@@ -1,0 +1,25 @@
+# HTTP-01 ACME challenge — requires port 80 accessible from the internet
+{
+	email {$ACME_EMAIL}
+}
+
+{$SSL_DOMAIN} {
+	reverse_proxy cf-reporting:3000
+
+	# Mozilla Intermediate TLS profile
+	# https://wiki.mozilla.org/Security/Server_Side_TLS
+	tls {
+		protocols tls1.2 tls1.3
+		ciphers TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+		curves x25519 secp256r1 secp384r1
+	}
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	encode gzip
+}

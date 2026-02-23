@@ -32,6 +32,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.ssl.example
+
+# Caddy local data (certificates, config)
+caddy/data/
+caddy/config/
 
 # vercel
 .vercel

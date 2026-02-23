@@ -1,0 +1,42 @@
+# SSL deployment with automatic Let's Encrypt certificates via Caddy
+#
+# Usage:
+#   cp .env.ssl.example .env   # then edit with your domain, email, etc.
+#   docker compose -f docker-compose.ssl.yml up -d
+#
+# For DNS-01 challenge (when port 80 is not accessible):
+#   Set ACME_CHALLENGE=dns in .env (requires CF_API_TOKEN with Zone>DNS>Edit)
+
+services:
+  cf-reporting:
+    build: .
+    expose:
+      - "3000"
+    environment:
+      - SESSION_SECRET=${SESSION_SECRET}
+      - CF_API_TOKEN=${CF_API_TOKEN:-}
+      - SECURE_COOKIES=true
+    restart: unless-stopped
+
+  caddy:
+    build: ./caddy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      - SSL_DOMAIN=${SSL_DOMAIN}
+      - ACME_EMAIL=${ACME_EMAIL}
+      - ACME_CHALLENGE=${ACME_CHALLENGE:-http}
+      - CF_API_TOKEN=${CF_API_TOKEN:-}
+      - CF_DNS_TOKEN=${CF_DNS_TOKEN:-}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - cf-reporting
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
