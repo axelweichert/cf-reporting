@@ -12,7 +12,7 @@ import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber, formatBytes, formatPercent, STATUS_COLORS } from "@/components/charts/theme";
-import { FileDown, AlertTriangle, Info, AlertCircle } from "lucide-react";
+import { AlertTriangle, Info, AlertCircle } from "lucide-react";
 
 export default function ExecutivePage() {
   const { capabilities } = useAuth();
@@ -38,10 +38,6 @@ export default function ExecutivePage() {
     );
   }
 
-  const handleExportPDF = () => {
-    window.print();
-  };
-
   const severityIcons = {
     info: <Info size={16} className="text-blue-400" />,
     warning: <AlertTriangle size={16} className="text-yellow-400" />,
@@ -57,20 +53,11 @@ export default function ExecutivePage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6 print:space-y-4 print:text-black">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white print:text-black">Executive Report</h1>
-          <p className="mt-1 text-sm text-zinc-400 print:text-gray-600">
-            {zoneName} — {start} to {end}
-          </p>
-        </div>
-        <button
-          onClick={handleExportPDF}
-          className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-orange-600 print:hidden"
-        >
-          <FileDown size={16} />
-          Export PDF
-        </button>
+      <div>
+        <h1 className="text-2xl font-bold text-white print:text-black">Executive Report</h1>
+        <p className="mt-1 text-sm text-zinc-400 print:text-gray-600">
+          {zoneName} — {start} to {end}
+        </p>
       </div>
 
       {error && !loading && (
@@ -155,18 +142,6 @@ export default function ExecutivePage() {
         </div>
       )}
 
-      {/* Print styles */}
-      <style jsx global>{`
-        @media print {
-          body { background: white !important; color: black !important; }
-          .bg-zinc-950, .bg-zinc-900, .bg-zinc-900\\/50 { background: white !important; }
-          .border-zinc-800, .border-zinc-700 { border-color: #e5e7eb !important; }
-          .text-white, .text-zinc-100, .text-zinc-200, .text-zinc-300 { color: black !important; }
-          .text-zinc-400, .text-zinc-500 { color: #6b7280 !important; }
-          nav, aside, [class*="filter-bar"] { display: none !important; }
-          main { margin: 0 !important; padding: 1rem !important; }
-        }
-      `}</style>
     </div>
   );
 }

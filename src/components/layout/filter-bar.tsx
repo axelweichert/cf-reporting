@@ -2,15 +2,35 @@
 
 import { useFilterStore } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
+import { exportPDF, exportHTML } from "@/lib/export";
 import {
   PanelLeftClose,
   PanelLeft,
   Calendar,
   Sun,
   Moon,
+  Download,
 } from "lucide-react";
+import { usePathname } from "next/navigation";
 import type { CloudflareAccount, CloudflareZone } from "@/types/cloudflare";
 import { useState, useRef, useEffect } from "react";
+
+const PAGE_TITLES: Record<string, string> = {
+  "/dashboard": "Dashboard",
+  "/traffic": "Traffic Overview",
+  "/security": "Security Posture",
+  "/ddos": "DDoS & Rate Limiting",
+  "/bots": "Bot Analysis",
+  "/dns": "DNS Analytics",
+  "/zt-summary": "Zero Trust Summary",
+  "/gateway-dns": "Gateway DNS & HTTP",
+  "/gateway-network": "Gateway Network",
+  "/access-audit": "Access Audit",
+  "/shadow-it": "Shadow IT",
+  "/devices-users": "Devices & Users",
+  "/executive": "Executive Report",
+  "/custom": "Custom Report",
+};
 
 interface FilterBarProps {
   accounts: CloudflareAccount[];
@@ -47,11 +67,16 @@ export default function FilterBar({
     setCustomRange,
   } = useFilterStore();
   const { theme, toggleTheme } = useTheme();
+  const pathname = usePathname();
 
   const [showCustom, setShowCustom] = useState(false);
   const [zoneSearch, setZoneSearch] = useState("");
   const [showZoneDropdown, setShowZoneDropdown] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const zoneDropdownRef = useRef<HTMLDivElement>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  const isReportPage = pathname !== "/" && pathname !== "/setup" && pathname !== "/dashboard";
 
   const filteredZones = zones.filter((z) => {
     if (selectedAccount && z.account.id !== selectedAccount) return false;
@@ -65,6 +90,9 @@ export default function FilterBar({
     function handleClickOutside(e: MouseEvent) {
       if (zoneDropdownRef.current && !zoneDropdownRef.current.contains(e.target as Node)) {
         setShowZoneDropdown(false);
+      }
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -211,6 +239,39 @@ export default function FilterBar({
             </div>
           )}
         </div>
+
+        {/* Export dropdown */}
+        {isReportPage && (
+          <>
+            <div className="mx-1 h-6 w-px bg-zinc-700" />
+            <div className="relative" ref={exportMenuRef}>
+              <button
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors print:hidden"
+                aria-label="Download report"
+              >
+                <Download size={14} />
+                Export
+              </button>
+              {showExportMenu && (
+                <div className="absolute right-0 top-full z-50 mt-1 w-44 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl">
+                  <button
+                    onClick={() => { exportPDF(); setShowExportMenu(false); }}
+                    className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white"
+                  >
+                    Download as PDF
+                  </button>
+                  <button
+                    onClick={() => { exportHTML(PAGE_TITLES[pathname] || "Report"); setShowExportMenu(false); }}
+                    className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white"
+                  >
+                    Download as HTML
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
 
         {/* Divider */}
         <div className="mx-1 h-6 w-px bg-zinc-700" />

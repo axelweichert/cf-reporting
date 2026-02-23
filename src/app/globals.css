@@ -86,3 +86,28 @@ html.light select option { background-color: #f4f4f5; color: #18181b; }
 
 /* Recharts legend text */
 html.light .recharts-legend-item-text { color: #71717a !important; }
+
+/* ===== Print styles (PDF export) ===== */
+@media print {
+  body { background: white !important; color: black !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .bg-zinc-950, .bg-zinc-900, .bg-zinc-900\/50 { background: white !important; }
+  .bg-zinc-800, .bg-zinc-800\/30 { background: #f4f4f5 !important; }
+  .border-zinc-800, .border-zinc-800\/50, .border-zinc-700 { border-color: #e5e7eb !important; }
+  .text-white, .text-zinc-100, .text-zinc-200, .text-zinc-300 { color: black !important; }
+  .text-zinc-400, .text-zinc-500 { color: #6b7280 !important; }
+
+  /* Hide chrome: sidebar, filter bar, nav */
+  nav, aside, [class*="filter-bar"] { display: none !important; }
+  main { margin: 0 !important; padding: 1rem !important; }
+
+  /* Hide interactive table elements */
+  [data-table-search], [data-table-pagination] { display: none !important; }
+  input[type="text"], input[type="search"] { display: none !important; }
+
+  /* Compact spacing */
+  .space-y-6 > * + * { margin-top: 1rem; }
+  .gap-6 { gap: 1rem; }
+
+  /* Avoid page breaks inside charts/cards */
+  .rounded-xl, .rounded-lg { break-inside: avoid; }
+}
