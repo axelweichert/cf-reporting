@@ -115,6 +115,65 @@ export async function fetchAppNameMap(accountId: string): Promise<Map<string, st
   }
 }
 
+// Helper: Fetch firewall rule ID → name mapping for a zone (cached)
+const firewallRuleCache = new Map<string, Map<string, string>>();
+
+export async function fetchFirewallRuleMap(zoneId: string): Promise<Map<string, string>> {
+  if (firewallRuleCache.has(zoneId)) return firewallRuleCache.get(zoneId)!;
+
+  const map = new Map<string, string>();
+
+  // Fetch from multiple ruleset phases to cover WAF custom rules, managed rules, etc.
+  const phases = [
+    "http_request_firewall_custom",
+    "http_request_firewall_managed",
+    "http_request_sbfm",
+    "http_ratelimit",
+  ];
+
+  const fetches = phases.map(async (phase) => {
+    try {
+      const ruleset = await cfRest<{
+        id: string;
+        name?: string;
+        rules?: Array<{ id: string; description?: string; ref?: string; action?: string }>;
+      }>(`/zones/${zoneId}/rulesets/phases/${phase}/entrypoint`);
+
+      for (const rule of ruleset.rules || []) {
+        if (rule.description) {
+          map.set(rule.id, rule.description);
+        } else if (rule.ref) {
+          map.set(rule.id, rule.ref);
+        }
+      }
+    } catch {
+      // Phase may not exist — ignore
+    }
+  });
+
+  // Also fetch legacy firewall rules
+  fetches.push(
+    (async () => {
+      try {
+        const rules = await cfRest<Array<{ id: string; description?: string }>>(
+          `/zones/${zoneId}/firewall/rules`
+        );
+        for (const rule of rules) {
+          if (rule.description) {
+            map.set(rule.id, rule.description);
+          }
+        }
+      } catch {
+        // Legacy endpoint may not be available
+      }
+    })()
+  );
+
+  await Promise.all(fetches);
+  firewallRuleCache.set(zoneId, map);
+  return map;
+}
+
 // Helper: Call our CF proxy REST endpoint
 export async function cfRest<T = unknown>(path: string): Promise<T> {
   const res = await fetch(`/api/cf${path}`);

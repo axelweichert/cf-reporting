@@ -133,8 +133,23 @@ export default function SecurityPage() {
       <ChartWrapper title="Top Firewall Rules" subtitle="By hit count" loading={loading}>
         <DataTable
           columns={[
-            { key: "ruleId", label: "Rule ID", width: "200px" },
-            { key: "description", label: "Description" },
+            {
+              key: "ruleName",
+              label: "Rule",
+              render: (_v, row) => {
+                const r = row as { ruleId: string; ruleName: string | null; description: string };
+                const displayName = r.ruleName || r.description;
+                const hasName = displayName && displayName !== "No description";
+                return (
+                  <div>
+                    <span className="text-zinc-200">{hasName ? displayName : r.ruleId}</span>
+                    {hasName && (
+                      <span className="ml-2 text-xs text-zinc-600">{r.ruleId}</span>
+                    )}
+                  </div>
+                );
+              },
+            },
             { key: "count", label: "Hits", align: "right", render: (v) => formatNumber(v as number) },
           ]}
           data={data?.topFirewallRules || []}

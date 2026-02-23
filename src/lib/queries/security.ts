@@ -1,4 +1,4 @@
-import { cfGraphQL } from "@/lib/use-cf-data";
+import { cfGraphQL, fetchFirewallRuleMap } from "@/lib/use-cf-data";
 
 // --- Types ---
 interface WAFTimeSeriesPoint {
@@ -12,6 +12,7 @@ interface WAFTimeSeriesPoint {
 
 interface FirewallRule {
   ruleId: string;
+  ruleName: string | null;
   description: string;
   count: number;
 }
@@ -67,13 +68,14 @@ export async function fetchSecurityData(
 ): Promise<SecurityData> {
   const [
     wafTimeSeries,
-    topFirewallRules,
+    rawFirewallRules,
     sourceBreakdown,
     botScoreDistribution,
     challengeSolveRates,
     topAttackingIPs,
     topAttackingCountries,
     topAttackingASNs,
+    ruleNameMap,
   ] = await Promise.all([
     fetchWAFTimeSeries(zoneTag, since, until),
     fetchTopFirewallRules(zoneTag, since, until),
@@ -83,7 +85,13 @@ export async function fetchSecurityData(
     fetchTopAttackingIPs(zoneTag, since, until),
     fetchTopAttackingCountries(zoneTag, since, until),
     fetchTopAttackingASNs(zoneTag, since, until),
+    fetchFirewallRuleMap(zoneTag),
   ]);
+
+  const topFirewallRules = rawFirewallRules.map((rule) => ({
+    ...rule,
+    ruleName: ruleNameMap.get(rule.ruleId) || null,
+  }));
 
   return {
     wafTimeSeries,
@@ -163,7 +171,7 @@ async function fetchTopFirewallRules(
   zoneTag: string,
   since: string,
   until: string
-): Promise<FirewallRule[]> {
+): Promise<Omit<FirewallRule, "ruleName">[]> {
   const query = `{
     viewer {
       zones(filter: { zoneTag: "${zoneTag}" }) {
