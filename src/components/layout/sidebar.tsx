@@ -14,6 +14,7 @@ import {
   Network,
   KeyRound,
   Eye,
+  Monitor,
   BarChart3,
   ChevronDown,
   ChevronRight,
@@ -63,6 +64,7 @@ const navGroups: NavGroup[] = [
       { label: "Gateway Network", href: "/gateway-network", icon: <Network size={18} />, requiredPermission: "gateway" },
       { label: "Access Audit", href: "/access-audit", icon: <KeyRound size={18} />, requiredPermission: "access" },
       { label: "Shadow IT", href: "/shadow-it", icon: <Eye size={18} />, requiredPermission: "gateway" },
+      { label: "Devices & Users", href: "/devices-users", icon: <Monitor size={18} />, requiredPermission: "zero_trust" },
     ],
   },
   {

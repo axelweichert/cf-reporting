@@ -1,4 +1,4 @@
-import { cfGraphQL } from "@/lib/use-cf-data";
+import { cfGraphQL, fetchAppNameMap } from "@/lib/use-cf-data";
 
 // --- Types ---
 interface LoginTimeSeriesPoint {
@@ -7,8 +7,14 @@ interface LoginTimeSeriesPoint {
   failed: number;
 }
 
+interface RawAccessByApp {
+  appId: string;
+  count: number;
+}
+
 interface AccessByApp {
   appId: string;
+  appName: string | null;
   count: number;
 }
 
@@ -36,14 +42,20 @@ export async function fetchAccessAuditData(
   since: string,
   until: string
 ): Promise<AccessAuditData> {
-  const [loginsOverTime, accessByApplication, geographicAccess, identityProviders, failedLoginCount] =
+  const [loginsOverTime, rawAccessByApp, geographicAccess, identityProviders, failedLoginCount, appNameMap] =
     await Promise.all([
       fetchLoginsOverTime(accountTag, since, until),
       fetchAccessByApplication(accountTag, since, until),
       fetchGeographicAccess(accountTag, since, until),
       fetchIdentityProviders(accountTag, since, until),
       fetchFailedLoginCount(accountTag, since, until),
+      fetchAppNameMap(accountTag),
     ]);
+
+  const accessByApplication = rawAccessByApp.map((item) => ({
+    ...item,
+    appName: appNameMap.get(item.appId) || null,
+  }));
 
   return {
     loginsOverTime,
@@ -130,7 +142,7 @@ async function fetchAccessByApplication(
   accountTag: string,
   since: string,
   until: string
-): Promise<AccessByApp[]> {
+): Promise<RawAccessByApp[]> {
   const query = `{
     viewer {
       accounts(filter: { accountTag: "${accountTag}" }) {

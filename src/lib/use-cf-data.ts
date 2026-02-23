@@ -93,6 +93,28 @@ export async function fetchCategoryMap(accountId: string): Promise<Map<number, s
   }
 }
 
+// Helper: Fetch Access app ID → name mapping (cached per account)
+const appNameCache = new Map<string, Map<string, string>>();
+
+export async function fetchAppNameMap(accountId: string): Promise<Map<string, string>> {
+  if (appNameCache.has(accountId)) return appNameCache.get(accountId)!;
+
+  try {
+    const apps = await cfRest<Array<{ id: string; name: string }>>(
+      `/accounts/${accountId}/access/apps`
+    );
+
+    const map = new Map<string, string>();
+    for (const app of apps) {
+      map.set(app.id, app.name);
+    }
+    appNameCache.set(accountId, map);
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
 // Helper: Call our CF proxy REST endpoint
 export async function cfRest<T = unknown>(path: string): Promise<T> {
   const res = await fetch(`/api/cf${path}`);

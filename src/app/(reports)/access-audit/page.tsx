@@ -104,7 +104,21 @@ export default function AccessAuditPage() {
       <ChartWrapper title="Access by Application" loading={loading}>
         <DataTable
           columns={[
-            { key: "appId", label: "Application ID" },
+            {
+              key: "appName",
+              label: "Application",
+              render: (_v, row) => {
+                const r = row as { appId: string; appName: string | null };
+                return (
+                  <div>
+                    <span className="text-zinc-200">{r.appName || r.appId}</span>
+                    {r.appName && (
+                      <span className="ml-2 text-xs text-zinc-600">{r.appId}</span>
+                    )}
+                  </div>
+                );
+              },
+            },
             { key: "count", label: "Access Events", align: "right", render: (v) => formatNumber(v as number) },
           ]}
           data={data?.accessByApplication || []}
