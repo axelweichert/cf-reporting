@@ -100,7 +100,7 @@ export async function fetchAppNameMap(accountId: string): Promise<Map<string, st
   if (appNameCache.has(accountId)) return appNameCache.get(accountId)!;
 
   try {
-    const apps = await cfRest<Array<{ id: string; name: string }>>(
+    const apps = await cfRestPaginated<{ id: string; name: string }>(
       `/accounts/${accountId}/access/apps`
     );
 
@@ -186,4 +186,34 @@ export async function cfRest<T = unknown>(path: string): Promise<T> {
     throw new Error(json.errors?.[0]?.message || "API request failed");
   }
   return json.result as T;
+}
+
+// Helper: Paginated REST fetch — auto-pages through all results
+export async function cfRestPaginated<T = unknown>(path: string, perPage = 100): Promise<T[]> {
+  const results: T[] = [];
+  let page = 1;
+
+  while (true) {
+    const separator = path.includes("?") ? "&" : "?";
+    const res = await fetch(`/api/cf${path}${separator}page=${page}&per_page=${perPage}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `API error: ${res.status}`);
+    }
+    const json = await res.json();
+    if (!json.success) {
+      throw new Error(json.errors?.[0]?.message || "API request failed");
+    }
+
+    const pageResults = json.result as T[];
+    results.push(...pageResults);
+
+    const info = json.result_info;
+    if (!info || page >= info.total_pages || pageResults.length === 0) {
+      break;
+    }
+    page++;
+  }
+
+  return results;
 }

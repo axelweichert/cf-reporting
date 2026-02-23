@@ -1,4 +1,4 @@
-import { cfRest } from "@/lib/use-cf-data";
+import { cfRest, cfRestPaginated } from "@/lib/use-cf-data";
 
 // --- Types ---
 
@@ -119,7 +119,7 @@ interface CfPostureRule {
 
 async function fetchDevices(accountId: string): Promise<CfDevice[]> {
   try {
-    return await cfRest<CfDevice[]>(`/accounts/${accountId}/devices`);
+    return await cfRestPaginated<CfDevice>(`/accounts/${accountId}/devices`);
   } catch {
     // Fall back to empty — the endpoint may require specific permissions
     return [];
@@ -128,7 +128,7 @@ async function fetchDevices(accountId: string): Promise<CfDevice[]> {
 
 async function fetchUsers(accountId: string): Promise<CfAccessUser[]> {
   try {
-    return await cfRest<CfAccessUser[]>(`/accounts/${accountId}/access/users?per_page=500`);
+    return await cfRestPaginated<CfAccessUser>(`/accounts/${accountId}/access/users`);
   } catch {
     return [];
   }
