@@ -70,7 +70,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <Sidebar collapsed={sidebarCollapsed} permissions={permissions} />
-      <div className={`transition-all duration-200 ${sidebarCollapsed ? "ml-16" : "ml-60"}`}>
+      <div className={`transition-all duration-200 print:ml-0 ${sidebarCollapsed ? "ml-16" : "ml-60"}`}>
         <FilterBar
           accounts={accounts}
           zones={zones}

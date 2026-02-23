@@ -100,7 +100,7 @@ export default function FilterBar({
   }, []);
 
   return (
-    <div className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-zinc-800 bg-zinc-950 px-4">
+    <div className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-zinc-800 bg-zinc-950 px-4 print:hidden">
       {/* Left side */}
       <div className="flex items-center gap-3">
         <button

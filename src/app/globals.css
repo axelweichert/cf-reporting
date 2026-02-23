@@ -96,8 +96,8 @@ html.light .recharts-legend-item-text { color: #71717a !important; }
   .text-white, .text-zinc-100, .text-zinc-200, .text-zinc-300 { color: black !important; }
   .text-zinc-400, .text-zinc-500 { color: #6b7280 !important; }
 
-  /* Hide chrome: sidebar, filter bar, nav */
-  nav, aside, [class*="filter-bar"] { display: none !important; }
+  /* Hide chrome: sidebar, nav */
+  nav, aside { display: none !important; }
   main { margin: 0 !important; padding: 1rem !important; }
 
   /* Hide interactive table elements */
