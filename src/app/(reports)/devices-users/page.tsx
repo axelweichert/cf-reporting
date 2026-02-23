@@ -12,7 +12,7 @@ import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber } from "@/components/charts/theme";
-import { Monitor, Users, ShieldCheck, Wifi, Laptop, AlertTriangle } from "lucide-react";
+import { Monitor, Users, ShieldCheck, Wifi, Laptop, AlertTriangle, Clock } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 function RelativeTime({ date }: { date: string }) {
@@ -81,13 +81,14 @@ export default function DevicesUsersPage() {
       {error && !loading && <ErrorMessage type="generic" message={error} onRetry={refetch} />}
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         {loading ? (
-          <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></>
+          <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></>
         ) : (
           <>
             <StatCard label="Total Devices" value={formatNumber(stats?.totalDevices || 0)} icon={<Monitor size={18} />} />
             <StatCard label="Active (24h)" value={formatNumber(stats?.activeDevices || 0)} icon={<Wifi size={18} />} />
+            <StatCard label="Inactive (1-30d)" value={formatNumber(stats?.inactiveDevices || 0)} icon={<Clock size={18} />} />
             <StatCard label="Stale (>30d)" value={formatNumber(stats?.staleDevices || 0)} icon={<AlertTriangle size={18} />} />
             <StatCard label="Total Users" value={formatNumber(stats?.totalUsers || 0)} icon={<Users size={18} />} />
             <StatCard label="Access Seats" value={formatNumber(stats?.accessSeats || 0)} icon={<ShieldCheck size={18} />} />

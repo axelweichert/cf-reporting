@@ -48,6 +48,7 @@ export interface DevicesUsersData {
   stats: {
     totalDevices: number;
     activeDevices: number;
+    inactiveDevices: number;
     staleDevices: number;
     totalUsers: number;
     accessSeats: number;
@@ -226,6 +227,7 @@ export async function fetchDevicesUsersData(
 
   // Stats
   const activeDevices = devices.filter((d) => d.status === "active").length;
+  const inactiveDevices = devices.filter((d) => d.status === "inactive").length;
   const staleDevices = devices.filter((d) => d.status === "stale").length;
   const accessSeats = users.filter((u) => u.accessSeat).length;
   const gatewaySeats = users.filter((u) => u.gatewaySeat).length;
@@ -240,6 +242,7 @@ export async function fetchDevicesUsersData(
     stats: {
       totalDevices: devices.length,
       activeDevices,
+      inactiveDevices,
       staleDevices,
       totalUsers: users.length,
       accessSeats,
