@@ -23,7 +23,7 @@ export default function ZtSummaryPage() {
   const { data, loading, error, refetch } = useCfData<ZtSummaryData>({
     fetcher: () => {
       if (!accountId) throw new Error("No account available");
-      return fetchZtSummaryData(accountId, `${start}T00:00:00Z`, `${end}T23:59:59Z`);
+      return fetchZtSummaryData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
     },
     deps: [accountId, start, end],
   });

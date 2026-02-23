@@ -1,4 +1,4 @@
-import { cfGraphQL } from "@/lib/use-cf-data";
+import { cfGraphQL, fetchCategoryMap } from "@/lib/use-cf-data";
 
 // --- Types ---
 interface BlockedByPolicy {
@@ -29,17 +29,21 @@ export async function fetchZtSummaryData(
   since: string,
   until: string
 ): Promise<ZtSummaryData> {
-  const [totalDnsQueries, blockedByPolicy, topBlockedCategories, accessLogins] = await Promise.all([
+  const [totalDnsQueries, blockedByPolicy, topBlockedCategories, accessLogins, categoryMap] = await Promise.all([
     fetchTotalDnsQueries(accountTag, since, until),
     fetchBlockedByPolicy(accountTag, since, until),
     fetchTopBlockedCategories(accountTag, since, until),
     fetchAccessLogins(accountTag, since, until),
+    fetchCategoryMap(accountTag),
   ]);
 
   return {
     totalDnsQueries,
     blockedByPolicy,
-    topBlockedCategories,
+    topBlockedCategories: topBlockedCategories.map((c) => ({
+      ...c,
+      name: categoryMap.get(Number(c.name)) || `Category ${c.name}`,
+    })),
     accessLogins,
   };
 }

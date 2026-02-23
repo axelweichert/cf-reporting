@@ -1,4 +1,4 @@
-import { cfGraphQL } from "@/lib/use-cf-data";
+import { cfGraphQL, fetchCategoryMap } from "@/lib/use-cf-data";
 
 // --- Types ---
 interface DnsQueryTimeSeriesPoint {
@@ -49,19 +49,23 @@ export async function fetchGatewayDnsData(
   since: string,
   until: string
 ): Promise<GatewayDnsData> {
-  const [queryVolume, topBlockedDomains, blockedCategories, resolverDecisions, topBlockedLocations] =
+  const [queryVolume, topBlockedDomains, blockedCategories, resolverDecisions, topBlockedLocations, categoryMap] =
     await Promise.all([
       fetchDnsQueryVolume(accountTag, since, until),
       fetchTopBlockedDomains(accountTag, since, until),
       fetchBlockedCategories(accountTag, since, until),
       fetchResolverDecisions(accountTag, since, until),
       fetchTopBlockedLocations(accountTag, since, until),
+      fetchCategoryMap(accountTag),
     ]);
 
   return {
     queryVolume,
     topBlockedDomains,
-    blockedCategories,
+    blockedCategories: blockedCategories.map((c) => ({
+      ...c,
+      category: categoryMap.get(Number(c.category)) || `Category ${c.category}`,
+    })),
     resolverDecisions,
     topBlockedLocations,
   };

@@ -26,7 +26,7 @@ export default function DnsPage() {
   const { data, loading, error, refetch } = useCfData<DnsData>({
     fetcher: () => {
       if (!zoneId) throw new Error("No zone available");
-      return fetchDnsData(zoneId, `${start}T00:00:00Z`, `${end}T23:59:59Z`);
+      return fetchDnsData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
     },
     deps: [zoneId, start, end],
   });

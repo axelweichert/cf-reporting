@@ -26,7 +26,7 @@ export default function SecurityPage() {
   const { data, loading, error, refetch } = useCfData<SecurityData>({
     fetcher: () => {
       if (!zoneId) throw new Error("No zone available");
-      return fetchSecurityData(zoneId, `${start}T00:00:00Z`, `${end}T23:59:59Z`);
+      return fetchSecurityData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
     },
     deps: [zoneId, start, end],
   });

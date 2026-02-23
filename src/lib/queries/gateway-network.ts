@@ -29,6 +29,15 @@ export interface GatewayNetworkData {
   transportProtocols: TransportProtocol[];
 }
 
+// --- Transport protocol mapping ---
+const TRANSPORT_NAMES: Record<string, string> = {
+  "0": "TCP",
+  "1": "ICMP",
+  "2": "UDP",
+  "6": "TCP",
+  "17": "UDP",
+};
+
 // --- Main fetch ---
 export async function fetchGatewayNetworkData(
   accountTag: string,
@@ -210,7 +219,8 @@ async function fetchTransportProtocols(
 
   const byProtocol = new Map<string, number>();
   for (const g of data.viewer.accounts[0]?.gatewayL4SessionsAdaptiveGroups || []) {
-    const protocol = g.dimensions.transport || "unknown";
+    const raw = g.dimensions.transport != null ? String(g.dimensions.transport) : "unknown";
+    const protocol = TRANSPORT_NAMES[raw] || raw;
     byProtocol.set(protocol, (byProtocol.get(protocol) || 0) + g.count);
   }
 

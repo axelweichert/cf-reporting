@@ -1,8 +1,19 @@
 import { cfGraphQL } from "@/lib/use-cf-data";
 
+// --- Helpers ---
+// matchedApplicationName returns JSON-array strings like '["Amazon Web Services"]'
+function parseAppName(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.join(", ");
+  } catch { /* not JSON */ }
+  return raw;
+}
+
 // --- Types ---
 interface DiscoveredApp {
   name: string;
+  rawName: string; // original value for GraphQL filtering
   count: number;
 }
 
@@ -35,14 +46,16 @@ export async function fetchShadowItData(
   ]);
 
   // Fetch usage trends for the top 5 discovered apps
-  const top5Apps = discoveredApplications.slice(0, 5).map((a) => a.name);
-  const usageTrendsResult = await fetchUsageTrends(accountTag, since, until, top5Apps);
+  const top5 = discoveredApplications.slice(0, 5);
+  const top5DisplayNames = top5.map((a) => a.name);
+  const top5RawNames = top5.map((a) => a.rawName);
+  const usageTrendsResult = await fetchUsageTrends(accountTag, since, until, top5RawNames, top5DisplayNames);
 
   return {
     discoveredApplications,
     categoryBreakdown,
     usageTrends: usageTrendsResult,
-    trendAppNames: top5Apps,
+    trendAppNames: top5DisplayNames,
   };
 }
 
@@ -82,7 +95,8 @@ async function fetchDiscoveredApplications(
   }>(query);
 
   return (data.viewer.accounts[0]?.gatewayResolverQueriesAdaptiveGroups || []).map((g) => ({
-    name: g.dimensions.matchedApplicationName || "Unknown",
+    name: parseAppName(g.dimensions.matchedApplicationName) || "Unknown",
+    rawName: g.dimensions.matchedApplicationName,
     count: g.count,
   }));
 }
@@ -112,7 +126,7 @@ async function fetchCategoryBreakdown(
 
   interface Group {
     count: number;
-    dimensions: { categoryNames: string };
+    dimensions: { categoryNames: string[] };
   }
 
   const data = await cfGraphQL<{
@@ -121,7 +135,8 @@ async function fetchCategoryBreakdown(
 
   const byCategory = new Map<string, number>();
   for (const g of data.viewer.accounts[0]?.gatewayResolverQueriesAdaptiveGroups || []) {
-    const category = g.dimensions.categoryNames || "Uncategorized";
+    const names = g.dimensions.categoryNames;
+    const category = Array.isArray(names) && names.length > 0 ? names.join(", ") : "Uncategorized";
     byCategory.set(category, (byCategory.get(category) || 0) + g.count);
   }
 
@@ -135,14 +150,16 @@ async function fetchUsageTrends(
   accountTag: string,
   since: string,
   until: string,
-  appNames: string[]
+  rawNames: string[],
+  displayNames: string[]
 ): Promise<AppUsageTrend[]> {
-  if (appNames.length === 0) {
+  if (rawNames.length === 0) {
     return [];
   }
 
   // Fetch hourly data for each top app in parallel
-  const appQueries = appNames.map((appName) => {
+  const appQueries = rawNames.map((rawName, i) => {
+    const escapedName = rawName.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     const query = `{
       viewer {
         accounts(filter: { accountTag: "${accountTag}" }) {
@@ -151,7 +168,7 @@ async function fetchUsageTrends(
             filter: {
               datetime_geq: "${since}"
               datetime_lt: "${until}"
-              matchedApplicationName: "${appName}"
+              matchedApplicationName: "${escapedName}"
             }
             orderBy: [datetimeHour_ASC]
           ) {
@@ -170,7 +187,7 @@ async function fetchUsageTrends(
     return cfGraphQL<{
       viewer: { accounts: Array<{ gatewayResolverQueriesAdaptiveGroups: Group[] }> };
     }>(query).then((data) => ({
-      appName,
+      displayName: displayNames[i],
       groups: data.viewer.accounts[0]?.gatewayResolverQueriesAdaptiveGroups || [],
     }));
   });
@@ -180,11 +197,11 @@ async function fetchUsageTrends(
   // Merge all app data into a single time series
   const byHour = new Map<string, AppUsageTrend>();
 
-  for (const { appName, groups } of results) {
+  for (const { displayName, groups } of results) {
     for (const g of groups) {
       const hour = g.dimensions.datetimeHour;
       const existing = byHour.get(hour) || { date: hour };
-      existing[appName] = ((existing[appName] as number) || 0) + g.count;
+      existing[displayName] = ((existing[displayName] as number) || 0) + g.count;
       byHour.set(hour, existing);
     }
   }
@@ -192,9 +209,9 @@ async function fetchUsageTrends(
   // Ensure every time point has a value for each app (default to 0)
   const allPoints = Array.from(byHour.values());
   for (const point of allPoints) {
-    for (const appName of appNames) {
-      if (!(appName in point)) {
-        point[appName] = 0;
+    for (const name of displayNames) {
+      if (!(name in point)) {
+        point[name] = 0;
       }
     }
   }

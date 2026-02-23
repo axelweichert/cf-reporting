@@ -25,7 +25,7 @@ export default function GatewayNetworkPage() {
   const { data, loading, error, refetch } = useCfData<GatewayNetworkData>({
     fetcher: () => {
       if (!accountId) throw new Error("No account available");
-      return fetchGatewayNetworkData(accountId, `${start}T00:00:00Z`, `${end}T23:59:59Z`);
+      return fetchGatewayNetworkData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
     },
     deps: [accountId, start, end],
   });

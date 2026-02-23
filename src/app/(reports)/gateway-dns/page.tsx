@@ -25,7 +25,7 @@ export default function GatewayDnsPage() {
   const { data, loading, error, refetch } = useCfData<GatewayDnsData>({
     fetcher: () => {
       if (!accountId) throw new Error("No account available");
-      return fetchGatewayDnsData(accountId, `${start}T00:00:00Z`, `${end}T23:59:59Z`);
+      return fetchGatewayDnsData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
     },
     deps: [accountId, start, end],
   });

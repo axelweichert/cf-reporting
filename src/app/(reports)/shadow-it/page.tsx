@@ -25,7 +25,7 @@ export default function ShadowItPage() {
   const { data, loading, error, refetch } = useCfData<ShadowItData>({
     fetcher: () => {
       if (!accountId) throw new Error("No account available");
-      return fetchShadowItData(accountId, `${start}T00:00:00Z`, `${end}T23:59:59Z`);
+      return fetchShadowItData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
     },
     deps: [accountId, start, end],
   });
