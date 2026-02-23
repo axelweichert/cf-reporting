@@ -78,7 +78,7 @@ export async function fetchSecurityData(
     fetchWAFTimeSeries(zoneTag, since, until),
     fetchTopFirewallRules(zoneTag, since, until),
     fetchSourceBreakdown(zoneTag, since, until),
-    fetchBotScoreDistribution(zoneTag, since, until),
+    fetchBotScoreDistribution(zoneTag, since, until).catch(() => []),
     fetchChallengeSolveRates(zoneTag, since, until),
     fetchTopAttackingIPs(zoneTag, since, until),
     fetchTopAttackingCountries(zoneTag, since, until),

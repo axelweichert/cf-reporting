@@ -18,7 +18,7 @@ export default function AccessAuditPage() {
   const { capabilities } = useAuth();
   const { selectedAccount, timeRange, customStart, customEnd } = useFilterStore();
   const accounts = capabilities?.accounts || [];
-  const accountId = selectedAccount || accounts[0]?.id;
+  const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
@@ -31,7 +31,11 @@ export default function AccessAuditPage() {
   });
 
   if (!accountId) {
-    return <ErrorMessage type="permission" message="No accounts available." />;
+    return (
+      <div className="mx-auto max-w-7xl py-12 text-center">
+        <p className="text-zinc-400">Please select an account from the filter bar to view this report.</p>
+      </div>
+    );
   }
 
   const loginsFormatted = (data?.loginsOverTime || []).map((p) => ({

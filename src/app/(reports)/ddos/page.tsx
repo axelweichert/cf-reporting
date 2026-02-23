@@ -18,7 +18,7 @@ export default function DdosPage() {
   const { capabilities } = useAuth();
   const { selectedZone, timeRange, customStart, customEnd } = useFilterStore();
   const zones = capabilities?.zones || [];
-  const zoneId = selectedZone || zones[0]?.id;
+  const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
@@ -31,7 +31,11 @@ export default function DdosPage() {
   });
 
   if (!zoneId) {
-    return <ErrorMessage type="empty" message="No zones available for this token." />;
+    return (
+      <div className="mx-auto max-w-7xl py-12 text-center">
+        <p className="text-zinc-400">Please select a zone from the filter bar to view this report.</p>
+      </div>
+    );
   }
 
   const ddosTimeFormatted = (data?.ddosEventsOverTime || []).map((p) => ({

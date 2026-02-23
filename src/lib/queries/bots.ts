@@ -48,6 +48,9 @@ export async function fetchBotData(
   since: string,
   until: string
 ): Promise<BotData> {
+  // Bot Management fields (botScoreBucketBy10, botManagementDecision, botScore,
+  // verifiedBotCategory) require the Bot Management add-on. Gracefully degrade
+  // if the zone doesn't have access.
   const [
     botScoreDistribution,
     botManagementDecisions,
@@ -56,12 +59,12 @@ export async function fetchBotData(
     botRequestsByPath,
     verifiedBotCategories,
   ] = await Promise.all([
-    fetchBotScoreDistribution(zoneTag, since, until),
-    fetchBotManagementDecisions(zoneTag, since, until),
-    fetchAutomatedTrafficOverTime(zoneTag, since, until),
-    fetchTopBotUserAgents(zoneTag, since, until),
-    fetchBotRequestsByPath(zoneTag, since, until),
-    fetchVerifiedBotCategories(zoneTag, since, until),
+    fetchBotScoreDistribution(zoneTag, since, until).catch(() => []),
+    fetchBotManagementDecisions(zoneTag, since, until).catch(() => []),
+    fetchAutomatedTrafficOverTime(zoneTag, since, until).catch(() => []),
+    fetchTopBotUserAgents(zoneTag, since, until).catch(() => []),
+    fetchBotRequestsByPath(zoneTag, since, until).catch(() => []),
+    fetchVerifiedBotCategories(zoneTag, since, until).catch(() => []),
   ]);
 
   return {
