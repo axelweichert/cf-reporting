@@ -109,16 +109,10 @@ export default function AccessAuditPage() {
               label: "Application",
               render: (_v, row) => {
                 const r = row as { appId: string; appName: string | null };
-                return (
-                  <div>
-                    <span className="text-zinc-200">{r.appName || r.appId}</span>
-                    {r.appName && (
-                      <span className="ml-2 text-xs text-zinc-600">{r.appId}</span>
-                    )}
-                  </div>
-                );
+                return <>{r.appName || "—"}</>;
               },
             },
+            { key: "appId", label: "Application ID" },
             { key: "count", label: "Access Events", align: "right", render: (v) => formatNumber(v as number) },
           ]}
           data={data?.accessByApplication || []}
