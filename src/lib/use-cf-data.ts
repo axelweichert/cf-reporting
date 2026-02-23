@@ -188,6 +188,39 @@ export async function cfRest<T = unknown>(path: string): Promise<T> {
   return json.result as T;
 }
 
+// Helper: Format country — handles both ISO codes ("US") and full names ("United States")
+const countryDisplayNames = new Intl.DisplayNames(["en"], { type: "region" });
+
+// Build reverse map: full name → code (e.g. "United States" → "US")
+const nameToCode = new Map<string, string>();
+for (let i = 65; i <= 90; i++) {
+  for (let j = 65; j <= 90; j++) {
+    const code = String.fromCharCode(i) + String.fromCharCode(j);
+    try {
+      const name = countryDisplayNames.of(code);
+      if (name && name !== code) nameToCode.set(name.toLowerCase(), code);
+    } catch { /* not a valid code */ }
+  }
+}
+
+export function formatCountry(input: string): string {
+  if (!input || input === "Unknown") return "Unknown";
+
+  // If it's a 2-letter code, resolve to "Full Name (XX)"
+  if (input.length === 2) {
+    try {
+      const name = countryDisplayNames.of(input.toUpperCase());
+      return name && name !== input ? `${name} (${input.toUpperCase()})` : input;
+    } catch {
+      return input;
+    }
+  }
+
+  // Otherwise it's a full name — look up the code
+  const code = nameToCode.get(input.toLowerCase());
+  return code ? `${input} (${code})` : input;
+}
+
 // Helper: Paginated REST fetch — auto-pages through all results
 export async function cfRestPaginated<T = unknown>(path: string, perPage = 100): Promise<T[]> {
   const results: T[] = [];

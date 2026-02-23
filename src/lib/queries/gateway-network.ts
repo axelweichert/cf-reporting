@@ -1,4 +1,4 @@
-import { cfGraphQL } from "@/lib/use-cf-data";
+import { cfGraphQL, formatCountry } from "@/lib/use-cf-data";
 
 // --- Types ---
 interface L4SessionTimeSeriesPoint {
@@ -183,7 +183,7 @@ async function fetchTopSourceCountries(
   }
 
   return Array.from(byCountry.entries())
-    .map(([country, count]) => ({ country, count }))
+    .map(([country, count]) => ({ country: formatCountry(country), count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 10);
 }

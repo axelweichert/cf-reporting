@@ -1,4 +1,4 @@
-import { cfGraphQL } from "@/lib/use-cf-data";
+import { cfGraphQL, formatCountry } from "@/lib/use-cf-data";
 
 // --- Types ---
 interface TrafficSummary {
@@ -202,7 +202,7 @@ async function fetchTopCountriesSummary(
   const data = await cfGraphQL<{ viewer: { zones: Array<{ httpRequestsAdaptiveGroups: Group[] }> } }>(query);
 
   return (data.viewer.zones[0]?.httpRequestsAdaptiveGroups || []).map((g) => ({
-    name: g.dimensions.clientCountryName || "Unknown",
+    name: formatCountry(g.dimensions.clientCountryName),
     value: g.count,
   }));
 }

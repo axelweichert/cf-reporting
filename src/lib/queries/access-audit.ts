@@ -1,4 +1,4 @@
-import { cfGraphQL, fetchAppNameMap } from "@/lib/use-cf-data";
+import { cfGraphQL, fetchAppNameMap, formatCountry } from "@/lib/use-cf-data";
 
 // --- Types ---
 interface LoginTimeSeriesPoint {
@@ -203,7 +203,7 @@ async function fetchGeographicAccess(
   }>(query);
 
   return (data.viewer.accounts[0]?.accessLoginRequestsAdaptiveGroups || []).map((g) => ({
-    country: g.dimensions.country || "Unknown",
+    country: formatCountry(g.dimensions.country),
     count: g.count,
   }));
 }

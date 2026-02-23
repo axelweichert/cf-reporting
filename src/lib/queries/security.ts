@@ -1,4 +1,4 @@
-import { cfGraphQL, fetchFirewallRuleMap } from "@/lib/use-cf-data";
+import { cfGraphQL, fetchFirewallRuleMap, formatCountry } from "@/lib/use-cf-data";
 
 // --- Types ---
 interface WAFTimeSeriesPoint {
@@ -423,7 +423,7 @@ async function fetchTopAttackingCountries(
   }>(query);
 
   return (data.viewer.zones[0]?.firewallEventsAdaptiveGroups || []).map((g) => ({
-    country: g.dimensions.clientCountryName || "Unknown",
+    country: formatCountry(g.dimensions.clientCountryName),
     count: g.count,
   }));
 }
