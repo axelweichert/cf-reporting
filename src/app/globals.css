@@ -18,7 +18,7 @@ body {
   font-family: var(--font-sans), system-ui, sans-serif;
 }
 
-/* Scrollbar styling for dark mode */
+/* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -35,3 +35,54 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #52525b;
 }
+
+/* ===== Light mode overrides ===== */
+html.light {
+  --background: #ffffff;
+  --foreground: #18181b;
+}
+
+/* Backgrounds */
+html.light .bg-zinc-950 { background-color: #ffffff !important; }
+html.light .bg-zinc-900 { background-color: #f4f4f5 !important; }
+html.light .bg-zinc-900\/50 { background-color: rgba(250, 250, 250, 0.8) !important; }
+html.light .bg-zinc-800 { background-color: #e4e4e7 !important; }
+html.light .bg-zinc-800\/30 { background-color: rgba(228, 228, 231, 0.3) !important; }
+html.light .bg-zinc-700 { background-color: #d4d4d8 !important; }
+
+/* Text */
+html.light .text-white { color: #18181b !important; }
+html.light .text-zinc-100 { color: #27272a !important; }
+html.light .text-zinc-200 { color: #3f3f46 !important; }
+html.light .text-zinc-300 { color: #52525b !important; }
+html.light .text-zinc-400 { color: #71717a !important; }
+html.light .text-zinc-500 { color: #a1a1aa !important; }
+html.light .text-zinc-600 { color: #71717a !important; }
+
+/* Borders */
+html.light .border-zinc-800 { border-color: #e4e4e7 !important; }
+html.light .border-zinc-800\/50 { border-color: rgba(228, 228, 231, 0.5) !important; }
+html.light .border-zinc-700 { border-color: #d4d4d8 !important; }
+html.light .border-zinc-600 { border-color: #a1a1aa !important; }
+
+/* Hover states */
+html.light .hover\:bg-zinc-800:hover { background-color: #e4e4e7 !important; }
+html.light .hover\:text-white:hover { color: #18181b !important; }
+html.light .hover\:text-zinc-300:hover { color: #52525b !important; }
+html.light .hover\:border-zinc-600:hover { border-color: #a1a1aa !important; }
+
+/* Focus states */
+html.light .focus\:border-orange-500:focus { border-color: #f97316 !important; }
+
+/* Placeholder */
+html.light .placeholder\:text-zinc-500::placeholder { color: #a1a1aa !important; }
+
+/* Scrollbar - light */
+html.light ::-webkit-scrollbar-thumb { background: #d4d4d8; }
+html.light ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+
+/* Select/input elements */
+html.light select option { background-color: #f4f4f5; color: #18181b; }
+
+/* Recharts legend text */
+html.light .recharts-legend-item-text { color: #71717a !important; }

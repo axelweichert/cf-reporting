@@ -1,10 +1,13 @@
 "use client";
 
 import { useFilterStore } from "@/lib/store";
+import { useTheme } from "@/lib/theme";
 import {
   PanelLeftClose,
   PanelLeft,
   Calendar,
+  Sun,
+  Moon,
 } from "lucide-react";
 import type { CloudflareAccount, CloudflareZone } from "@/types/cloudflare";
 import { useState, useRef, useEffect } from "react";
@@ -43,6 +46,7 @@ export default function FilterBar({
     customEnd,
     setCustomRange,
   } = useFilterStore();
+  const { theme, toggleTheme } = useTheme();
 
   const [showCustom, setShowCustom] = useState(false);
   const [zoneSearch, setZoneSearch] = useState("");
@@ -207,6 +211,18 @@ export default function FilterBar({
             </div>
           )}
         </div>
+
+        {/* Divider */}
+        <div className="mx-1 h-6 w-px bg-zinc-700" />
+
+        {/* Theme toggle */}
+        <button
+          onClick={toggleTheme}
+          className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+          aria-label="Toggle theme"
+        >
+          {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
 
         {/* Divider */}
         <div className="mx-1 h-6 w-px bg-zinc-700" />

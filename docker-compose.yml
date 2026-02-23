@@ -1,0 +1,10 @@
+services:
+  cf-reporting:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      # Pre-configure API token (optional — skip browser setup)
+      - CF_API_TOKEN=${CF_API_TOKEN:-}
+    restart: unless-stopped
