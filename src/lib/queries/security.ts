@@ -14,6 +14,7 @@ interface FirewallRule {
   ruleId: string;
   ruleName: string | null;
   description: string;
+  action: string;
   count: number;
 }
 
@@ -52,6 +53,7 @@ interface AttackingASN {
 export interface SecurityData {
   wafTimeSeries: WAFTimeSeriesPoint[];
   topFirewallRules: FirewallRule[];
+  topSkipRules: FirewallRule[];
   sourceBreakdown: SourceBreakdown[];
   botScoreDistribution: BotScoreBucket[];
   challengeSolveRates: ChallengeSolveRates;
@@ -68,7 +70,8 @@ export async function fetchSecurityData(
 ): Promise<SecurityData> {
   const [
     wafTimeSeries,
-    rawFirewallRules,
+    rawBlockRules,
+    rawSkipRules,
     sourceBreakdown,
     botScoreDistribution,
     challengeSolveRates,
@@ -78,7 +81,8 @@ export async function fetchSecurityData(
     ruleNameMap,
   ] = await Promise.all([
     fetchWAFTimeSeries(zoneTag, since, until),
-    fetchTopFirewallRules(zoneTag, since, until),
+    fetchTopBlockRules(zoneTag, since, until),
+    fetchTopSkipRules(zoneTag, since, until),
     fetchSourceBreakdown(zoneTag, since, until),
     fetchBotScoreDistribution(zoneTag, since, until).catch(() => []),
     fetchChallengeSolveRates(zoneTag, since, until),
@@ -88,14 +92,15 @@ export async function fetchSecurityData(
     fetchFirewallRuleMap(zoneTag),
   ]);
 
-  const topFirewallRules = rawFirewallRules.map((rule) => ({
+  const enrichRule = (rule: Omit<FirewallRule, "ruleName">) => ({
     ...rule,
     ruleName: ruleNameMap.get(rule.ruleId) || null,
-  }));
+  });
 
   return {
     wafTimeSeries,
-    topFirewallRules,
+    topFirewallRules: rawBlockRules.map(enrichRule),
+    topSkipRules: rawSkipRules.map(enrichRule),
     sourceBreakdown,
     botScoreDistribution,
     challengeSolveRates,
@@ -167,7 +172,7 @@ async function fetchWAFTimeSeries(
   return Array.from(byHour.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
 
-async function fetchTopFirewallRules(
+async function fetchTopBlockRules(
   zoneTag: string,
   since: string,
   until: string
@@ -177,11 +182,11 @@ async function fetchTopFirewallRules(
       zones(filter: { zoneTag: "${zoneTag}" }) {
         firewallEventsAdaptiveGroups(
           limit: 15
-          filter: { datetime_geq: "${since}", datetime_lt: "${until}" }
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}", action_in: ["block", "challenge", "managed_challenge", "js_challenge"] }
           orderBy: [count_DESC]
         ) {
           count
-          dimensions { ruleId description }
+          dimensions { ruleId description action }
         }
       }
     }
@@ -189,7 +194,7 @@ async function fetchTopFirewallRules(
 
   interface Group {
     count: number;
-    dimensions: { ruleId: string; description: string };
+    dimensions: { ruleId: string; description: string; action: string };
   }
 
   const data = await cfGraphQL<{
@@ -199,6 +204,44 @@ async function fetchTopFirewallRules(
   return (data.viewer.zones[0]?.firewallEventsAdaptiveGroups || []).map((g) => ({
     ruleId: g.dimensions.ruleId || "unknown",
     description: g.dimensions.description || "No description",
+    action: g.dimensions.action || "block",
+    count: g.count,
+  }));
+}
+
+async function fetchTopSkipRules(
+  zoneTag: string,
+  since: string,
+  until: string
+): Promise<Omit<FirewallRule, "ruleName">[]> {
+  const query = `{
+    viewer {
+      zones(filter: { zoneTag: "${zoneTag}" }) {
+        firewallEventsAdaptiveGroups(
+          limit: 15
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}", action: "skip" }
+          orderBy: [count_DESC]
+        ) {
+          count
+          dimensions { ruleId description action }
+        }
+      }
+    }
+  }`;
+
+  interface Group {
+    count: number;
+    dimensions: { ruleId: string; description: string; action: string };
+  }
+
+  const data = await cfGraphQL<{
+    viewer: { zones: Array<{ firewallEventsAdaptiveGroups: Group[] }> };
+  }>(query);
+
+  return (data.viewer.zones[0]?.firewallEventsAdaptiveGroups || []).map((g) => ({
+    ruleId: g.dimensions.ruleId || "unknown",
+    description: g.dimensions.description || "No description",
+    action: g.dimensions.action || "skip",
     count: g.count,
   }));
 }
@@ -368,7 +411,7 @@ async function fetchTopAttackingIPs(
       zones(filter: { zoneTag: "${zoneTag}" }) {
         firewallEventsAdaptiveGroups(
           limit: 10
-          filter: { datetime_geq: "${since}", datetime_lt: "${until}" }
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}", action_in: ["block", "challenge", "managed_challenge", "js_challenge"] }
           orderBy: [count_DESC]
         ) {
           count
@@ -403,7 +446,7 @@ async function fetchTopAttackingCountries(
       zones(filter: { zoneTag: "${zoneTag}" }) {
         firewallEventsAdaptiveGroups(
           limit: 10
-          filter: { datetime_geq: "${since}", datetime_lt: "${until}" }
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}", action_in: ["block", "challenge", "managed_challenge", "js_challenge"] }
           orderBy: [count_DESC]
         ) {
           count
@@ -438,7 +481,7 @@ async function fetchTopAttackingASNs(
       zones(filter: { zoneTag: "${zoneTag}" }) {
         firewallEventsAdaptiveGroups(
           limit: 10
-          filter: { datetime_geq: "${since}", datetime_lt: "${until}" }
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}", action_in: ["block", "challenge", "managed_challenge", "js_challenge"] }
           orderBy: [count_DESC]
         ) {
           count

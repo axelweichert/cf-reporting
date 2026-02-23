@@ -8,6 +8,7 @@ interface DnsQueryTimeSeriesPoint {
 
 interface BlockedDomain {
   domain: string;
+  category: string;
   count: number;
 }
 
@@ -122,7 +123,7 @@ async function fetchTopBlockedDomains(
     viewer {
       accounts(filter: { accountTag: "${accountTag}" }) {
         gatewayResolverQueriesAdaptiveGroups(
-          limit: 15
+          limit: 50
           filter: {
             datetime_geq: "${since}"
             datetime_lt: "${until}"
@@ -131,7 +132,7 @@ async function fetchTopBlockedDomains(
           orderBy: [count_DESC]
         ) {
           count
-          dimensions { queryName }
+          dimensions { queryName categoryNames }
         }
       }
     }
@@ -139,17 +140,22 @@ async function fetchTopBlockedDomains(
 
   interface Group {
     count: number;
-    dimensions: { queryName: string };
+    dimensions: { queryName: string; categoryNames: string[] };
   }
 
   const data = await cfGraphQL<{
     viewer: { accounts: Array<{ gatewayResolverQueriesAdaptiveGroups: Group[] }> };
   }>(query);
 
-  return (data.viewer.accounts[0]?.gatewayResolverQueriesAdaptiveGroups || []).map((g) => ({
-    domain: g.dimensions.queryName || "unknown",
-    count: g.count,
-  }));
+  return (data.viewer.accounts[0]?.gatewayResolverQueriesAdaptiveGroups || []).map((g) => {
+    const names = g.dimensions.categoryNames;
+    const category = Array.isArray(names) && names.length > 0 ? names.join(", ") : "Uncategorized";
+    return {
+      domain: g.dimensions.queryName || "unknown",
+      category,
+      count: g.count,
+    };
+  });
 }
 
 async function fetchBlockedCategories(

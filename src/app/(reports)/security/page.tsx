@@ -89,7 +89,10 @@ export default function SecurityPage() {
                   : "N/A"
               }
             />
-            <StatCard label="Top Firewall Rules" value={data?.topFirewallRules.length || 0} />
+            <StatCard
+              label="Skip Rule Hits"
+              value={formatNumber((data?.topSkipRules || []).reduce((sum, r) => sum + r.count, 0))}
+            />
           </>
         )}
       </div>
@@ -129,26 +132,56 @@ export default function SecurityPage() {
         </ChartWrapper>
       </div>
 
-      {/* Top Firewall Rules */}
-      <ChartWrapper title="Top Firewall Rules" subtitle="By hit count" loading={loading}>
-        <DataTable
-          columns={[
-            {
-              key: "ruleName",
-              label: "Rule",
-              render: (_v, row) => {
-                const r = row as { ruleName: string | null; description: string };
-                const displayName = r.ruleName || r.description;
-                return <>{displayName && displayName !== "No description" ? displayName : "—"}</>;
+      {/* Firewall Rules: Block/Challenge vs Skip */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <ChartWrapper title="Top Block / Challenge Rules" loading={loading}>
+          <DataTable
+            columns={[
+              {
+                key: "ruleName",
+                label: "Rule",
+                render: (_v, row) => {
+                  const r = row as { ruleName: string | null; description: string };
+                  const displayName = r.ruleName || r.description;
+                  return <>{displayName && displayName !== "No description" ? displayName : "—"}</>;
+                },
               },
-            },
-            { key: "ruleId", label: "Rule ID" },
-            { key: "count", label: "Hits", align: "right", render: (v) => formatNumber(v as number) },
-          ]}
-          data={data?.topFirewallRules || []}
-          maxRows={15}
-        />
-      </ChartWrapper>
+              {
+                key: "action",
+                label: "Action",
+                render: (v) => {
+                  const action = v as string;
+                  const color = ACTION_COLORS[action] || "#6b7280";
+                  return <span style={{ color }}>{action.replace(/_/g, " ")}</span>;
+                },
+              },
+              { key: "count", label: "Hits", align: "right", render: (v) => formatNumber(v as number) },
+            ]}
+            data={data?.topFirewallRules || []}
+            maxRows={15}
+          />
+        </ChartWrapper>
+
+        <ChartWrapper title="Top Skip Rules" loading={loading}>
+          <DataTable
+            columns={[
+              {
+                key: "ruleName",
+                label: "Rule",
+                render: (_v, row) => {
+                  const r = row as { ruleName: string | null; description: string };
+                  const displayName = r.ruleName || r.description;
+                  return <>{displayName && displayName !== "No description" ? displayName : "—"}</>;
+                },
+              },
+              { key: "ruleId", label: "Rule ID" },
+              { key: "count", label: "Hits", align: "right", render: (v) => formatNumber(v as number) },
+            ]}
+            data={data?.topSkipRules || []}
+            maxRows={15}
+          />
+        </ChartWrapper>
+      </div>
 
       {/* Three columns: Top IPs, Countries, ASNs */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

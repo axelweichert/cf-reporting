@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useCfData } from "@/lib/use-cf-data";
@@ -21,6 +22,8 @@ export default function GatewayDnsPage() {
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+
+  const [showAllBlocked, setShowAllBlocked] = useState(false);
 
   const { data, loading, error, refetch } = useCfData<GatewayDnsData>({
     fetcher: () => {
@@ -100,14 +103,27 @@ export default function GatewayDnsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ChartWrapper title="Top Blocked Domains" loading={loading}>
+        <ChartWrapper
+          title="Top Blocked Domains"
+          loading={loading}
+          actions={
+            (data?.topBlockedDomains.length || 0) > 10 && (
+              <button
+                onClick={() => setShowAllBlocked((v) => !v)}
+                className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                {showAllBlocked ? "Show less" : `Show all (${data?.topBlockedDomains.length})`}
+              </button>
+            )
+          }
+        >
           <DataTable
             columns={[
               { key: "domain", label: "Domain" },
+              { key: "category", label: "Category" },
               { key: "count", label: "Blocks", align: "right", render: (v) => formatNumber(v as number) },
             ]}
-            data={data?.topBlockedDomains || []}
-            maxRows={15}
+            data={showAllBlocked ? (data?.topBlockedDomains || []) : (data?.topBlockedDomains || []).slice(0, 10)}
           />
         </ChartWrapper>
 
