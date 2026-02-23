@@ -12,10 +12,24 @@ interface CacheEntry<T> {
 
 const cache = new Map<string, CacheEntry<unknown>>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const MAX_CACHE_ENTRIES = 500;
 
 function getCacheKey(method: string, path: string, body?: string): string {
   return `${method}:${path}:${body || ""}`;
 }
+
+function sweepExpired(): void {
+  const now = Date.now();
+  for (const [key, entry] of cache) {
+    if (now - entry.timestamp > CACHE_TTL) {
+      cache.delete(key);
+    }
+  }
+}
+
+// Sweep expired entries every 60 seconds
+const sweepInterval = setInterval(sweepExpired, 60_000);
+sweepInterval.unref(); // Don't prevent process exit
 
 function getCached<T>(key: string): T | null {
   const entry = cache.get(key);
@@ -28,6 +42,19 @@ function getCached<T>(key: string): T | null {
 }
 
 function setCache<T>(key: string, data: T): void {
+  // Evict oldest entries if at capacity
+  if (cache.size >= MAX_CACHE_ENTRIES) {
+    sweepExpired();
+    // Still over limit — drop oldest entries
+    if (cache.size >= MAX_CACHE_ENTRIES) {
+      const toDelete = cache.size - MAX_CACHE_ENTRIES + 1;
+      const iter = cache.keys();
+      for (let i = 0; i < toDelete; i++) {
+        const { value } = iter.next();
+        if (value) cache.delete(value);
+      }
+    }
+  }
   cache.set(key, { data, timestamp: Date.now() });
 }
 

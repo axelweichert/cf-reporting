@@ -9,6 +9,17 @@ interface CacheEntry {
 const capabilitiesCache = new Map<string, CacheEntry>();
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
+// Sweep expired entries periodically
+const sweepInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of capabilitiesCache) {
+    if (now - entry.timestamp > CACHE_TTL) {
+      capabilitiesCache.delete(key);
+    }
+  }
+}, 5 * 60_000); // every 5 minutes
+sweepInterval.unref();
+
 function hashToken(token: string): string {
   // Simple hash for cache key — not cryptographic, just for keying
   let hash = 0;
