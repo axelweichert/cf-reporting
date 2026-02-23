@@ -128,9 +128,9 @@ export default function SetupPage() {
         </div>
 
         <p className="mt-4 text-center text-xs text-zinc-600">
-          Your token is encrypted and stored server-side only.
+          Your token is encrypted in an httpOnly cookie — it never reaches client-side JavaScript
           <br />
-          It never reaches client-side JavaScript.
+          and is never stored on disk. The server only decrypts it in memory per request.
         </p>
       </div>
     </div>
