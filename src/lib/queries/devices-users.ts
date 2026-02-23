@@ -86,10 +86,12 @@ interface CfDevice {
   id: string;
   name?: string;
   device_type?: string;
-  platform?: string;
   os_version?: string;
-  client_version?: string;
-  last_seen_at?: string;
+  // The deprecated /devices endpoint returns "version" (not "client_version")
+  // and "last_seen" (not "last_seen_at"). The newer /physical-devices endpoint
+  // uses "client_version" and "last_seen" respectively.
+  version?: string;
+  last_seen?: string;
   user?: {
     name?: string;
     email?: string;
@@ -170,7 +172,7 @@ export async function fetchDevicesUsersData(
 
   // Process devices
   const devices: DeviceItem[] = rawDevices.map((d) => {
-    const lastSeen = d.last_seen_at || new Date(0).toISOString();
+    const lastSeen = d.last_seen || new Date(0).toISOString();
     const email = d.user?.email || "";
     userDeviceCount.set(email, (userDeviceCount.get(email) || 0) + 1);
 
@@ -178,9 +180,9 @@ export async function fetchDevicesUsersData(
       name: d.name || d.id || "Unknown Device",
       user: d.user?.name || d.user?.email || "Unknown",
       email,
-      os: formatOsName(d.platform || d.device_type, d.os_version),
+      os: formatOsName(d.device_type, d.os_version),
       osVersion: d.os_version || "",
-      warpVersion: d.client_version || "Unknown",
+      warpVersion: d.version || "Unknown",
       lastSeen,
       status: classifyDevice(lastSeen),
     };
