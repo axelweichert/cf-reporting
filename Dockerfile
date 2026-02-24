@@ -12,7 +12,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-RUN npm run build
+RUN SESSION_SECRET=build-placeholder-00000000000000000000 npm run build
 
 # --- Runner ---
 FROM base AS runner
