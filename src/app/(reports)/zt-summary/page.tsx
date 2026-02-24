@@ -20,7 +20,7 @@ export default function ZtSummaryPage() {
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
-  const { data, loading, error, refetch } = useCfData<ZtSummaryData>({
+  const { data, loading, error, errorType, refetch } = useCfData<ZtSummaryData>({
     fetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchZtSummaryData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
@@ -43,7 +43,16 @@ export default function ZtSummaryPage() {
         <p className="mt-1 text-sm text-zinc-400">{accountName} – {start} to {end}</p>
       </div>
 
-      {error && !loading && <ErrorMessage type="generic" message={error} onRetry={refetch} />}
+      {error && !loading && <ErrorMessage type={errorType} message={error} onRetry={refetch} />}
+
+      {!loading && !error && data && data.totalDnsQueries === 0 && data.accessLogins.total === 0 && (
+        <ErrorMessage
+          type={capabilities?.permissions.includes("zero_trust") ? "empty" : "permission"}
+          message={capabilities?.permissions.includes("zero_trust")
+            ? "No Zero Trust activity found for this time period. This may mean no Gateway or Access events occurred, or the services haven't been configured yet."
+            : "Your API token doesn't have Zero Trust permissions. Add the Zero Trust permission to see this report."}
+        />
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {loading ? (

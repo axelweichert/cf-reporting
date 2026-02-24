@@ -117,7 +117,7 @@ export class CloudflareClient {
   async rest<T>(
     path: string,
     options: { method?: string; body?: unknown; useCache?: boolean } = {}
-  ): Promise<CloudflareApiResponse<T>> {
+  ): Promise<CloudflareApiResponse<T> & { _httpStatus?: number }> {
     const { method = "GET", body, useCache = true } = options;
     const url = `${CF_BASE}${path}`;
     const bodyStr = body ? JSON.stringify(body) : undefined;
@@ -134,7 +134,8 @@ export class CloudflareClient {
       body: bodyStr,
     });
 
-    const data = (await response.json()) as CloudflareApiResponse<T>;
+    const data = (await response.json()) as CloudflareApiResponse<T> & { _httpStatus?: number };
+    data._httpStatus = response.status;
 
     if (useCache && method === "GET" && data.success) {
       setCache(getCacheKey(this.scope, method, path), data);

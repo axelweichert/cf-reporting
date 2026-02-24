@@ -22,7 +22,7 @@ export default function ExecutivePage() {
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
-  const { data, loading, error, refetch } = useCfData<ExecutiveData>({
+  const { data, loading, error, errorType, refetch } = useCfData<ExecutiveData>({
     fetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchExecutiveData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
@@ -61,7 +61,7 @@ export default function ExecutivePage() {
       </div>
 
       {error && !loading && (
-        <ErrorMessage type="generic" message={error} onRetry={refetch} />
+        <ErrorMessage type={errorType} message={error} onRetry={refetch} />
       )}
 
       {/* Key Metrics */}

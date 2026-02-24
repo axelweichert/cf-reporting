@@ -22,7 +22,7 @@ export default function AccessAuditPage() {
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
-  const { data, loading, error, refetch } = useCfData<AccessAuditData>({
+  const { data, loading, error, errorType, refetch } = useCfData<AccessAuditData>({
     fetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchAccessAuditData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
@@ -53,7 +53,16 @@ export default function AccessAuditPage() {
         <p className="mt-1 text-sm text-zinc-400">{accountName} – {start} to {end}</p>
       </div>
 
-      {error && !loading && <ErrorMessage type="generic" message={error} onRetry={refetch} />}
+      {error && !loading && <ErrorMessage type={errorType} message={error} onRetry={refetch} />}
+
+      {!loading && !error && data && totalLogins === 0 && (
+        <ErrorMessage
+          type={capabilities?.permissions.includes("access") ? "empty" : "permission"}
+          message={capabilities?.permissions.includes("access")
+            ? "No Access login events found for this time period. This may mean no login attempts occurred, or Access hasn't been configured yet."
+            : "Your API token doesn't have Access permissions. Add the 'Access: Apps and Policies' permission to see this report."}
+        />
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {loading ? <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></> : (

@@ -23,7 +23,7 @@ export default function DnsPage() {
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
-  const { data, loading, error, refetch } = useCfData<DnsData>({
+  const { data, loading, error, errorType, refetch } = useCfData<DnsData>({
     fetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchDnsData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
@@ -64,7 +64,7 @@ export default function DnsPage() {
       </div>
 
       {error && !loading && (
-        <ErrorMessage type="generic" message={error} onRetry={refetch} />
+        <ErrorMessage type={errorType} message={error} onRetry={refetch} />
       )}
 
       {/* Stat Cards */}

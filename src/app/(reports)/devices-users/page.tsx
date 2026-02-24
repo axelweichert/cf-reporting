@@ -56,7 +56,7 @@ export default function DevicesUsersPage() {
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
 
-  const { data, loading, error, refetch } = useCfData<DevicesUsersData>({
+  const { data, loading, error, errorType, refetch } = useCfData<DevicesUsersData>({
     fetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchDevicesUsersData(accountId);
@@ -81,7 +81,16 @@ export default function DevicesUsersPage() {
         <p className="mt-1 text-sm text-zinc-400">{accountName} – WARP fleet & Access/Gateway seats</p>
       </div>
 
-      {error && !loading && <ErrorMessage type="generic" message={error} onRetry={refetch} />}
+      {error && !loading && <ErrorMessage type={errorType} message={error} onRetry={refetch} />}
+
+      {!loading && !error && data && stats?.totalDevices === 0 && stats?.totalUsers === 0 && (
+        <ErrorMessage
+          type={capabilities?.permissions.includes("zero_trust") ? "empty" : "permission"}
+          message={capabilities?.permissions.includes("zero_trust")
+            ? "No devices or users found. This may mean WARP hasn't been deployed or Access users haven't been configured yet."
+            : "Your API token doesn't have Zero Trust permissions. Add the Zero Trust permission to see this report."}
+        />
+      )}
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">

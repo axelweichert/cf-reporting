@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 
+export type ErrorType = "permission" | "rate_limit" | "network" | "empty" | "generic";
+
 interface UseCfDataOptions<T> {
   fetcher: () => Promise<T>;
   deps?: unknown[];
@@ -11,24 +13,49 @@ interface UseCfDataResult<T> {
   data: T | null;
   loading: boolean;
   error: string | null;
+  errorType: ErrorType;
   refetch: () => void;
+}
+
+function classifyError(e: unknown): { message: string; type: ErrorType } {
+  if (e instanceof CfApiError) {
+    if (e.status === 403) return { message: e.message, type: "permission" };
+    if (e.status === 429) return { message: e.message, type: "rate_limit" };
+  }
+  const msg = e instanceof Error ? e.message : "Failed to fetch data";
+  if (msg.includes("403") || msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("forbidden")) {
+    return { message: msg, type: "permission" };
+  }
+  if (msg.includes("429") || msg.toLowerCase().includes("rate limit")) {
+    return { message: msg, type: "rate_limit" };
+  }
+  if (msg.toLowerCase().includes("network") || msg.toLowerCase().includes("fetch")) {
+    return { message: msg, type: "network" };
+  }
+  return { message: msg, type: "generic" };
 }
 
 export function useCfData<T>({ fetcher, deps = [] }: UseCfDataOptions<T>): UseCfDataResult<T> {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorType, setErrorType] = useState<ErrorType>("generic");
   const reqId = useRef(0);
 
   const fetchData = useCallback(async () => {
     const id = ++reqId.current;
     setLoading(true);
     setError(null);
+    setErrorType("generic");
     try {
       const result = await fetcher();
       if (id === reqId.current) setData(result);
     } catch (e) {
-      if (id === reqId.current) setError(e instanceof Error ? e.message : "Failed to fetch data");
+      if (id === reqId.current) {
+        const classified = classifyError(e);
+        setError(classified.message);
+        setErrorType(classified.type);
+      }
     } finally {
       if (id === reqId.current) setLoading(false);
     }
@@ -39,7 +66,7 @@ export function useCfData<T>({ fetcher, deps = [] }: UseCfDataOptions<T>): UseCf
     fetchData();
   }, [fetchData]);
 
-  return { data, loading, error, refetch: fetchData };
+  return { data, loading, error, errorType, refetch: fetchData };
 }
 
 // Helper: Call our CF proxy GraphQL endpoint
@@ -176,12 +203,23 @@ export async function fetchFirewallRuleMap(zoneId: string): Promise<Map<string, 
   return map;
 }
 
+// Custom error class that preserves HTTP status for permission detection
+export class CfApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "CfApiError";
+    this.status = status;
+  }
+}
+
 // Helper: Call our CF proxy REST endpoint
 export async function cfRest<T = unknown>(path: string): Promise<T> {
   const res = await fetch(`/api/cf${path}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `API error: ${res.status}`);
+    const message = body.errors?.[0]?.message || body.error || `API error: ${res.status}`;
+    throw new CfApiError(message, res.status);
   }
   const json = await res.json();
   if (!json.success) {
@@ -223,7 +261,29 @@ export function formatCountry(input: string): string {
   return code ? `${input} (${code})` : input;
 }
 
-// Helper: Paginated REST fetch – auto-pages through all results
+// Helper: Split a date range into daily chunks for GraphQL queries to avoid limit truncation
+export function splitDateRange(since: string, until: string): Array<{ since: string; until: string }> {
+  const start = new Date(since);
+  const end = new Date(until);
+  const chunks: Array<{ since: string; until: string }> = [];
+
+  const current = new Date(start);
+  while (current < end) {
+    const chunkEnd = new Date(current);
+    chunkEnd.setUTCDate(chunkEnd.getUTCDate() + 1);
+    if (chunkEnd > end) chunkEnd.setTime(end.getTime());
+
+    chunks.push({
+      since: current.toISOString(),
+      until: chunkEnd.toISOString(),
+    });
+
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+
+  return chunks;
+}
+
 export async function cfRestPaginated<T = unknown>(path: string, perPage = 100): Promise<T[]> {
   const results: T[] = [];
   let page = 1;
@@ -233,7 +293,8 @@ export async function cfRestPaginated<T = unknown>(path: string, perPage = 100):
     const res = await fetch(`/api/cf${path}${separator}page=${page}&per_page=${perPage}`);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `API error: ${res.status}`);
+      const message = body.errors?.[0]?.message || body.error || `API error: ${res.status}`;
+      throw new CfApiError(message, res.status);
     }
     const json = await res.json();
     if (!json.success) {

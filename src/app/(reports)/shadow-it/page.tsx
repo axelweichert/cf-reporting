@@ -22,7 +22,7 @@ export default function ShadowItPage() {
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
-  const { data, loading, error, refetch } = useCfData<ShadowItData>({
+  const { data, loading, error, errorType, refetch } = useCfData<ShadowItData>({
     fetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchShadowItData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
@@ -53,7 +53,7 @@ export default function ShadowItPage() {
         <p className="mt-1 text-sm text-zinc-400">{accountName} – {start} to {end}</p>
       </div>
 
-      {error && !loading && <ErrorMessage type="generic" message={error} onRetry={refetch} />}
+      {error && !loading && <ErrorMessage type={errorType} message={error} onRetry={refetch} />}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {loading ? <><CardSkeleton /><CardSkeleton /><CardSkeleton /></> : (

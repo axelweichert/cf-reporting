@@ -22,7 +22,7 @@ export default function DdosPage() {
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
-  const { data, loading, error, refetch } = useCfData<DdosData>({
+  const { data, loading, error, errorType, refetch } = useCfData<DdosData>({
     fetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchDdosData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
@@ -58,7 +58,7 @@ export default function DdosPage() {
       </div>
 
       {error && !loading && (
-        <ErrorMessage type="generic" message={error} onRetry={refetch} />
+        <ErrorMessage type={errorType} message={error} onRetry={refetch} />
       )}
 
       {/* Stat Cards */}

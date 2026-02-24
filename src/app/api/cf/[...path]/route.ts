@@ -50,6 +50,11 @@ export async function GET(
 
   try {
     const data = await client.rest(fullPath);
+    // Preserve upstream error status for permission detection (e.g. 403)
+    if (!data.success && data._httpStatus && data._httpStatus >= 400) {
+      const { _httpStatus, ...responseBody } = data;
+      return Response.json(responseBody, { status: _httpStatus });
+    }
     return Response.json(data);
   } catch (error) {
     console.error("CF API GET error:", error instanceof Error ? error.message : error);

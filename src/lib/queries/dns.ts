@@ -1,4 +1,4 @@
-import { cfGraphQL, cfRest } from "@/lib/use-cf-data";
+import { cfGraphQL, cfRestPaginated, splitDateRange } from "@/lib/use-cf-data";
 
 // --- Types ---
 interface DnsTimeSeriesPoint {
@@ -62,11 +62,11 @@ export async function fetchDnsData(
   };
 }
 
-async function fetchQueryVolumeByType(
+async function fetchQueryVolumeChunk(
   zoneTag: string,
   since: string,
   until: string
-): Promise<{ timeSeries: DnsTimeSeriesPoint[]; types: string[] }> {
+): Promise<{ byHour: Map<string, DnsTimeSeriesPoint>; types: Set<string> }> {
   const query = `{
     viewer {
       zones(filter: { zoneTag: "${zoneTag}" }) {
@@ -103,11 +103,42 @@ async function fetchQueryVolumeByType(
     byHour.set(hour, existing);
   }
 
+  return { byHour, types };
+}
+
+async function fetchQueryVolumeByType(
+  zoneTag: string,
+  since: string,
+  until: string
+): Promise<{ timeSeries: DnsTimeSeriesPoint[]; types: string[] }> {
+  // Split into daily chunks to avoid GraphQL limit: 1000 truncation
+  // (7 days × 24 hours × ~20 query types ≈ 3360 groups, far exceeds 1000)
+  const chunks = splitDateRange(since, until);
+  const chunkResults = await Promise.all(
+    chunks.map((c) => fetchQueryVolumeChunk(zoneTag, c.since, c.until))
+  );
+
+  // Merge all chunks
+  const allTypes = new Set<string>();
+  const merged = new Map<string, DnsTimeSeriesPoint>();
+
+  for (const { byHour, types } of chunkResults) {
+    for (const t of types) allTypes.add(t);
+    for (const [hour, point] of byHour) {
+      const existing = merged.get(hour) || { date: hour };
+      for (const [key, value] of Object.entries(point)) {
+        if (key === "date") continue;
+        existing[key] = ((existing[key] as number) || 0) + (value as number);
+      }
+      merged.set(hour, existing);
+    }
+  }
+
   return {
-    timeSeries: Array.from(byHour.values()).sort((a, b) =>
+    timeSeries: Array.from(merged.values()).sort((a, b) =>
       (a.date as string).localeCompare(b.date as string)
     ),
-    types: Array.from(types).sort(),
+    types: Array.from(allTypes).sort(),
   };
 }
 
@@ -152,7 +183,7 @@ async function fetchResponseCodes(
 }
 
 async function fetchDnsRecords(zoneTag: string): Promise<DnsRecord[]> {
-  return cfRest<DnsRecord[]>(`/zones/${zoneTag}/dns_records?per_page=100`);
+  return cfRestPaginated<DnsRecord>(`/zones/${zoneTag}/dns_records`);
 }
 
 async function fetchTopQueriedRecords(

@@ -1,4 +1,4 @@
-import { cfGraphQL, formatCountry } from "@/lib/use-cf-data";
+import { cfGraphQL, formatCountry, splitDateRange } from "@/lib/use-cf-data";
 
 // --- Types ---
 interface TimeSeriesPoint {
@@ -68,7 +68,7 @@ export async function fetchTrafficData(
   };
 }
 
-async function fetchTimeSeries(zoneTag: string, since: string, until: string): Promise<TimeSeriesPoint[]> {
+async function fetchTimeSeriesChunk(zoneTag: string, since: string, until: string): Promise<Map<string, TimeSeriesPoint>> {
   const query = `{
     viewer {
       zones(filter: { zoneTag: "${zoneTag}" }) {
@@ -93,7 +93,6 @@ async function fetchTimeSeries(zoneTag: string, since: string, until: string): P
 
   const data = await cfGraphQL<{ viewer: { zones: Array<{ httpRequestsAdaptiveGroups: Group[] }> } }>(query);
 
-  // Aggregate by hour
   const byHour = new Map<string, TimeSeriesPoint>();
   for (const g of data.viewer.zones[0]?.httpRequestsAdaptiveGroups || []) {
     const hour = g.dimensions.datetimeHour;
@@ -106,7 +105,33 @@ async function fetchTimeSeries(zoneTag: string, since: string, until: string): P
     byHour.set(hour, existing);
   }
 
-  return Array.from(byHour.values()).sort((a, b) => a.date.localeCompare(b.date));
+  return byHour;
+}
+
+async function fetchTimeSeries(zoneTag: string, since: string, until: string): Promise<TimeSeriesPoint[]> {
+  // Split into daily chunks to avoid GraphQL limit: 1000 truncation
+  // (7 days × 24 hours × ~7 cache statuses ≈ 1176 groups, exceeds 1000)
+  const chunks = splitDateRange(since, until);
+  const chunkResults = await Promise.all(
+    chunks.map((c) => fetchTimeSeriesChunk(zoneTag, c.since, c.until))
+  );
+
+  // Merge all chunks
+  const merged = new Map<string, TimeSeriesPoint>();
+  for (const chunk of chunkResults) {
+    for (const [hour, point] of chunk) {
+      const existing = merged.get(hour);
+      if (existing) {
+        existing.requests += point.requests;
+        existing.bandwidth += point.bandwidth;
+        existing.cachedRequests += point.cachedRequests;
+      } else {
+        merged.set(hour, { ...point });
+      }
+    }
+  }
+
+  return Array.from(merged.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 async function fetchStatusCodes(zoneTag: string, since: string, until: string): Promise<StatusCodeGroup[]> {

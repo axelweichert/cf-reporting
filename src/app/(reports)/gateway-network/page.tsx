@@ -22,7 +22,7 @@ export default function GatewayNetworkPage() {
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
-  const { data, loading, error, refetch } = useCfData<GatewayNetworkData>({
+  const { data, loading, error, errorType, refetch } = useCfData<GatewayNetworkData>({
     fetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchGatewayNetworkData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
@@ -53,7 +53,16 @@ export default function GatewayNetworkPage() {
         <p className="mt-1 text-sm text-zinc-400">{accountName} – {start} to {end}</p>
       </div>
 
-      {error && !loading && <ErrorMessage type="generic" message={error} onRetry={refetch} />}
+      {error && !loading && <ErrorMessage type={errorType} message={error} onRetry={refetch} />}
+
+      {!loading && !error && data && totalAllowed === 0 && totalBlocked === 0 && (
+        <ErrorMessage
+          type={capabilities?.permissions.includes("gateway") ? "empty" : "permission"}
+          message={capabilities?.permissions.includes("gateway")
+            ? "No Gateway Network data found for this time period. This may mean no L4 sessions were routed through Gateway, or the service hasn't been configured yet."
+            : "Your API token doesn't have Gateway permissions. Add the Gateway permission to see this report."}
+        />
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {loading ? <><CardSkeleton /><CardSkeleton /><CardSkeleton /></> : (
