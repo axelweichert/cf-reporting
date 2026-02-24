@@ -55,12 +55,13 @@ export default function ShadowItPage() {
 
       {error && !loading && <ErrorMessage type={errorType} message={error} onRetry={refetch} />}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {loading ? <><CardSkeleton /><CardSkeleton /><CardSkeleton /></> : (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {loading ? <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></> : (
           <>
             <StatCard label="Discovered Apps" value={totalDiscovered} />
-            <StatCard label="Total Requests" value={formatNumber(totalRequests)} />
-            <StatCard label="Categories" value={data?.categoryBreakdown.length || 0} />
+            <StatCard label="App Requests" value={formatNumber(totalRequests)} />
+            <StatCard label="Unidentified Categories" value={data?.categoryBreakdown.length || 0} />
+            <StatCard label="Unidentified Requests" value={formatNumber((data?.categoryBreakdown || []).reduce((s, c) => s + c.count, 0))} />
           </>
         )}
       </div>
@@ -81,28 +82,33 @@ export default function ShadowItPage() {
         </ChartWrapper>
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ChartWrapper title="Category Breakdown" loading={loading}>
-          <DonutChart
-            data={(data?.categoryBreakdown || []).map((c) => ({
-              name: c.category || "Unknown",
-              value: c.count,
-            }))}
-            valueFormatter={formatNumber}
-          />
-        </ChartWrapper>
+      {/* Discovered Applications - full width with category column */}
+      <ChartWrapper title="Discovered Applications" loading={loading}>
+        <DataTable
+          columns={[
+            { key: "name", label: "Application" },
+            { key: "category", label: "Category" },
+            { key: "count", label: "Requests", align: "right", render: (v) => formatNumber(v as number) },
+          ]}
+          data={data?.discoveredApplications || []}
+          maxRows={20}
+        />
+      </ChartWrapper>
 
-        <ChartWrapper title="Discovered Applications" loading={loading}>
-          <DataTable
-            columns={[
-              { key: "name", label: "Application" },
-              { key: "count", label: "Requests", align: "right", render: (v) => formatNumber(v as number) },
-            ]}
-            data={data?.discoveredApplications || []}
-            maxRows={20}
-          />
-        </ChartWrapper>
-      </div>
+      {/* Unidentified traffic categories */}
+      <ChartWrapper
+        title="Unidentified Traffic by Category"
+        subtitle="DNS requests not matched to a known SaaS application"
+        loading={loading}
+      >
+        <DonutChart
+          data={(data?.categoryBreakdown || []).map((c) => ({
+            name: c.category || "Unknown",
+            value: c.count,
+          }))}
+          valueFormatter={formatNumber}
+        />
+      </ChartWrapper>
     </div>
   );
 }

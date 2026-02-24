@@ -14,6 +14,7 @@ function parseAppName(raw: string): string {
 interface DiscoveredApp {
   name: string;
   rawName: string; // original value for GraphQL filtering
+  category: string;
   count: number;
 }
 
@@ -79,7 +80,7 @@ async function fetchDiscoveredApplications(
           orderBy: [count_DESC]
         ) {
           count
-          dimensions { matchedApplicationName }
+          dimensions { matchedApplicationName categoryNames }
         }
       }
     }
@@ -87,18 +88,42 @@ async function fetchDiscoveredApplications(
 
   interface Group {
     count: number;
-    dimensions: { matchedApplicationName: string };
+    dimensions: { matchedApplicationName: string; categoryNames: string[] };
   }
 
   const data = await cfGraphQL<{
     viewer: { accounts: Array<{ gatewayResolverQueriesAdaptiveGroups: Group[] }> };
   }>(query);
 
-  return (data.viewer.accounts[0]?.gatewayResolverQueriesAdaptiveGroups || []).map((g) => ({
-    name: parseAppName(g.dimensions.matchedApplicationName) || "Unknown",
-    rawName: g.dimensions.matchedApplicationName,
-    count: g.count,
-  }));
+  // Multiple groups may exist for the same app (different category combos).
+  // Merge them, keeping the most common category.
+  const appMap = new Map<string, { rawName: string; count: number; categories: Map<string, number> }>();
+
+  for (const g of data.viewer.accounts[0]?.gatewayResolverQueriesAdaptiveGroups || []) {
+    const raw = g.dimensions.matchedApplicationName;
+    const name = parseAppName(raw) || "Unknown";
+    const cats = Array.isArray(g.dimensions.categoryNames) && g.dimensions.categoryNames.length > 0
+      ? g.dimensions.categoryNames
+      : ["Uncategorized"];
+
+    const existing = appMap.get(name) || { rawName: raw, count: 0, categories: new Map() };
+    existing.count += g.count;
+    const catKey = cats.join(", ");
+    existing.categories.set(catKey, (existing.categories.get(catKey) || 0) + g.count);
+    appMap.set(name, existing);
+  }
+
+  return Array.from(appMap.entries())
+    .map(([name, { rawName, count, categories }]) => {
+      // Pick the category with the most requests
+      let topCategory = "Uncategorized";
+      let topCount = 0;
+      for (const [cat, c] of categories) {
+        if (c > topCount) { topCategory = cat; topCount = c; }
+      }
+      return { name, rawName, category: topCategory, count };
+    })
+    .sort((a, b) => b.count - a.count);
 }
 
 async function fetchCategoryBreakdown(
@@ -114,7 +139,7 @@ async function fetchCategoryBreakdown(
           filter: {
             datetime_geq: "${since}"
             datetime_lt: "${until}"
-            matchedApplicationName_neq: ""
+            matchedApplicationName: ""
           }
           orderBy: [count_DESC]
         ) {
