@@ -44,3 +44,15 @@ caddy/config/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local workspace (screenshots, test exports, scratch files)
+/local/
+
+# Playwright MCP artifacts
+.playwright-mcp/
+
+# Screenshots and binary files (use /local/ for these)
+*.png
+*.jpg
+*.jpeg
+*.zip
