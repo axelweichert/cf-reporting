@@ -56,7 +56,7 @@ export default function TrafficPage() {
       <div>
         <h1 className="text-2xl font-bold text-white">Traffic Overview</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          {zoneName} — {start} to {end}
+          {zoneName} – {start} to {end}
         </p>
       </div>
 
@@ -115,7 +115,7 @@ export default function TrafficPage() {
               { name: "Hit", value: data?.cache.hit || 0, color: "#10b981" },
               { name: "Miss", value: data?.cache.miss || 0, color: "#ef4444" },
             ]}
-            centerValue={data ? formatPercent(data.cache.ratio) : "—"}
+            centerValue={data ? formatPercent(data.cache.ratio) : "–"}
             centerLabel="Hit Ratio"
             valueFormatter={formatNumber}
           />

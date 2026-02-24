@@ -53,7 +53,7 @@ export default function BotsPage() {
       <div>
         <h1 className="text-2xl font-bold text-white">Bot Analysis</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          {zoneName} — {start} to {end}
+          {zoneName} – {start} to {end}
         </p>
       </div>
 

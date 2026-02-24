@@ -124,7 +124,7 @@ async function fetchDevices(accountId: string): Promise<CfDevice[]> {
   try {
     return await cfRestPaginated<CfDevice>(`/accounts/${accountId}/devices`);
   } catch {
-    // Fall back to empty — the endpoint may require specific permissions
+    // Fall back to empty – the endpoint may require specific permissions
     return [];
   }
 }

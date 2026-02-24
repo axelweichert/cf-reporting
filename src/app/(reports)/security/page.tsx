@@ -60,7 +60,7 @@ export default function SecurityPage() {
       <div>
         <h1 className="text-2xl font-bold text-white">Security Posture</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          {zoneName} — {start} to {end}
+          {zoneName} – {start} to {end}
         </p>
       </div>
 
@@ -143,7 +143,7 @@ export default function SecurityPage() {
                 render: (_v, row) => {
                   const r = row as { ruleName: string | null; description: string };
                   const displayName = r.ruleName || r.description;
-                  return <>{displayName && displayName !== "No description" ? displayName : "—"}</>;
+                  return <>{displayName && displayName !== "No description" ? displayName : "–"}</>;
                 },
               },
               {
@@ -171,7 +171,7 @@ export default function SecurityPage() {
                 render: (_v, row) => {
                   const r = row as { ruleName: string | null; description: string };
                   const displayName = r.ruleName || r.description;
-                  return <>{displayName && displayName !== "No description" ? displayName : "—"}</>;
+                  return <>{displayName && displayName !== "No description" ? displayName : "–"}</>;
                 },
               },
               { key: "ruleId", label: "Rule ID" },

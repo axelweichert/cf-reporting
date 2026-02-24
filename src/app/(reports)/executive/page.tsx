@@ -56,7 +56,7 @@ export default function ExecutivePage() {
       <div>
         <h1 className="text-2xl font-bold text-white print:text-black">Executive Report</h1>
         <p className="mt-1 text-sm text-zinc-400 print:text-gray-600">
-          {zoneName} — {start} to {end}
+          {zoneName} – {start} to {end}
         </p>
       </div>
 

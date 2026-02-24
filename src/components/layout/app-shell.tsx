@@ -25,7 +25,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             const caps = await capsRes.json();
             setAuth(true, caps);
           } else {
-            // Session valid but caps failed — use slim data from session
+            // Session valid but caps failed – use slim data from session
             setAuth(true, {
               permissions: data.capabilities?.permissions || [],
               accounts: [],

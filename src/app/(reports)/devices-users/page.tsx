@@ -78,7 +78,7 @@ export default function DevicesUsersPage() {
     <div className="mx-auto max-w-7xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-white">Devices & Users</h1>
-        <p className="mt-1 text-sm text-zinc-400">{accountName} — WARP fleet & Access/Gateway seats</p>
+        <p className="mt-1 text-sm text-zinc-400">{accountName} – WARP fleet & Access/Gateway seats</p>
       </div>
 
       {error && !loading && <ErrorMessage type="generic" message={error} onRetry={refetch} />}

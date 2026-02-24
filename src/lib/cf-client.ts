@@ -50,7 +50,7 @@ function setCache<T>(key: string, data: T): void {
   // Evict oldest entries if at capacity
   if (cache.size >= MAX_CACHE_ENTRIES) {
     sweepExpired();
-    // Still over limit — drop oldest entries
+    // Still over limit – drop oldest entries
     if (cache.size >= MAX_CACHE_ENTRIES) {
       const toDelete = cache.size - MAX_CACHE_ENTRIES + 1;
       const iter = cache.keys();

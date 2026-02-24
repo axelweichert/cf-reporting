@@ -115,9 +115,9 @@ export default function SetupPage() {
               "Zone Analytics (read)",
               "Firewall Services (read)",
               "DNS (read)",
-              "Zero Trust (read) — optional",
-              "Access: Apps and Policies (read) — optional",
-              "Gateway (read) — optional",
+              "Zero Trust (read) – optional",
+              "Access: Apps and Policies (read) – optional",
+              "Gateway (read) – optional",
             ].map((p) => (
               <li key={p} className="flex items-center gap-2">
                 <CheckCircle2 size={12} className="text-zinc-600" />
@@ -128,7 +128,7 @@ export default function SetupPage() {
         </div>
 
         <p className="mt-4 text-center text-xs text-zinc-600">
-          Your token is encrypted in an httpOnly cookie — it never reaches client-side JavaScript
+          Your token is encrypted in an httpOnly cookie – it never reaches client-side JavaScript
           <br />
           and is never stored on disk. The server only decrypts it in memory per request.
         </p>

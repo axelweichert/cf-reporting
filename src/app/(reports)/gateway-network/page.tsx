@@ -50,7 +50,7 @@ export default function GatewayNetworkPage() {
     <div className="mx-auto max-w-7xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-white">Gateway L4 / Network</h1>
-        <p className="mt-1 text-sm text-zinc-400">{accountName} — {start} to {end}</p>
+        <p className="mt-1 text-sm text-zinc-400">{accountName} – {start} to {end}</p>
       </div>
 
       {error && !loading && <ErrorMessage type="generic" message={error} onRetry={refetch} />}
@@ -73,7 +73,6 @@ export default function GatewayNetworkPage() {
             { key: "allowed", label: "Allowed", color: "#10b981" },
             { key: "blocked", label: "Blocked", color: "#ef4444" },
           ]}
-          stacked
           yFormatter={formatNumber}
         />
       </ChartWrapper>

@@ -50,7 +50,7 @@ export default function AccessAuditPage() {
     <div className="mx-auto max-w-7xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-white">Access Audit</h1>
-        <p className="mt-1 text-sm text-zinc-400">{accountName} — {start} to {end}</p>
+        <p className="mt-1 text-sm text-zinc-400">{accountName} – {start} to {end}</p>
       </div>
 
       {error && !loading && <ErrorMessage type="generic" message={error} onRetry={refetch} />}
@@ -109,7 +109,7 @@ export default function AccessAuditPage() {
               label: "Application",
               render: (_v, row) => {
                 const r = row as { appId: string; appName: string | null };
-                return <>{r.appName || "—"}</>;
+                return <>{r.appName || "–"}</>;
               },
             },
             { key: "appId", label: "Application ID" },

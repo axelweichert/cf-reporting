@@ -149,7 +149,7 @@ export async function fetchFirewallRuleMap(zoneId: string): Promise<Map<string, 
         }
       }
     } catch {
-      // Phase may not exist — ignore
+      // Phase may not exist – ignore
     }
   });
 
@@ -190,7 +190,7 @@ export async function cfRest<T = unknown>(path: string): Promise<T> {
   return json.result as T;
 }
 
-// Helper: Format country — handles both ISO codes ("US") and full names ("United States")
+// Helper: Format country – handles both ISO codes ("US") and full names ("United States")
 const countryDisplayNames = new Intl.DisplayNames(["en"], { type: "region" });
 
 // Build reverse map: full name → code (e.g. "United States" → "US")
@@ -218,12 +218,12 @@ export function formatCountry(input: string): string {
     }
   }
 
-  // Otherwise it's a full name — look up the code
+  // Otherwise it's a full name – look up the code
   const code = nameToCode.get(input.toLowerCase());
   return code ? `${input} (${code})` : input;
 }
 
-// Helper: Paginated REST fetch — auto-pages through all results
+// Helper: Paginated REST fetch – auto-pages through all results
 export async function cfRestPaginated<T = unknown>(path: string, perPage = 100): Promise<T[]> {
   const results: T[] = [];
   let page = 1;

@@ -17,7 +17,7 @@ async function getClient(): Promise<CloudflareClient | null> {
   return new CloudflareClient(token);
 }
 
-// Only allow POST to GraphQL — all other CF API operations are read-only GET
+// Only allow POST to GraphQL – all other CF API operations are read-only GET
 const ALLOWED_POST_PATHS = new Set(["/graphql"]);
 
 function validateOrigin(request: NextRequest): Response | null {
