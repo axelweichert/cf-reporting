@@ -4,6 +4,18 @@ import { sessionOptions } from "@/lib/session";
 import type { SessionData } from "@/types/cloudflare";
 import { verifyToken, detectCapabilities } from "@/lib/token";
 import { setCapabilitiesCache } from "@/lib/capabilities-cache";
+import { NextRequest } from "next/server";
+
+function validateOrigin(request: NextRequest): Response | null {
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host");
+  if (!origin || !host) return null;
+  const originHost = new URL(origin).host;
+  if (originHost !== host) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+  return null;
+}
 
 export async function GET() {
   const session = await getIronSession<SessionData>(
@@ -30,7 +42,10 @@ export async function GET() {
   });
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const originError = validateOrigin(request);
+  if (originError) return originError;
+
   const { token } = await request.json();
 
   if (!token || typeof token !== "string") {
@@ -72,7 +87,10 @@ export async function POST(request: Request) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
+  const originError = validateOrigin(request);
+  if (originError) return originError;
+
   const session = await getIronSession<SessionData>(
     await cookies(),
     sessionOptions

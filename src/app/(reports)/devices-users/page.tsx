@@ -16,11 +16,14 @@ import { Monitor, Users, ShieldCheck, Wifi, Laptop, AlertTriangle, Clock } from 
 import { formatDistanceToNow } from "date-fns";
 
 function RelativeTime({ date }: { date: string }) {
-  try {
-    return <>{formatDistanceToNow(new Date(date), { addSuffix: true })}</>;
-  } catch {
-    return <>Unknown</>;
-  }
+  const text = (() => {
+    try {
+      return formatDistanceToNow(new Date(date), { addSuffix: true });
+    } catch {
+      return "Unknown";
+    }
+  })();
+  return <>{text}</>;
 }
 
 function StatusBadge({ status }: { status: "active" | "inactive" | "stale" }) {

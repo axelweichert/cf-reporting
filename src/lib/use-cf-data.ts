@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 interface UseCfDataOptions<T> {
   fetcher: () => Promise<T>;
@@ -18,17 +18,19 @@ export function useCfData<T>({ fetcher, deps = [] }: UseCfDataOptions<T>): UseCf
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const reqId = useRef(0);
 
   const fetchData = useCallback(async () => {
+    const id = ++reqId.current;
     setLoading(true);
     setError(null);
     try {
       const result = await fetcher();
-      setData(result);
+      if (id === reqId.current) setData(result);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to fetch data");
+      if (id === reqId.current) setError(e instanceof Error ? e.message : "Failed to fetch data");
     } finally {
-      setLoading(false);
+      if (id === reqId.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);

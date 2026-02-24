@@ -1,7 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
-import React from "react";
+import { createContext, useContext, useState, useEffect, useCallback, createElement, type ReactNode } from "react";
 
 type Theme = "dark" | "light";
 
@@ -23,12 +22,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const stored = localStorage.getItem("cf-reporting-theme") as Theme | null;
-    if (stored) {
-      setTheme(stored);
+    if (stored && stored !== theme) {
       document.documentElement.classList.toggle("light", stored === "light");
       document.documentElement.classList.toggle("dark", stored === "dark");
+      // Deferred to avoid synchronous setState in effect body
+      queueMicrotask(() => setTheme(stored));
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
@@ -40,8 +40,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  return React.createElement(ThemeContext.Provider, {
+  return createElement(ThemeContext.Provider, {
     value: { theme, toggleTheme },
-    children,
-  });
+  }, children);
 }

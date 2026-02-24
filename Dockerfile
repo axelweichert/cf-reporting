@@ -12,10 +12,6 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Generate session secret at build time if not provided
-ARG SESSION_SECRET
-ENV SESSION_SECRET=${SESSION_SECRET:-}
-
 RUN npm run build
 
 # --- Runner ---

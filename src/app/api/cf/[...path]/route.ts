@@ -17,6 +17,20 @@ async function getClient(): Promise<CloudflareClient | null> {
   return new CloudflareClient(token);
 }
 
+// Only allow POST to GraphQL — all other CF API operations are read-only GET
+const ALLOWED_POST_PATHS = new Set(["/graphql"]);
+
+function validateOrigin(request: NextRequest): Response | null {
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host");
+  if (!origin || !host) return null; // Same-origin requests may omit origin
+  const originHost = new URL(origin).host;
+  if (originHost !== host) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+  return null;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
@@ -38,8 +52,8 @@ export async function GET(
     const data = await client.rest(fullPath);
     return Response.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "API request failed";
-    return Response.json({ error: message }, { status: 502 });
+    console.error("CF API GET error:", error instanceof Error ? error.message : error);
+    return Response.json({ error: "Upstream API request failed" }, { status: 502 });
   }
 }
 
@@ -47,6 +61,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
+  const originError = validateOrigin(request);
+  if (originError) return originError;
+
   const client = await getClient();
   if (!client) {
     return Response.json(
@@ -58,24 +75,19 @@ export async function POST(
   const { path } = await params;
   const cfPath = `/${path.join("/")}`;
 
-  // Special handling for GraphQL
-  if (cfPath === "/graphql") {
-    try {
-      const body = await request.json();
-      const data = await client.graphql(body.query, body.variables);
-      return Response.json(data);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "GraphQL request failed";
-      return Response.json({ error: message }, { status: 502 });
-    }
+  if (!ALLOWED_POST_PATHS.has(cfPath)) {
+    return Response.json(
+      { error: "POST not allowed for this path" },
+      { status: 403 }
+    );
   }
 
   try {
     const body = await request.json();
-    const data = await client.rest(cfPath, { method: "POST", body });
+    const data = await client.graphql(body.query, body.variables);
     return Response.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "API request failed";
-    return Response.json({ error: message }, { status: 502 });
+    console.error("CF API POST error:", error instanceof Error ? error.message : error);
+    return Response.json({ error: "Upstream API request failed" }, { status: 502 });
   }
 }

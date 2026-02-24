@@ -15,7 +15,6 @@ import {
   KeyRound,
   Eye,
   Monitor,
-  BarChart3,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
@@ -71,7 +70,6 @@ const navGroups: NavGroup[] = [
     label: "Reports",
     items: [
       { label: "Executive Report", href: "/executive", icon: <FileText size={18} /> },
-      { label: "Custom Report", href: "/custom", icon: <BarChart3 size={18} /> },
     ],
   },
 ];

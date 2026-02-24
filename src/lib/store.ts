@@ -1,7 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
-import React from "react";
+import { createContext, useContext, useState, useCallback, createElement, type ReactNode } from "react";
 import type { Permission, CloudflareAccount, CloudflareZone, TokenCapabilities } from "@/types/cloudflare";
 
 // ---- Filter Store ----
@@ -40,7 +39,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     setCustomEnd(end);
   }, []);
 
-  return React.createElement(FilterContext.Provider, {
+  return createElement(FilterContext.Provider, {
     value: {
       selectedAccount,
       setSelectedAccount,
@@ -54,8 +53,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
       customEnd,
       setCustomRange,
     },
-    children,
-  });
+  }, children);
 }
 
 // ---- Auth Store ----
@@ -92,10 +90,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCapabilities(null);
   }, []);
 
-  return React.createElement(AuthContext.Provider, {
+  return createElement(AuthContext.Provider, {
     value: { authenticated, capabilities, loading, setAuth, setLoading, logout },
-    children,
-  });
+  }, children);
 }
 
 // Helper: get date range from time range string

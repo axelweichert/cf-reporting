@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import type { TokenCapabilities } from "@/types/cloudflare";
 
 interface CacheEntry {
@@ -21,14 +22,7 @@ const sweepInterval = setInterval(() => {
 sweepInterval.unref();
 
 function hashToken(token: string): string {
-  // Simple hash for cache key — not cryptographic, just for keying
-  let hash = 0;
-  for (let i = 0; i < token.length; i++) {
-    const char = token.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash |= 0;
-  }
-  return `tk_${hash}`;
+  return createHash("sha256").update(token).digest("hex");
 }
 
 export function setCapabilitiesCache(token: string, capabilities: TokenCapabilities): void {

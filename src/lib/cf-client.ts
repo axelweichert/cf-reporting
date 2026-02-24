@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import type {
   CloudflareApiResponse,
   GraphQLResponse,
@@ -14,8 +15,12 @@ const cache = new Map<string, CacheEntry<unknown>>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const MAX_CACHE_ENTRIES = 500;
 
-function getCacheKey(method: string, path: string, body?: string): string {
-  return `${method}:${path}:${body || ""}`;
+function tokenFingerprint(token: string): string {
+  return createHash("sha256").update(token).digest("hex").slice(0, 16);
+}
+
+function getCacheKey(scope: string, method: string, path: string, body?: string): string {
+  return `${scope}:${method}:${path}:${body || ""}`;
 }
 
 function sweepExpired(): void {
@@ -58,22 +63,36 @@ function setCache<T>(key: string, data: T): void {
   cache.set(key, { data, timestamp: Date.now() });
 }
 
+const FETCH_TIMEOUT_MS = 30_000; // 30 seconds per request
+
 async function fetchWithRetry(
   url: string,
   init: RequestInit,
   retries = 3
 ): Promise<Response> {
   for (let attempt = 0; attempt < retries; attempt++) {
-    const response = await fetch(url, init);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-    if (response.status === 429) {
-      const retryAfter = response.headers.get("Retry-After");
-      const waitMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 2000 * (attempt + 1);
-      await new Promise((r) => setTimeout(r, waitMs));
-      continue;
+    try {
+      const response = await fetch(url, { ...init, signal: controller.signal });
+
+      if (response.status === 429) {
+        const retryAfter = response.headers.get("Retry-After");
+        const waitMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 2000 * (attempt + 1);
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
+
+      return response;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new Error(`Request timed out after ${FETCH_TIMEOUT_MS / 1000}s: ${url}`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeout);
     }
-
-    return response;
   }
 
   throw new Error("Max retries exceeded for rate-limited request");
@@ -81,9 +100,11 @@ async function fetchWithRetry(
 
 export class CloudflareClient {
   private token: string;
+  private scope: string;
 
   constructor(token: string) {
     this.token = token;
+    this.scope = tokenFingerprint(token);
   }
 
   private get headers(): HeadersInit {
@@ -102,7 +123,7 @@ export class CloudflareClient {
     const bodyStr = body ? JSON.stringify(body) : undefined;
 
     if (useCache && method === "GET") {
-      const cacheKey = getCacheKey(method, path);
+      const cacheKey = getCacheKey(this.scope, method, path);
       const cached = getCached<CloudflareApiResponse<T>>(cacheKey);
       if (cached) return cached;
     }
@@ -116,7 +137,7 @@ export class CloudflareClient {
     const data = (await response.json()) as CloudflareApiResponse<T>;
 
     if (useCache && method === "GET" && data.success) {
-      setCache(getCacheKey(method, path), data);
+      setCache(getCacheKey(this.scope, method, path), data);
     }
 
     return data;
@@ -155,7 +176,7 @@ export class CloudflareClient {
     variables?: Record<string, unknown>
   ): Promise<GraphQLResponse<T>> {
     const bodyStr = JSON.stringify({ query, variables });
-    const cacheKey = getCacheKey("GRAPHQL", "/graphql", bodyStr);
+    const cacheKey = getCacheKey(this.scope, "GRAPHQL", "/graphql", bodyStr);
 
     const cached = getCached<GraphQLResponse<T>>(cacheKey);
     if (cached) return cached;
