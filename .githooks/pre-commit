@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+#
+# Pre-commit hook: block commits containing sensitive or binary files.
+# Install: git config core.hooksPath .githooks
+#
+
+BLOCKED_PATTERNS=(
+  '\.png$'
+  '\.jpg$'
+  '\.jpeg$'
+  '\.gif$'
+  '\.bmp$'
+  '\.zip$'
+  '\.tar\.gz$'
+  '\.rar$'
+  '\.7z$'
+  '\.pdf$'
+  '\.mp4$'
+  '\.mov$'
+  '\.csv$'
+  '\.xlsx$'
+  '\.env[^.]*$'
+)
+
+# Files that are allowed exceptions (e.g. favicon in public/)
+ALLOWED_PATHS=(
+  '^public/'
+)
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACR)
+BLOCKED_FILES=()
+
+for file in $STAGED; do
+  for pattern in "${BLOCKED_PATTERNS[@]}"; do
+    if echo "$file" | grep -qiE "$pattern"; then
+      # Check if it's in an allowed path
+      allowed=false
+      for allow in "${ALLOWED_PATHS[@]}"; do
+        if echo "$file" | grep -qE "$allow"; then
+          allowed=true
+          break
+        fi
+      done
+      if [ "$allowed" = false ]; then
+        BLOCKED_FILES+=("$file")
+      fi
+    fi
+  done
+done
+
+if [ ${#BLOCKED_FILES[@]} -gt 0 ]; then
+  echo ""
+  echo "COMMIT BLOCKED: The following files match blocked patterns:"
+  echo ""
+  for f in "${BLOCKED_FILES[@]}"; do
+    echo "  - $f"
+  done
+  echo ""
+  echo "These file types should not be committed to the repo."
+  echo "Move them to /local/ (gitignored) instead."
+  echo ""
+  echo "To bypass this check (only if you're sure): git commit --no-verify"
+  exit 1
+fi
