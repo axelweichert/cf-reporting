@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CF Reporting",
+  title: "cf-reporting",
   description: "Open-source Cloudflare reporting dashboard",
 };
 

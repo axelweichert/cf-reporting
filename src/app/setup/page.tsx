@@ -51,7 +51,7 @@ export default function SetupPage() {
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-orange-500/10">
             <Shield className="h-8 w-8 text-orange-500" />
           </div>
-          <h1 className="text-2xl font-bold text-white">CF Reporting</h1>
+          <h1 className="text-2xl font-bold text-white">cf-reporting</h1>
           <p className="mt-2 text-sm text-zinc-400">
             Enter your Cloudflare API token to get started
           </p>

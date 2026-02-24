@@ -107,7 +107,7 @@ export default function Sidebar({ collapsed, permissions }: SidebarProps) {
     >
       <div className="flex h-14 items-center border-b border-zinc-800 px-4">
         {!collapsed && (
-          <span className="text-lg font-semibold text-white">CF Reporting</span>
+          <span className="text-lg font-semibold text-white">cf-reporting</span>
         )}
       </div>
 

@@ -113,7 +113,7 @@ export function exportHTML(title: string) {
 <body>
   ${clone.innerHTML}
   <div class="export-footer">
-    Exported from CF Reporting on ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+    Exported from cf-reporting on ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}
   </div>
 </body>
 </html>`;

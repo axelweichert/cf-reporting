@@ -1,10 +1,10 @@
 #!/bin/bash
-# CF Reporting — Development Environment Setup
+# cf-reporting — Development Environment Setup
 # Run this on your headless Ubuntu 24.04 before starting Claude Code
 
 set -e
 
-echo "=== CF Reporting Development Setup ==="
+echo "=== cf-reporting Development Setup ==="
 
 # 1. Ensure Node.js 20+ is installed
 if ! command -v node &> /dev/null || [[ $(node -v | cut -d. -f1 | tr -d 'v') -lt 20 ]]; then

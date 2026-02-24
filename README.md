@@ -1,4 +1,4 @@
-# CF Reporting
+# cf-reporting
 
 Open-source, self-hosted reporting dashboard for Cloudflare. Authenticate with your own API token and generate reports covering web security, Zero Trust, DNS, and executive summaries.
 
@@ -52,7 +52,7 @@ Open `http://localhost:3000`.
 
 ## SSL / HTTPS Deployment
 
-CF Reporting supports automatic Let's Encrypt SSL via a Caddy reverse proxy with Mozilla Intermediate cipher configuration.
+cf-reporting supports automatic Let's Encrypt SSL via a Caddy reverse proxy with Mozilla Intermediate cipher configuration.
 
 ### HTTP-01 Challenge (default)
 
