@@ -2,6 +2,7 @@
 # Requires CF_DNS_TOKEN with Zone > DNS > Edit permission
 {
 	email {$ACME_EMAIL}
+	default_sni {$DEFAULT_SNI}
 }
 
 {$SSL_DOMAIN} {
@@ -27,9 +28,8 @@
 	encode gzip
 }
 
-# Fallback for direct IP access — self-signed cert (browser will warn)
+# Fallback for direct IP access — serves domain cert (browser will show name mismatch warning)
 :443 {
 	reverse_proxy cf-reporting:3000
-	tls internal
 	encode gzip
 }

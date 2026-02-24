@@ -26,6 +26,9 @@ if [ -z "$SSL_DOMAIN" ]; then
     exit 1
 fi
 
+# Extract first domain for default_sni (fallback when clients connect by IP)
+export DEFAULT_SNI=$(echo "$SSL_DOMAIN" | cut -d',' -f1 | tr -d ' ')
+
 if [ -z "$ACME_EMAIL" ]; then
     echo "Error: ACME_EMAIL must be set for Let's Encrypt notifications" >&2
     exit 1
