@@ -284,6 +284,55 @@ export function splitDateRange(since: string, until: string): Array<{ since: str
   return chunks;
 }
 
+// Helper: Fetch Cloudflare One / Zero Trust plan info (cached per account)
+export interface ZtPlanInfo {
+  planName: string;
+  seatLimit: number;
+  features: string[];
+  isContract: boolean;
+}
+
+const planCache = new Map<string, ZtPlanInfo>();
+
+export async function fetchZtPlanInfo(accountId: string): Promise<ZtPlanInfo | null> {
+  if (planCache.has(accountId)) return planCache.get(accountId)!;
+
+  try {
+    const subs = await cfRest<Array<{
+      rate_plan: { id: string; public_name: string; is_contract: boolean };
+      component_values: Array<{ name: string; value: number }>;
+    }>>(`/accounts/${accountId}/subscriptions`);
+
+    const ztSub = subs.find((s) =>
+      s.rate_plan.id.startsWith("teams_") || s.rate_plan.public_name.toLowerCase().includes("zero trust")
+    );
+    if (!ztSub) return null;
+
+    const seatLimit = ztSub.component_values.find((c) => c.name === "users")?.value || 0;
+
+    const featureMap: Record<string, string> = {
+      browser_isolation_adv: "Browser Isolation",
+      dlp: "DLP",
+      casb: "CASB",
+      dex: "DEX",
+    };
+    const features = ztSub.component_values
+      .filter((c) => c.name !== "users" && c.value > 0 && featureMap[c.name])
+      .map((c) => featureMap[c.name]);
+
+    const info: ZtPlanInfo = {
+      planName: ztSub.rate_plan.public_name,
+      seatLimit,
+      features,
+      isContract: ztSub.rate_plan.is_contract,
+    };
+    planCache.set(accountId, info);
+    return info;
+  } catch {
+    return null;
+  }
+}
+
 export async function cfRestPaginated<T = unknown>(path: string, perPage = 100): Promise<T[]> {
   const results: T[] = [];
   let page = 1;

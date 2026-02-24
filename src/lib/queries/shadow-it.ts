@@ -1,5 +1,7 @@
 import { cfGraphQL } from "@/lib/use-cf-data";
 
+const BLOCKED_DECISION_IDS = new Set([9, 14]);
+
 // --- Helpers ---
 // matchedApplicationName returns JSON-array strings like '["Amazon Web Services"]'
 function parseAppName(raw: string): string {
@@ -33,6 +35,7 @@ export interface ShadowItData {
   categoryBreakdown: CategoryBreakdownItem[];
   usageTrends: AppUsageTrend[];
   trendAppNames: string[];
+  onlyBlockedLogged: boolean;
 }
 
 // --- Main fetch ---
@@ -41,9 +44,10 @@ export async function fetchShadowItData(
   since: string,
   until: string
 ): Promise<ShadowItData> {
-  const [discoveredApplications, categoryBreakdown] = await Promise.all([
+  const [discoveredApplications, categoryBreakdown, resolverDecisions] = await Promise.all([
     fetchDiscoveredApplications(accountTag, since, until),
     fetchCategoryBreakdown(accountTag, since, until),
+    fetchResolverDecisionsSummary(accountTag, since, until),
   ]);
 
   // Fetch usage trends for the top 5 discovered apps
@@ -52,11 +56,19 @@ export async function fetchShadowItData(
   const top5RawNames = top5.map((a) => a.rawName);
   const usageTrendsResult = await fetchUsageTrends(accountTag, since, until, top5RawNames, top5DisplayNames);
 
+  // Detect if only blocked queries are logged
+  const totalQueries = resolverDecisions.reduce((sum, d) => sum + d.count, 0);
+  const blockedQueries = resolverDecisions
+    .filter((d) => BLOCKED_DECISION_IDS.has(d.id))
+    .reduce((sum, d) => sum + d.count, 0);
+  const onlyBlockedLogged = totalQueries > 0 && blockedQueries === totalQueries && resolverDecisions.length === 1;
+
   return {
     discoveredApplications,
     categoryBreakdown,
     usageTrends: usageTrendsResult,
     trendAppNames: top5DisplayNames,
+    onlyBlockedLogged,
   };
 }
 
@@ -243,4 +255,45 @@ async function fetchUsageTrends(
   }
 
   return allPoints.sort((a, b) => (a.date as string).localeCompare(b.date as string));
+}
+
+async function fetchResolverDecisionsSummary(
+  accountTag: string,
+  since: string,
+  until: string
+): Promise<Array<{ id: number; count: number }>> {
+  const query = `{
+    viewer {
+      accounts(filter: { accountTag: "${accountTag}" }) {
+        gatewayResolverQueriesAdaptiveGroups(
+          limit: 20
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}" }
+          orderBy: [count_DESC]
+        ) {
+          count
+          dimensions { resolverDecision }
+        }
+      }
+    }
+  }`;
+
+  interface Group {
+    count: number;
+    dimensions: { resolverDecision: number };
+  }
+
+  try {
+    const data = await cfGraphQL<{
+      viewer: { accounts: Array<{ gatewayResolverQueriesAdaptiveGroups: Group[] }> };
+    }>(query);
+
+    const byDecision = new Map<number, number>();
+    for (const g of data.viewer.accounts[0]?.gatewayResolverQueriesAdaptiveGroups || []) {
+      const id = g.dimensions.resolverDecision;
+      byDecision.set(id, (byDecision.get(id) || 0) + g.count);
+    }
+    return Array.from(byDecision.entries()).map(([id, count]) => ({ id, count }));
+  } catch {
+    return [];
+  }
 }

@@ -1,4 +1,4 @@
-import { cfGraphQL, cfRestPaginated, fetchCategoryMap, fetchAppNameMap } from "@/lib/use-cf-data";
+import { cfGraphQL, cfRestPaginated, fetchCategoryMap, fetchAppNameMap, fetchZtPlanInfo, type ZtPlanInfo } from "@/lib/use-cf-data";
 
 // --- Types ---
 interface BlockedByPolicy {
@@ -39,6 +39,7 @@ export interface ZtSummaryData {
   topBlockedCategories: BlockedCategory[];
   accessLogins: AccessLoginSummary;
   fleet: FleetStats;
+  plan: ZtPlanInfo | null;
 }
 
 // --- Decision ID mapping (shared with gateway-dns) ---
@@ -58,7 +59,7 @@ export async function fetchZtSummaryData(
   since: string,
   until: string
 ): Promise<ZtSummaryData> {
-  const [resolverDecisions, blockedByPolicy, topBlockedCategories, accessLogins, fleet, categoryMap] =
+  const [resolverDecisions, blockedByPolicy, topBlockedCategories, accessLogins, fleet, categoryMap, plan] =
     await Promise.all([
       fetchResolverDecisions(accountTag, since, until),
       fetchBlockedByPolicy(accountTag, since, until),
@@ -66,6 +67,7 @@ export async function fetchZtSummaryData(
       fetchAccessLogins(accountTag, since, until),
       fetchFleetStats(accountTag),
       fetchCategoryMap(accountTag),
+      fetchZtPlanInfo(accountTag),
     ]);
 
   const totalDnsQueries = resolverDecisions.reduce((sum, d) => sum + d.count, 0);
@@ -84,6 +86,7 @@ export async function fetchZtSummaryData(
     })),
     accessLogins,
     fleet,
+    plan,
   };
 }
 

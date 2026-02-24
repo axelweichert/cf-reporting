@@ -1,4 +1,4 @@
-import { cfRest, cfRestPaginated } from "@/lib/use-cf-data";
+import { cfRest, cfRestPaginated, fetchZtPlanInfo, type ZtPlanInfo } from "@/lib/use-cf-data";
 
 // --- Types ---
 
@@ -45,6 +45,7 @@ export interface DevicesUsersData {
   postureError: string | null;
   osDistribution: OsDistribution[];
   warpVersionDistribution: WarpVersionDistribution[];
+  plan: ZtPlanInfo | null;
   stats: {
     totalDevices: number;
     activeDevices: number;
@@ -162,10 +163,11 @@ async function fetchPostureRules(
 export async function fetchDevicesUsersData(
   accountId: string
 ): Promise<DevicesUsersData> {
-  const [rawDevices, rawUsers, postureResult] = await Promise.all([
+  const [rawDevices, rawUsers, postureResult, plan] = await Promise.all([
     fetchDevices(accountId),
     fetchUsers(accountId),
     fetchPostureRules(accountId),
+    fetchZtPlanInfo(accountId),
   ]);
 
   // Build user email → device count map
@@ -239,6 +241,7 @@ export async function fetchDevicesUsersData(
     postureError: postureResult.error,
     osDistribution,
     warpVersionDistribution,
+    plan,
     stats: {
       totalDevices: devices.length,
       activeDevices,

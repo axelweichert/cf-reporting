@@ -73,6 +73,8 @@ export default function DevicesUsersPage() {
   }
 
   const stats = data?.stats;
+  const plan = data?.plan;
+  const seatUsage = Math.max(stats?.accessSeats || 0, stats?.gatewaySeats || 0);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -90,6 +92,37 @@ export default function DevicesUsersPage() {
             ? "No devices or users found. This may mean WARP hasn't been deployed or Access users haven't been configured yet."
             : "Your API token doesn't have Zero Trust permissions. Add the Zero Trust permission to see this report."}
         />
+      )}
+
+      {/* Plan info */}
+      {!loading && plan && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-zinc-400">Cloudflare One Plan</p>
+              <p className="text-lg font-semibold text-white">{plan.planName}</p>
+              {plan.features.length > 0 && (
+                <p className="mt-1 text-xs text-zinc-500">
+                  Includes: {plan.features.join(", ")}
+                </p>
+              )}
+            </div>
+            {plan.seatLimit > 0 && (
+              <div className="text-right">
+                <p className="text-sm text-zinc-400">Seat Usage</p>
+                <p className="text-lg font-semibold text-white">
+                  {seatUsage} <span className="text-sm font-normal text-zinc-500">/ {plan.seatLimit}</span>
+                </p>
+                <div className="mt-1 h-2 w-32 overflow-hidden rounded-full bg-zinc-800">
+                  <div
+                    className="h-full rounded-full bg-blue-500"
+                    style={{ width: `${Math.min(100, (seatUsage / plan.seatLimit) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Stat cards */}

@@ -12,6 +12,7 @@ import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber, SERIES_COLORS } from "@/components/charts/theme";
+import { Info } from "lucide-react";
 import { format } from "date-fns";
 
 export default function ShadowItPage() {
@@ -65,6 +66,17 @@ export default function ShadowItPage() {
           </>
         )}
       </div>
+
+      {data?.onlyBlockedLogged && (
+        <div className="flex items-start gap-2 rounded-md border border-blue-500/20 bg-blue-500/5 px-3 py-2">
+          <Info size={16} className="mt-0.5 shrink-0 text-blue-400" />
+          <p className="text-xs text-blue-300">
+            Only blocked queries appear in the analytics. SaaS discovery results may be incomplete because your Gateway activity logging may be set to &quot;Capture only blocked&quot;.
+            To discover all SaaS applications, change the setting under{" "}
+            <span className="font-medium">Traffic policies &gt; Traffic settings &gt; Traffic logging &gt; Log traffic activity</span> to &quot;Capture all&quot;.
+          </p>
+        </div>
+      )}
 
       {/* Usage Trends */}
       {(data?.trendAppNames || []).length > 0 && (
