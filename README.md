@@ -80,10 +80,32 @@ docker compose -f docker-compose.ssl.yml up -d
 
 | Variable | Description | Default |
 |---|---|---|
-| `SSL_DOMAIN` | Domain for the certificate (e.g. `reports.example.com`) | Required |
+| `SSL_DOMAIN` | Domain(s) for the certificate — supports comma-separated multiple domains and wildcards (see below) | Required |
 | `ACME_EMAIL` | Email for Let's Encrypt notifications | Required |
 | `ACME_CHALLENGE` | `http` for HTTP-01 or `dns` for DNS-01 via Cloudflare | `http` |
 | `CF_DNS_TOKEN` | Separate token for DNS-01 only (falls back to `CF_API_TOKEN`) | — |
+
+### Multiple Domains & Wildcards
+
+`SSL_DOMAIN` supports comma-separated multiple domains:
+
+```bash
+SSL_DOMAIN=reports.example.com, dashboard.example.com
+```
+
+Wildcard certificates are supported with DNS-01 challenge only:
+
+```bash
+SSL_DOMAIN=*.example.com
+ACME_CHALLENGE=dns
+```
+
+A wildcard covers subdomains but not the bare domain — use both if needed:
+
+```bash
+SSL_DOMAIN=example.com, *.example.com
+ACME_CHALLENGE=dns
+```
 
 Certificates are stored in the `caddy_data` Docker volume and persist across restarts. Caddy handles renewal automatically with zero downtime.
 
