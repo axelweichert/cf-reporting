@@ -23,3 +23,10 @@
 
 	encode gzip
 }
+
+# Fallback for direct IP access — self-signed cert (browser will warn)
+:443 {
+	reverse_proxy cf-reporting:3000
+	tls internal
+	encode gzip
+}
