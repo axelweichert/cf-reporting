@@ -81,7 +81,7 @@ export default function DonutChart({
               layout="vertical"
               align="right"
               verticalAlign="middle"
-              wrapperStyle={{ fontSize: 12 }}
+              wrapperStyle={{ fontSize: 12, paddingLeft: 16 }}
               iconType="circle"
               iconSize={8}
               formatter={(value: string) => (
