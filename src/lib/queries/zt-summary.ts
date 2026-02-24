@@ -17,6 +17,7 @@ interface AccessLoginSummary {
 }
 
 interface ResolverDecisionItem {
+  id: number;
   decision: string;
   count: number;
 }
@@ -46,10 +47,10 @@ const DECISION_NAMES: Record<number, string> = {
   2: "Allowed",
   9: "Blocked by Policy",
   14: "Blocked (Already Resolved)",
-  15: "Allowed (Not Blocked)",
+  15: "Allowed",
 };
 
-const BLOCKED_DECISIONS = new Set([9, 14]);
+const BLOCKED_DECISION_IDS = new Set([9, 14]);
 
 // --- Main fetch ---
 export async function fetchZtSummaryData(
@@ -69,7 +70,7 @@ export async function fetchZtSummaryData(
 
   const totalDnsQueries = resolverDecisions.reduce((sum, d) => sum + d.count, 0);
   const blockedDnsQueries = resolverDecisions
-    .filter((d) => d.decision.toLowerCase().includes("blocked"))
+    .filter((d) => BLOCKED_DECISION_IDS.has(d.id))
     .reduce((sum, d) => sum + d.count, 0);
 
   return {
@@ -124,6 +125,7 @@ async function fetchResolverDecisions(
   }
 
   return Array.from(byDecision.entries()).map(([id, count]) => ({
+    id,
     decision: DECISION_NAMES[id] || `Unknown (${id})`,
     count,
   }));

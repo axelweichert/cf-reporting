@@ -37,11 +37,11 @@ export interface GatewayDnsData {
 
 // --- Decision ID mapping ---
 const DECISION_NAMES: Record<number, string> = {
-  1: "allowedByPolicy",
-  2: "allowed",
-  9: "blockedByPolicy",
-  14: "blockedAlreadyResolved",
-  15: "allowedNotBlocked",
+  1: "Allowed by Policy",
+  2: "Allowed",
+  9: "Blocked by Policy",
+  14: "Blocked (Already Resolved)",
+  15: "Allowed",
 };
 
 // --- Main fetch ---
