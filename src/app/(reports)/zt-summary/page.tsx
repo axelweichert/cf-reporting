@@ -11,6 +11,7 @@ import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber } from "@/components/charts/theme";
+import { Monitor, Users, ShieldCheck, Laptop, AppWindow } from "lucide-react";
 
 export default function ZtSummaryPage() {
   const { capabilities } = useAuth();
@@ -36,8 +37,16 @@ export default function ZtSummaryPage() {
     );
   }
 
+  const fleet = data?.fleet;
+  const blockRate = data?.totalDnsQueries
+    ? ((data.blockedDnsQueries / data.totalDnsQueries) * 100).toFixed(1) + "%"
+    : "N/A";
+  const loginSuccessRate = data?.accessLogins.total
+    ? ((data.accessLogins.successful / data.accessLogins.total) * 100).toFixed(1) + "%"
+    : "N/A";
+
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className="mx-auto max-w-7xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-white">Zero Trust Executive Summary</h1>
         <p className="mt-1 text-sm text-zinc-400">{accountName} – {start} to {end}</p>
@@ -54,21 +63,68 @@ export default function ZtSummaryPage() {
         />
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {loading ? (
-          <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></>
-        ) : (
-          <>
-            <StatCard label="Total DNS Queries" value={formatNumber(data?.totalDnsQueries || 0)} />
-            <StatCard label="Blocked by Policy" value={formatNumber(data?.blockedByPolicy.reduce((s, b) => s + b.value, 0) || 0)} />
-            <StatCard label="Access Logins" value={formatNumber(data?.accessLogins.total || 0)} />
-            <StatCard label="Login Success Rate" value={data?.accessLogins.total ? `${((data.accessLogins.successful / data.accessLogins.total) * 100).toFixed(1)}%` : "N/A"} />
-          </>
-        )}
+      {/* Gateway DNS stats */}
+      <div>
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-zinc-500">Gateway DNS</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {loading ? (
+            <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></>
+          ) : (
+            <>
+              <StatCard label="Total DNS Queries" value={formatNumber(data?.totalDnsQueries || 0)} />
+              <StatCard label="Blocked Queries" value={formatNumber(data?.blockedDnsQueries || 0)} />
+              <StatCard label="Block Rate" value={blockRate} />
+              <StatCard label="Access Logins" value={formatNumber(data?.accessLogins.total || 0)} />
+            </>
+          )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ChartWrapper title="Blocked Requests by Policy" loading={loading}>
+      {/* Access stats */}
+      <div>
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-zinc-500">Access & Identity</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {loading ? (
+            <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></>
+          ) : (
+            <>
+              <StatCard label="Login Success Rate" value={loginSuccessRate} />
+              <StatCard label="Failed Logins" value={formatNumber((data?.accessLogins.total || 0) - (data?.accessLogins.successful || 0))} />
+              <StatCard label="Access Apps" value={formatNumber(fleet?.accessApps || 0)} icon={<AppWindow size={18} />} />
+              <StatCard label="Access Seats" value={formatNumber(fleet?.accessSeats || 0)} icon={<ShieldCheck size={18} />} />
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Fleet stats */}
+      <div>
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-zinc-500">Fleet & Devices</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          {loading ? (
+            <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></>
+          ) : (
+            <>
+              <StatCard label="Total Devices" value={formatNumber(fleet?.totalDevices || 0)} icon={<Monitor size={18} />} />
+              <StatCard label="Active (24h)" value={formatNumber(fleet?.activeDevices || 0)} icon={<Monitor size={18} />} />
+              <StatCard label="Total Users" value={formatNumber(fleet?.totalUsers || 0)} icon={<Users size={18} />} />
+              <StatCard label="Gateway Seats" value={formatNumber(fleet?.gatewaySeats || 0)} icon={<Laptop size={18} />} />
+              <StatCard label="Access Seats" value={formatNumber(fleet?.accessSeats || 0)} icon={<ShieldCheck size={18} />} />
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Charts */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <ChartWrapper title="Resolver Decisions" loading={loading}>
+          <DonutChart
+            data={(data?.resolverDecisions || []).map((d) => ({ name: d.decision, value: d.count }))}
+            valueFormatter={formatNumber}
+          />
+        </ChartWrapper>
+
+        <ChartWrapper title="Blocked by Policy" loading={loading}>
           <HorizontalBarChart
             data={(data?.blockedByPolicy || []).map((b) => ({ name: b.name || "Unknown", value: b.value }))}
             valueFormatter={formatNumber}
