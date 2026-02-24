@@ -118,8 +118,10 @@ async function fetchResolverDecisions(
     viewer: { accounts: Array<{ gatewayResolverQueriesAdaptiveGroups: Group[] }> };
   }>(query);
 
+  const groups = data.viewer.accounts[0]?.gatewayResolverQueriesAdaptiveGroups || [];
+
   const byDecision = new Map<number, number>();
-  for (const g of data.viewer.accounts[0]?.gatewayResolverQueriesAdaptiveGroups || []) {
+  for (const g of groups) {
     const decision = g.dimensions.resolverDecision;
     byDecision.set(decision, (byDecision.get(decision) || 0) + g.count);
   }
