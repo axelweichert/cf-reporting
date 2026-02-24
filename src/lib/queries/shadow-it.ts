@@ -110,10 +110,11 @@ async function fetchCategoryBreakdown(
     viewer {
       accounts(filter: { accountTag: "${accountTag}" }) {
         gatewayResolverQueriesAdaptiveGroups(
-          limit: 15
+          limit: 50
           filter: {
             datetime_geq: "${since}"
             datetime_lt: "${until}"
+            matchedApplicationName_neq: ""
           }
           orderBy: [count_DESC]
         ) {
