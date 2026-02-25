@@ -60,7 +60,7 @@ export default function SetupPage() {
             <Shield className="h-8 w-8 text-orange-500" />
           </div>
           <h1 className="text-2xl font-bold text-white">cf-reporting</h1>
-          <p className="mt-2 text-sm text-zinc-400">
+          <p className="mt-2 text-base text-zinc-400">
             Enter your Cloudflare API token to get started
           </p>
         </div>
@@ -90,7 +90,7 @@ export default function SetupPage() {
           </div>
 
           <div>
-            <label htmlFor="token" className="mb-1.5 block text-sm font-medium text-zinc-300">
+            <label htmlFor="token" className="mb-1.5 block text-sm font-medium text-zinc-200">
               {tokenLabel}
             </label>
             <div className="relative">
@@ -114,7 +114,7 @@ export default function SetupPage() {
               </button>
             </div>
             {tokenType === "account" && (
-              <p className="mt-1.5 text-xs text-zinc-500">
+              <p className="mt-1.5 text-sm text-zinc-400">
                 Account tokens are created under Manage Account &rarr; Account API Tokens in the Cloudflare dashboard.
               </p>
             )}
@@ -144,8 +144,8 @@ export default function SetupPage() {
         </form>
 
         <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <h3 className="mb-2 text-sm font-medium text-zinc-300">Required permissions</h3>
-          <ul className="space-y-1.5 text-xs text-zinc-500">
+          <h3 className="mb-2 text-sm font-medium text-zinc-200">Required permissions</h3>
+          <ul className="space-y-1.5 text-sm text-zinc-400">
             {[
               "Account Settings (read)",
               "Zone Analytics (read)",
@@ -156,14 +156,14 @@ export default function SetupPage() {
               "Gateway (read) – optional",
             ].map((p) => (
               <li key={p} className="flex items-center gap-2">
-                <CheckCircle2 size={12} className="text-zinc-600" />
+                <CheckCircle2 size={14} className="text-zinc-500" />
                 {p}
               </li>
             ))}
           </ul>
         </div>
 
-        <p className="mt-4 text-center text-xs text-zinc-600">
+        <p className="mt-4 text-center text-sm text-zinc-500">
           Your token is encrypted in an httpOnly cookie – it never reaches client-side JavaScript and is never stored on disk. The server only decrypts it in memory per request.
         </p>
       </div>

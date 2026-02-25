@@ -45,16 +45,28 @@ export async function verifyToken(
   }
 
   // User token: existing flow
-  const response = await client.rest<TokenVerifyResult>("/user/tokens/verify");
+  let response;
+  try {
+    response = await client.rest<TokenVerifyResult>("/user/tokens/verify");
+  } catch {
+    throw new Error(
+      "Could not reach Cloudflare to verify this token. " +
+      "Please check the token and try again."
+    );
+  }
 
   if (!response.success) {
+    const apiMsg = response.errors.map((e) => e.message).join(", ");
     throw new Error(
-      response.errors.map((e) => e.message).join(", ") || "Token verification failed"
+      "Invalid token. Please check that you entered a valid Cloudflare User API token." +
+      (apiMsg ? ` (${apiMsg})` : "")
     );
   }
 
   if (response.result.status !== "active") {
-    throw new Error(`Token is ${response.result.status}`);
+    throw new Error(
+      `Token is ${response.result.status}. Only active tokens can be used.`
+    );
   }
 
   return response.result;
