@@ -1,14 +1,50 @@
 import { CloudflareClient } from "./cf-client";
 import type {
   TokenVerifyResult,
+  TokenType,
   CloudflareAccount,
   CloudflareZone,
   Permission,
   TokenCapabilities,
 } from "@/types/cloudflare";
 
-export async function verifyToken(token: string): Promise<TokenVerifyResult> {
+export async function verifyToken(
+  token: string,
+  tokenType: TokenType = "user"
+): Promise<TokenVerifyResult> {
   const client = new CloudflareClient(token);
+
+  if (tokenType === "account") {
+    // Account tokens can't use /user/tokens/verify.
+    // Discover accounts first, then verify via the account-scoped endpoint.
+    const accounts = await discoverAccounts(client);
+    if (accounts.length === 0) {
+      throw new Error(
+        "Could not discover any accounts with this token. " +
+        "Ensure the token has Account Settings read permission."
+      );
+    }
+
+    const accountId = accounts[0].id;
+    const response = await client.rest<TokenVerifyResult>(
+      `/accounts/${accountId}/tokens/verify`
+    );
+
+    if (!response.success) {
+      throw new Error(
+        response.errors.map((e) => e.message).join(", ") ||
+          "Account token verification failed"
+      );
+    }
+
+    if (response.result.status !== "active") {
+      throw new Error(`Token is ${response.result.status}`);
+    }
+
+    return response.result;
+  }
+
+  // User token: existing flow
   const response = await client.rest<TokenVerifyResult>("/user/tokens/verify");
 
   if (!response.success) {

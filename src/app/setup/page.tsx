@@ -3,9 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/store";
+import type { TokenType } from "@/types/cloudflare";
 import { Shield, Eye, EyeOff, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 
 export default function SetupPage() {
+  const [tokenType, setTokenType] = useState<TokenType>("user");
   const [token, setToken] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -24,7 +26,7 @@ export default function SetupPage() {
       const res = await fetch("/api/auth/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: token.trim() }),
+        body: JSON.stringify({ token: token.trim(), tokenType }),
       });
 
       const data = await res.json();
@@ -44,6 +46,12 @@ export default function SetupPage() {
     }
   }
 
+  const tokenLabel = tokenType === "user" ? "User API Token" : "Account API Token";
+  const tokenPlaceholder =
+    tokenType === "user"
+      ? "Enter your Cloudflare User API token"
+      : "Enter your Cloudflare Account API token";
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-950 p-4">
       <div className="w-full max-w-md">
@@ -58,9 +66,32 @@ export default function SetupPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Token type toggle */}
+          <div className="flex rounded-lg border border-zinc-700 bg-zinc-900 p-1">
+            {(["user", "account"] as const).map((type) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => {
+                  setTokenType(type);
+                  setToken("");
+                  setError(null);
+                }}
+                className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                  tokenType === type
+                    ? "bg-zinc-700 text-white"
+                    : "text-zinc-400 hover:text-zinc-300"
+                }`}
+                disabled={loading}
+              >
+                {type === "user" ? "User API Token" : "Account API Token"}
+              </button>
+            ))}
+          </div>
+
           <div>
             <label htmlFor="token" className="mb-1.5 block text-sm font-medium text-zinc-300">
-              API Token
+              {tokenLabel}
             </label>
             <div className="relative">
               <input
@@ -68,7 +99,7 @@ export default function SetupPage() {
                 type={showToken ? "text" : "password"}
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
-                placeholder="Enter your Cloudflare API token"
+                placeholder={tokenPlaceholder}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 pr-10 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
                 disabled={loading}
                 autoFocus
@@ -82,6 +113,11 @@ export default function SetupPage() {
                 {showToken ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
+            {tokenType === "account" && (
+              <p className="mt-1.5 text-xs text-zinc-500">
+                Account tokens are created under Manage Account &rarr; Account API Tokens in the Cloudflare dashboard.
+              </p>
+            )}
           </div>
 
           {error && (

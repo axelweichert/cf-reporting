@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { sessionOptions } from "@/lib/session";
-import type { SessionData } from "@/types/cloudflare";
+import type { SessionData, TokenType } from "@/types/cloudflare";
 import { verifyToken, detectCapabilities } from "@/lib/token";
 import { setCapabilitiesCache } from "@/lib/capabilities-cache";
 import { NextRequest } from "next/server";
@@ -23,12 +23,21 @@ export async function GET() {
     sessionOptions
   );
 
-  // Check env var first
-  const envToken = process.env.CF_API_TOKEN;
-  if (envToken && !session.token) {
-    session.token = envToken;
-    session.tokenSource = "env";
-    await session.save();
+  // Check env vars first (CF_API_TOKEN = user token, CF_ACCOUNT_TOKEN = account token)
+  if (!session.token) {
+    const envUserToken = process.env.CF_API_TOKEN;
+    const envAccountToken = process.env.CF_ACCOUNT_TOKEN;
+    if (envUserToken) {
+      session.token = envUserToken;
+      session.tokenType = "user";
+      session.tokenSource = "env";
+      await session.save();
+    } else if (envAccountToken) {
+      session.token = envAccountToken;
+      session.tokenType = "account";
+      session.tokenSource = "env";
+      await session.save();
+    }
   }
 
   if (!session.token) {
@@ -46,7 +55,7 @@ export async function POST(request: NextRequest) {
   const originError = validateOrigin(request);
   if (originError) return originError;
 
-  const { token } = await request.json();
+  const { token, tokenType = "user" } = await request.json();
 
   if (!token || typeof token !== "string") {
     return Response.json(
@@ -55,8 +64,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const resolvedTokenType: TokenType =
+    tokenType === "account" ? "account" : "user";
+
   try {
-    await verifyToken(token);
+    await verifyToken(token, resolvedTokenType);
     const fullCapabilities = await detectCapabilities(token);
 
     const session = await getIronSession<SessionData>(
@@ -64,6 +76,7 @@ export async function POST(request: NextRequest) {
       sessionOptions
     );
     session.token = token;
+    session.tokenType = resolvedTokenType;
     session.tokenSource = "browser";
     // Store only lightweight data in the cookie
     session.capabilities = {

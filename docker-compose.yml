@@ -5,6 +5,8 @@ services:
       - "3000:3000"
     environment:
       - SESSION_SECRET=${SESSION_SECRET:-}
-      # Pre-configure API token (optional — skip browser setup)
+      # Pre-configure User API token (optional — skip browser setup)
       - CF_API_TOKEN=${CF_API_TOKEN:-}
+      # Pre-configure Account API token (alternative to CF_API_TOKEN)
+      - CF_ACCOUNT_TOKEN=${CF_ACCOUNT_TOKEN:-}
     restart: unless-stopped

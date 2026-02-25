@@ -15,6 +15,7 @@ services:
     environment:
       - SESSION_SECRET=${SESSION_SECRET}
       - CF_API_TOKEN=${CF_API_TOKEN:-}
+      - CF_ACCOUNT_TOKEN=${CF_ACCOUNT_TOKEN:-}
       - SECURE_COOKIES=true
     restart: unless-stopped
 

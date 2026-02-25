@@ -59,8 +59,11 @@ export interface SessionCapabilities {
   zoneCount: number;
 }
 
+export type TokenType = "user" | "account";
+
 export interface SessionData {
   token?: string;
+  tokenType?: TokenType;
   capabilities?: SessionCapabilities;
   tokenSource?: "env" | "browser";
 }
