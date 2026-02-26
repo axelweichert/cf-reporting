@@ -62,9 +62,11 @@ export default function BotsPage() {
       )}
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         {loading ? (
           <>
+            <CardSkeleton />
+            <CardSkeleton />
             <CardSkeleton />
             <CardSkeleton />
             <CardSkeleton />
@@ -73,7 +75,9 @@ export default function BotsPage() {
           <>
             <StatCard label="Automated Traffic" value={formatPercent(automatedPct)} />
             <StatCard label="Automated Requests" value={formatNumber(totalAutomated)} />
-            <StatCard label="Verified Bot Categories" value={data?.verifiedBotCategories.length || 0} />
+            <StatCard label="Verified Bots" value={formatNumber(data?.verifiedBotTotal || 0)} />
+            <StatCard label="Unverified Bots" value={formatNumber(data?.unverifiedBotTotal || 0)} />
+            <StatCard label="Bot Categories" value={data?.verifiedBotCategories.length || 0} />
           </>
         )}
       </div>
@@ -90,7 +94,25 @@ export default function BotsPage() {
         />
       </ChartWrapper>
 
-      {/* Two columns: Bot Decisions + Automated Traffic Trend */}
+      {/* B2: Bot Traffic Trend - Verified vs Unverified vs Human */}
+      <ChartWrapper title="Bot Traffic Trend" subtitle="Verified bots, unverified bots, and human traffic over time" loading={loading}>
+        <TimeSeriesChart
+          data={(data?.botTrend || []).map((p) => ({
+            ...p,
+            date: format(new Date(p.date), "MMM d HH:mm"),
+          }))}
+          xKey="date"
+          series={[
+            { key: "unverified", label: "Unverified Bots", color: "#ef4444" },
+            { key: "verified", label: "Verified Bots", color: "#10b981" },
+            { key: "human", label: "Human Traffic", color: "#3b82f6" },
+          ]}
+          stacked
+          yFormatter={formatNumber}
+        />
+      </ChartWrapper>
+
+      {/* Two columns: Bot Decisions + Verified vs Unverified Split */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <ChartWrapper title="Bot Management Decisions" loading={loading}>
           <DonutChart
@@ -102,18 +124,35 @@ export default function BotsPage() {
           />
         </ChartWrapper>
 
-        <ChartWrapper title="Automated Traffic Over Time" subtitle="Bot score < 30" loading={loading}>
-          <TimeSeriesChart
-            data={automatedTrafficFormatted}
-            xKey="date"
-            series={[
-              { key: "automated", label: "Automated", color: "#ef4444" },
-              { key: "total", label: "Total", color: "#3b82f6" },
+        {/* B3: Verified vs Unverified Bot Split */}
+        <ChartWrapper title="Verified vs Unverified Bots" subtitle="Bot score < 30" loading={loading}>
+          <DonutChart
+            data={[
+              { name: "Verified Bots", value: data?.verifiedBotTotal || 0, color: "#10b981" },
+              { name: "Unverified Bots", value: data?.unverifiedBotTotal || 0, color: "#ef4444" },
             ]}
-            yFormatter={formatNumber}
+            valueFormatter={formatNumber}
+            centerValue={
+              (data?.verifiedBotTotal || 0) + (data?.unverifiedBotTotal || 0) > 0
+                ? `${(((data?.verifiedBotTotal || 0) / ((data?.verifiedBotTotal || 0) + (data?.unverifiedBotTotal || 0))) * 100).toFixed(0)}%`
+                : "N/A"
+            }
+            centerLabel="Verified"
           />
         </ChartWrapper>
       </div>
+
+      <ChartWrapper title="Automated Traffic Over Time" subtitle="Bot score < 30 vs total requests" loading={loading}>
+        <TimeSeriesChart
+          data={automatedTrafficFormatted}
+          xKey="date"
+          series={[
+            { key: "automated", label: "Automated", color: "#ef4444" },
+            { key: "total", label: "Total", color: "#3b82f6" },
+          ]}
+          yFormatter={formatNumber}
+        />
+      </ChartWrapper>
 
       {/* Verified Bot Categories */}
       <ChartWrapper title="Verified Bot Categories" loading={loading}>

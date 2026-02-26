@@ -130,6 +130,39 @@ export default function GatewayDnsPage() {
         </ChartWrapper>
       </div>
 
+      {/* GD6: Policy and Location breakdown */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <ChartWrapper title="DNS Policies" subtitle="Queries by policy with block counts" loading={loading}>
+          <DataTable
+            columns={[
+              { key: "policyName", label: "Policy" },
+              { key: "total", label: "Total", align: "right", render: (v) => formatNumber(v as number) },
+              { key: "blocked", label: "Blocked", align: "right", render: (v) => {
+                const n = v as number;
+                return <span className={n > 0 ? "text-red-400" : "text-zinc-600"}>{formatNumber(n)}</span>;
+              }},
+            ]}
+            data={data?.policyBreakdown || []}
+            maxRows={10}
+          />
+        </ChartWrapper>
+
+        <ChartWrapper title="Queries by Location" subtitle="WARP locations / network profiles" loading={loading}>
+          <DataTable
+            columns={[
+              { key: "location", label: "Location" },
+              { key: "total", label: "Total", align: "right", render: (v) => formatNumber(v as number) },
+              { key: "blocked", label: "Blocked", align: "right", render: (v) => {
+                const n = v as number;
+                return <span className={n > 0 ? "text-red-400" : "text-zinc-600"}>{formatNumber(n)}</span>;
+              }},
+            ]}
+            data={data?.locationBreakdown || []}
+            maxRows={10}
+          />
+        </ChartWrapper>
+      </div>
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <ChartWrapper
           title="Top Blocked Domains"

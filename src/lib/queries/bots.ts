@@ -33,6 +33,13 @@ interface VerifiedBotCategory {
   count: number;
 }
 
+interface BotTrendPoint {
+  date: string;
+  verified: number;
+  unverified: number;
+  human: number;
+}
+
 export interface BotData {
   botScoreDistribution: BotScoreBucket[];
   botManagementDecisions: BotDecision[];
@@ -40,6 +47,9 @@ export interface BotData {
   topBotUserAgents: BotUserAgent[];
   botRequestsByPath: BotPath[];
   verifiedBotCategories: VerifiedBotCategory[];
+  botTrend: BotTrendPoint[];
+  verifiedBotTotal: number;
+  unverifiedBotTotal: number;
 }
 
 // --- Queries ---
@@ -58,6 +68,7 @@ export async function fetchBotData(
     topBotUserAgents,
     botRequestsByPath,
     verifiedBotCategories,
+    botTrend,
   ] = await Promise.all([
     fetchBotScoreDistribution(zoneTag, since, until).catch(() => []),
     fetchBotManagementDecisions(zoneTag, since, until).catch(() => []),
@@ -65,6 +76,7 @@ export async function fetchBotData(
     fetchTopBotUserAgents(zoneTag, since, until).catch(() => []),
     fetchBotRequestsByPath(zoneTag, since, until).catch(() => []),
     fetchVerifiedBotCategories(zoneTag, since, until).catch(() => []),
+    fetchBotTrend(zoneTag, since, until).catch(() => ({ trend: [], verified: 0, unverified: 0 })),
   ]);
 
   return {
@@ -74,6 +86,9 @@ export async function fetchBotData(
     topBotUserAgents,
     botRequestsByPath,
     verifiedBotCategories,
+    botTrend: botTrend.trend,
+    verifiedBotTotal: botTrend.verified,
+    unverifiedBotTotal: botTrend.unverified,
   };
 }
 
@@ -372,4 +387,87 @@ async function fetchVerifiedBotCategories(
     category: g.dimensions.verifiedBotCategory,
     count: g.count,
   }));
+}
+
+// B2 + B3: Bot trend with verified/unverified separation
+async function fetchBotTrend(
+  zoneTag: string,
+  since: string,
+  until: string
+): Promise<{ trend: BotTrendPoint[]; verified: number; unverified: number }> {
+  const query = `{
+    viewer {
+      zones(filter: { zoneTag: "${zoneTag}" }) {
+        verified: httpRequestsAdaptiveGroups(
+          limit: 500
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}", botScore_lt: 30, verifiedBotCategory_neq: "" }
+          orderBy: [datetimeHour_ASC]
+        ) {
+          count
+          dimensions { datetimeHour }
+        }
+        unverified: httpRequestsAdaptiveGroups(
+          limit: 500
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}", botScore_lt: 30, verifiedBotCategory: "" }
+          orderBy: [datetimeHour_ASC]
+        ) {
+          count
+          dimensions { datetimeHour }
+        }
+        human: httpRequestsAdaptiveGroups(
+          limit: 500
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}", botScore_geq: 30 }
+          orderBy: [datetimeHour_ASC]
+        ) {
+          count
+          dimensions { datetimeHour }
+        }
+      }
+    }
+  }`;
+
+  interface Group { count: number; dimensions: { datetimeHour: string } }
+
+  const data = await cfGraphQL<{
+    viewer: {
+      zones: Array<{
+        verified: Group[];
+        unverified: Group[];
+        human: Group[];
+      }>;
+    };
+  }>(query);
+
+  const zone = data.viewer.zones[0];
+  const byHour = new Map<string, BotTrendPoint>();
+
+  let totalVerified = 0;
+  let totalUnverified = 0;
+
+  for (const g of zone?.verified || []) {
+    const hour = g.dimensions.datetimeHour;
+    const pt = byHour.get(hour) || { date: hour, verified: 0, unverified: 0, human: 0 };
+    pt.verified += g.count;
+    totalVerified += g.count;
+    byHour.set(hour, pt);
+  }
+  for (const g of zone?.unverified || []) {
+    const hour = g.dimensions.datetimeHour;
+    const pt = byHour.get(hour) || { date: hour, verified: 0, unverified: 0, human: 0 };
+    pt.unverified += g.count;
+    totalUnverified += g.count;
+    byHour.set(hour, pt);
+  }
+  for (const g of zone?.human || []) {
+    const hour = g.dimensions.datetimeHour;
+    const pt = byHour.get(hour) || { date: hour, verified: 0, unverified: 0, human: 0 };
+    pt.human += g.count;
+    byHour.set(hour, pt);
+  }
+
+  return {
+    trend: Array.from(byHour.values()).sort((a, b) => a.date.localeCompare(b.date)),
+    verified: totalVerified,
+    unverified: totalUnverified,
+  };
 }

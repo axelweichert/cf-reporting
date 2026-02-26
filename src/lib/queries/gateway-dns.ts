@@ -27,12 +27,27 @@ interface BlockedByLocation {
   count: number;
 }
 
+interface PolicyBreakdown {
+  policyName: string;
+  allowed: number;
+  blocked: number;
+  total: number;
+}
+
+interface LocationBreakdown {
+  location: string;
+  total: number;
+  blocked: number;
+}
+
 export interface GatewayDnsData {
   queryVolume: DnsQueryTimeSeriesPoint[];
   topBlockedDomains: BlockedDomain[];
   blockedCategories: BlockedCategoryItem[];
   resolverDecisions: ResolverDecisionItem[];
   topBlockedLocations: BlockedByLocation[];
+  policyBreakdown: PolicyBreakdown[];
+  locationBreakdown: LocationBreakdown[];
 }
 
 // --- Decision ID mapping ---
@@ -50,7 +65,7 @@ export async function fetchGatewayDnsData(
   since: string,
   until: string
 ): Promise<GatewayDnsData> {
-  const [queryVolume, topBlockedDomains, blockedCategories, resolverDecisions, topBlockedLocations, categoryMap] =
+  const [queryVolume, topBlockedDomains, blockedCategories, resolverDecisions, topBlockedLocations, categoryMap, userBreakdown] =
     await Promise.all([
       fetchDnsQueryVolume(accountTag, since, until),
       fetchTopBlockedDomains(accountTag, since, until),
@@ -58,6 +73,7 @@ export async function fetchGatewayDnsData(
       fetchResolverDecisions(accountTag, since, until),
       fetchTopBlockedLocations(accountTag, since, until),
       fetchCategoryMap(accountTag),
+      fetchUserBreakdown(accountTag, since, until),
     ]);
 
   return {
@@ -69,6 +85,8 @@ export async function fetchGatewayDnsData(
     })),
     resolverDecisions,
     topBlockedLocations,
+    policyBreakdown: userBreakdown.policies,
+    locationBreakdown: userBreakdown.locations,
   };
 }
 
@@ -275,4 +293,84 @@ async function fetchTopBlockedLocations(
     location: g.dimensions.locationName || "Unknown Location",
     count: g.count,
   }));
+}
+
+// GD6: User-level breakdown (via policy and location)
+const BLOCKED_DECISIONS = new Set([9, 14]);
+
+async function fetchUserBreakdown(
+  accountTag: string,
+  since: string,
+  until: string
+): Promise<{ policies: PolicyBreakdown[]; locations: LocationBreakdown[] }> {
+  const query = `{
+    viewer {
+      accounts(filter: { accountTag: "${accountTag}" }) {
+        byPolicy: gatewayResolverQueriesAdaptiveGroups(
+          limit: 100
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}" }
+          orderBy: [count_DESC]
+        ) {
+          count
+          dimensions { policyName resolverDecision }
+        }
+        byLocation: gatewayResolverQueriesAdaptiveGroups(
+          limit: 50
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}" }
+          orderBy: [count_DESC]
+        ) {
+          count
+          dimensions { locationName resolverDecision }
+        }
+      }
+    }
+  }`;
+
+  interface PolicyGroup { count: number; dimensions: { policyName: string; resolverDecision: number } }
+  interface LocationGroup { count: number; dimensions: { locationName: string; resolverDecision: number } }
+
+  const data = await cfGraphQL<{
+    viewer: {
+      accounts: Array<{
+        byPolicy: PolicyGroup[];
+        byLocation: LocationGroup[];
+      }>;
+    };
+  }>(query);
+
+  const account = data.viewer.accounts[0];
+
+  // Aggregate policies
+  const policyMap = new Map<string, { allowed: number; blocked: number; total: number }>();
+  for (const g of account?.byPolicy || []) {
+    const name = g.dimensions.policyName || "No Policy";
+    const existing = policyMap.get(name) || { allowed: 0, blocked: 0, total: 0 };
+    existing.total += g.count;
+    if (BLOCKED_DECISIONS.has(g.dimensions.resolverDecision)) {
+      existing.blocked += g.count;
+    } else {
+      existing.allowed += g.count;
+    }
+    policyMap.set(name, existing);
+  }
+  const policies = Array.from(policyMap.entries())
+    .map(([policyName, stats]) => ({ policyName, ...stats }))
+    .sort((a, b) => b.total - a.total);
+
+  // Aggregate locations
+  const locationMap = new Map<string, { total: number; blocked: number }>();
+  for (const g of account?.byLocation || []) {
+    const name = g.dimensions.locationName || "Unknown Location";
+    const existing = locationMap.get(name) || { total: 0, blocked: 0 };
+    existing.total += g.count;
+    if (BLOCKED_DECISIONS.has(g.dimensions.resolverDecision)) {
+      existing.blocked += g.count;
+    }
+    locationMap.set(name, existing);
+  }
+  const locations = Array.from(locationMap.entries())
+    .map(([location, stats]) => ({ location, ...stats }))
+    .sort((a, b) => b.total - a.total);
+
+  return { policies, locations };
 }
