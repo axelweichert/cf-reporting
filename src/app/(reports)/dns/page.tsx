@@ -14,6 +14,7 @@ import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber, SERIES_COLORS } from "@/components/charts/theme";
 import { format } from "date-fns";
+import { Zap } from "lucide-react";
 
 export default function DnsPage() {
   const { capabilities } = useAuth();
@@ -53,6 +54,14 @@ export default function DnsPage() {
   };
 
   const nxdomainCount = data?.responseCodeBreakdown.find((r) => r.name === "NXDOMAIN")?.value || 0;
+  const activeRecords = data?.dnsRecords.filter((r) => r.status === "active").length || 0;
+  const unqueriedRecords = data?.dnsRecords.filter((r) => r.status === "unqueried").length || 0;
+
+  function fmtMs(ms: number): string {
+    if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
+    if (ms < 0.01) return `<0.01ms`;
+    return `${ms.toFixed(2)}ms`;
+  }
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -79,12 +88,40 @@ export default function DnsPage() {
         ) : (
           <>
             <StatCard label="Total DNS Queries" value={formatNumber(data?.totalQueries || 0)} />
-            <StatCard label="DNS Records" value={data?.dnsRecords.length || 0} />
+            <StatCard label="DNS Records" value={`${data?.dnsRecords.length || 0} (${activeRecords} active)`} />
             <StatCard label="NXDOMAIN Queries" value={formatNumber(nxdomainCount)} />
             <StatCard label="Query Types" value={data?.queryTypes.length || 0} />
           </>
         )}
       </div>
+
+      {/* DNS Resolution Latency */}
+      {!loading && data && (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <Zap size={16} className="text-blue-400" />
+            <h3 className="text-sm font-medium text-zinc-300">DNS Resolution Time</h3>
+          </div>
+          <div className="grid grid-cols-4 gap-3">
+            <div>
+              <p className="text-xs text-zinc-500">Avg</p>
+              <p className="text-lg font-semibold text-white">{fmtMs(data.latency.avg)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500">P50</p>
+              <p className="text-lg font-semibold text-white">{fmtMs(data.latency.p50)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500">P90</p>
+              <p className="text-lg font-semibold text-yellow-400">{fmtMs(data.latency.p90)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500">P99</p>
+              <p className="text-lg font-semibold text-red-400">{fmtMs(data.latency.p99)}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Query Volume by Type */}
       <ChartWrapper title="DNS Query Volume Over Time" subtitle="By record type" loading={loading}>
@@ -142,7 +179,11 @@ export default function DnsPage() {
       </ChartWrapper>
 
       {/* DNS Records Inventory */}
-      <ChartWrapper title="DNS Records Inventory" loading={loading}>
+      <ChartWrapper
+        title="DNS Records Inventory"
+        subtitle={unqueriedRecords > 0 ? `${unqueriedRecords} records had no queries this period` : undefined}
+        loading={loading}
+      >
         <DataTable
           columns={[
             { key: "type", label: "Type", width: "80px" },
@@ -158,6 +199,31 @@ export default function DnsPage() {
                   {v ? "Yes" : "No"}
                 </span>
               ),
+            },
+            {
+              key: "queryCount",
+              label: "Queries",
+              align: "right",
+              render: (v) => formatNumber(v as number),
+            },
+            {
+              key: "status",
+              label: "Health",
+              align: "center",
+              render: (v) => {
+                const styles = {
+                  active: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+                  unqueried: "bg-zinc-500/10 text-zinc-400 border-zinc-500/20",
+                  error: "bg-red-500/10 text-red-400 border-red-500/20",
+                };
+                const labels = { active: "Active", unqueried: "No Queries", error: "NXDOMAIN" };
+                const s = v as "active" | "unqueried" | "error";
+                return (
+                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${styles[s]}`}>
+                    {labels[s]}
+                  </span>
+                );
+              },
             },
           ]}
           data={data?.dnsRecords || []}
