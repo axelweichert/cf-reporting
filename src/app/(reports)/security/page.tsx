@@ -39,8 +39,14 @@ export default function SecurityPage() {
     );
   }
 
+  // S1: Merge traffic volume into WAF time series for correlation
+  const trafficByHour = new Map<string, number>();
+  for (const t of data?.trafficTimeSeries || []) {
+    trafficByHour.set(t.date, t.requests);
+  }
   const wafTimeSeriesFormatted = (data?.wafTimeSeries || []).map((p) => ({
     ...p,
+    requests: trafficByHour.get(p.date) || 0,
     date: format(new Date(p.date), "MMM d HH:mm"),
   }));
 
@@ -97,8 +103,8 @@ export default function SecurityPage() {
         )}
       </div>
 
-      {/* WAF Events Over Time */}
-      <ChartWrapper title="WAF Events Over Time" subtitle="By action type" loading={loading}>
+      {/* S1: WAF Events + Traffic Correlation */}
+      <ChartWrapper title="WAF Events Over Time" subtitle="By action type, with traffic overlay" loading={loading}>
         <TimeSeriesChart
           data={wafTimeSeriesFormatted}
           xKey="date"
@@ -108,6 +114,7 @@ export default function SecurityPage() {
             { key: "challenge", label: "Challenge", color: ACTION_COLORS.challenge },
             { key: "js_challenge", label: "JS Challenge", color: ACTION_COLORS.js_challenge },
             { key: "log", label: "Log", color: ACTION_COLORS.log },
+            { key: "requests", label: "Total Requests", color: "#6b7280", yAxisId: "right" },
           ]}
           stacked
           yFormatter={formatNumber}
@@ -131,6 +138,61 @@ export default function SecurityPage() {
           />
         </ChartWrapper>
       </div>
+
+      {/* S5: Attack Classification */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <ChartWrapper title="Attack Categories" subtitle="Blocked requests classified by type" loading={loading}>
+          <HorizontalBarChart
+            data={(data?.attackCategories || []).slice(0, 10).map((c) => ({
+              name: c.category,
+              value: c.count,
+            }))}
+            valueFormatter={formatNumber}
+          />
+        </ChartWrapper>
+
+        <ChartWrapper title="Blocked Request Methods" subtitle="HTTP methods of blocked requests" loading={loading}>
+          <DonutChart
+            data={(data?.httpMethodBreakdown || []).map((m) => ({
+              name: m.method,
+              value: m.count,
+            }))}
+            valueFormatter={formatNumber}
+          />
+        </ChartWrapper>
+      </div>
+
+      {/* S2: Rule Effectiveness */}
+      <ChartWrapper title="Rule Effectiveness" subtitle="Top rules by hit count with block rate analysis" loading={loading}>
+        <DataTable
+          columns={[
+            {
+              key: "ruleName",
+              label: "Rule",
+              render: (_v, row) => {
+                const r = row as { ruleName: string | null; description: string };
+                const displayName = r.ruleName || r.description;
+                return <>{displayName && displayName !== "No description" ? displayName : "–"}</>;
+              },
+            },
+            { key: "totalHits", label: "Total Hits", align: "right", render: (v) => formatNumber(v as number) },
+            { key: "blocks", label: "Blocks", align: "right", render: (v) => formatNumber(v as number) },
+            { key: "challenges", label: "Challenges", align: "right", render: (v) => formatNumber(v as number) },
+            {
+              key: "blockRate",
+              label: "Block Rate",
+              align: "right",
+              render: (v) => {
+                const rate = v as number;
+                const color = rate >= 90 ? "text-emerald-400" : rate >= 50 ? "text-yellow-400" : "text-red-400";
+                return <span className={color}>{rate.toFixed(1)}%</span>;
+              },
+            },
+          ]}
+          data={data?.ruleEffectiveness || []}
+          maxRows={15}
+        />
+      </ChartWrapper>
 
       {/* Firewall Rules: Block/Challenge vs Skip */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

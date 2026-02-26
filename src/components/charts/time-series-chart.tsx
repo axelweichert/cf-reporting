@@ -19,6 +19,7 @@ interface TimeSeriesChartProps {
     key: string;
     label: string;
     color?: string;
+    yAxisId?: "left" | "right";
   }>;
   height?: number;
   yFormatter?: (value: number) => string;
@@ -70,9 +71,11 @@ export default function TimeSeriesChart({
   yFormatter = formatNumber,
   stacked = false,
 }: TimeSeriesChartProps) {
+  const hasRightAxis = series.some((s) => s.yAxisId === "right");
+
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+      <AreaChart data={data} margin={{ top: 5, right: hasRightAxis ? 60 : 10, left: 0, bottom: 5 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} vertical={false} />
         <XAxis
           dataKey={xKey}
@@ -82,6 +85,7 @@ export default function TimeSeriesChart({
           axisLine={false}
         />
         <YAxis
+          yAxisId="left"
           stroke={CHART_COLORS.axis}
           tick={{ fontSize: 11 }}
           tickLine={false}
@@ -89,6 +93,18 @@ export default function TimeSeriesChart({
           tickFormatter={yFormatter}
           width={60}
         />
+        {hasRightAxis && (
+          <YAxis
+            yAxisId="right"
+            orientation="right"
+            stroke={CHART_COLORS.axis}
+            tick={{ fontSize: 11 }}
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={yFormatter}
+            width={60}
+          />
+        )}
         <Tooltip content={<CustomTooltip yFormatter={yFormatter} />} />
         {series.length > 1 && (
           <Legend
@@ -105,9 +121,11 @@ export default function TimeSeriesChart({
             name={s.label}
             stroke={s.color || SERIES_COLORS[i % SERIES_COLORS.length]}
             fill={s.color || SERIES_COLORS[i % SERIES_COLORS.length]}
-            fillOpacity={0.1}
-            strokeWidth={2}
-            stackId={stacked ? "stack" : undefined}
+            fillOpacity={s.yAxisId === "right" ? 0.05 : 0.1}
+            strokeWidth={s.yAxisId === "right" ? 1.5 : 2}
+            strokeDasharray={s.yAxisId === "right" ? "4 2" : undefined}
+            stackId={stacked && !s.yAxisId ? "stack" : undefined}
+            yAxisId={s.yAxisId || "left"}
             dot={false}
           />
         ))}
