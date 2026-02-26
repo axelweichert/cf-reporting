@@ -142,6 +142,37 @@ export default function DevicesUsersPage() {
         )}
       </div>
 
+      {/* Device Health Dashboard */}
+      {!loading && data && data.health.length > 0 && (
+        <div>
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-zinc-500">Device Health</h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {data.health.map((m) => {
+              const colors = {
+                good: { bar: "bg-emerald-500", text: "text-emerald-400" },
+                warning: { bar: "bg-yellow-500", text: "text-yellow-400" },
+                critical: { bar: "bg-red-500", text: "text-red-400" },
+              }[m.status];
+              return (
+                <div key={m.label} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-zinc-300">{m.label}</p>
+                    <span className={`text-lg font-bold ${colors.text}`}>{m.value}%</span>
+                  </div>
+                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-zinc-800">
+                    <div
+                      className={`h-full rounded-full ${colors.bar} transition-all`}
+                      style={{ width: `${Math.min(100, m.value)}%` }}
+                    />
+                  </div>
+                  <p className="mt-1.5 text-xs text-zinc-500">{m.detail}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Charts row */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <ChartWrapper title="OS Distribution" loading={loading}>

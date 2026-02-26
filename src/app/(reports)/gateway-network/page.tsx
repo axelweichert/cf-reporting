@@ -109,6 +109,19 @@ export default function GatewayNetworkPage() {
         </ChartWrapper>
       </div>
 
+      {/* Port/Service Breakdown */}
+      <ChartWrapper title="Top Destination Ports" subtitle="Traffic by destination port and service" loading={loading}>
+        <DataTable
+          columns={[
+            { key: "port", label: "Port", width: "80px" },
+            { key: "service", label: "Service" },
+            { key: "count", label: "Sessions", align: "right", render: (v) => formatNumber(v as number) },
+          ]}
+          data={data?.portBreakdown || []}
+          maxRows={15}
+        />
+      </ChartWrapper>
+
       <ChartWrapper title="Blocked Destinations" subtitle="Enriched with country, port, and protocol" loading={loading}>
         <DataTable
           columns={[

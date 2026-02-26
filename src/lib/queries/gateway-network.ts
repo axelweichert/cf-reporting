@@ -25,11 +25,18 @@ interface TransportProtocol {
   count: number;
 }
 
+interface PortServiceItem {
+  port: number;
+  service: string;
+  count: number;
+}
+
 export interface GatewayNetworkData {
   sessionsOverTime: L4SessionTimeSeriesPoint[];
   blockedDestinations: BlockedDestination[];
   topSourceCountries: SourceCountry[];
   transportProtocols: TransportProtocol[];
+  portBreakdown: PortServiceItem[];
 }
 
 // --- Transport protocol mapping ---
@@ -47,12 +54,13 @@ export async function fetchGatewayNetworkData(
   since: string,
   until: string
 ): Promise<GatewayNetworkData> {
-  const [sessionsOverTime, blockedDestinations, topSourceCountries, transportProtocols] =
+  const [sessionsOverTime, blockedDestinations, topSourceCountries, transportProtocols, portBreakdown] =
     await Promise.all([
       fetchSessionsOverTime(accountTag, since, until),
       fetchBlockedDestinations(accountTag, since, until),
       fetchTopSourceCountries(accountTag, since, until),
       fetchTransportProtocols(accountTag, since, until),
+      fetchPortBreakdown(accountTag, since, until),
     ]);
 
   return {
@@ -60,6 +68,7 @@ export async function fetchGatewayNetworkData(
     blockedDestinations,
     topSourceCountries,
     transportProtocols,
+    portBreakdown,
   };
 }
 
@@ -248,4 +257,60 @@ async function fetchTransportProtocols(
   return Array.from(byProtocol.entries())
     .map(([protocol, count]) => ({ protocol, count }))
     .sort((a, b) => b.count - a.count);
+}
+
+// Well-known port → service name mapping
+const PORT_SERVICES: Record<number, string> = {
+  22: "SSH", 25: "SMTP", 53: "DNS", 80: "HTTP", 110: "POP3",
+  143: "IMAP", 443: "HTTPS", 445: "SMB", 993: "IMAPS", 995: "POP3S",
+  1433: "MSSQL", 1521: "Oracle", 3306: "MySQL", 3389: "RDP",
+  5432: "PostgreSQL", 5900: "VNC", 6379: "Redis", 8080: "HTTP-Alt",
+  8443: "HTTPS-Alt", 27017: "MongoDB",
+};
+
+async function fetchPortBreakdown(
+  accountTag: string,
+  since: string,
+  until: string
+): Promise<PortServiceItem[]> {
+  const query = `{
+    viewer {
+      accounts(filter: { accountTag: "${accountTag}" }) {
+        gatewayL4SessionsAdaptiveGroups(
+          limit: 30
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}" }
+          orderBy: [count_DESC]
+        ) {
+          count
+          dimensions { destinationPort }
+        }
+      }
+    }
+  }`;
+
+  interface Group {
+    count: number;
+    dimensions: { destinationPort: number };
+  }
+
+  const data = await cfGraphQL<{
+    viewer: { accounts: Array<{ gatewayL4SessionsAdaptiveGroups: Group[] }> };
+  }>(query);
+
+  const byPort = new Map<number, number>();
+  for (const g of data.viewer.accounts[0]?.gatewayL4SessionsAdaptiveGroups || []) {
+    const port = g.dimensions.destinationPort;
+    if (port != null) {
+      byPort.set(port, (byPort.get(port) || 0) + g.count);
+    }
+  }
+
+  return Array.from(byPort.entries())
+    .map(([port, count]) => ({
+      port,
+      service: PORT_SERVICES[port] || (port < 1024 ? "System" : "Custom"),
+      count,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 15);
 }

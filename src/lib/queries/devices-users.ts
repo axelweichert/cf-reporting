@@ -41,6 +41,13 @@ interface WarpVersionDistribution {
   value: number;
 }
 
+export interface DeviceHealthMetric {
+  label: string;
+  value: number; // percentage 0-100
+  detail: string;
+  status: "good" | "warning" | "critical";
+}
+
 export interface DevicesUsersData {
   devices: DeviceItem[];
   users: UserItem[];
@@ -58,6 +65,7 @@ export interface DevicesUsersData {
     accessSeats: number;
     gatewaySeats: number;
   };
+  health: DeviceHealthMetric[];
 }
 
 // --- Helpers ---
@@ -290,6 +298,12 @@ export async function fetchDevicesUsersData(
   const accessSeats = users.filter((u) => u.accessSeat).length;
   const gatewaySeats = users.filter((u) => u.gatewaySeat).length;
 
+  // Compute device health metrics
+  const health = computeDeviceHealth(devices, users, {
+    totalDevices: devices.length, activeDevices, inactiveDevices, staleDevices,
+    totalUsers: users.length, accessSeats, gatewaySeats,
+  });
+
   return {
     devices,
     users,
@@ -307,5 +321,68 @@ export async function fetchDevicesUsersData(
       accessSeats,
       gatewaySeats,
     },
+    health,
   };
+}
+
+function computeDeviceHealth(
+  devices: DeviceItem[],
+  users: UserItem[],
+  stats: { totalDevices: number; activeDevices: number; inactiveDevices: number; staleDevices: number; totalUsers: number; accessSeats: number; gatewaySeats: number }
+): DeviceHealthMetric[] {
+  const metrics: DeviceHealthMetric[] = [];
+
+  if (stats.totalDevices > 0) {
+    // Active device rate
+    const activeRate = (stats.activeDevices / stats.totalDevices) * 100;
+    metrics.push({
+      label: "Device Activity",
+      value: Math.round(activeRate),
+      detail: `${stats.activeDevices} active in last 24h / ${stats.totalDevices} total`,
+      status: activeRate >= 60 ? "good" : activeRate >= 30 ? "warning" : "critical",
+    });
+
+    // Stale device rate (lower is better)
+    const staleRate = (stats.staleDevices / stats.totalDevices) * 100;
+    const staleHealthPct = 100 - Math.round(staleRate);
+    metrics.push({
+      label: "Fleet Freshness",
+      value: staleHealthPct,
+      detail: `${stats.staleDevices} devices inactive >30 days (${Math.round(staleRate)}%)`,
+      status: staleRate <= 10 ? "good" : staleRate <= 30 ? "warning" : "critical",
+    });
+
+    // WARP version diversity (fewer versions = better, more unified fleet)
+    const uniqueVersions = new Set(devices.map((d) => d.warpVersion)).size;
+    const versionScore = uniqueVersions <= 3 ? 100 : uniqueVersions <= 6 ? 70 : uniqueVersions <= 10 ? 40 : 20;
+    metrics.push({
+      label: "WARP Version Consistency",
+      value: versionScore,
+      detail: `${uniqueVersions} distinct WARP versions deployed`,
+      status: versionScore >= 70 ? "good" : versionScore >= 40 ? "warning" : "critical",
+    });
+
+    // OS diversity
+    const uniqueOses = new Set(devices.map((d) => d.os)).size;
+    metrics.push({
+      label: "OS Coverage",
+      value: Math.min(100, uniqueOses * 20),
+      detail: `${uniqueOses} operating systems in fleet`,
+      status: uniqueOses <= 4 ? "good" : uniqueOses <= 6 ? "warning" : "critical",
+    });
+  }
+
+  // User coverage (users with devices enrolled)
+  if (stats.totalUsers > 0) {
+    const usersWithDevices = users.filter((u) => u.deviceCount > 0).length;
+    const coverageRate = (usersWithDevices / stats.totalUsers) * 100;
+    metrics.push({
+      label: "User Enrollment",
+      value: Math.round(coverageRate),
+      detail: `${usersWithDevices} users with enrolled devices / ${stats.totalUsers} total`,
+      status: coverageRate >= 80 ? "good" : coverageRate >= 50 ? "warning" : "critical",
+    });
+  }
+
+  return metrics;
 }
