@@ -31,6 +31,12 @@ interface FleetStats {
   accessApps: number;
 }
 
+interface DailyActiveUsers {
+  date: string;
+  uniqueUsers: number;
+  logins: number;
+}
+
 export interface ZtSummaryData {
   totalDnsQueries: number;
   blockedDnsQueries: number;
@@ -40,6 +46,7 @@ export interface ZtSummaryData {
   accessLogins: AccessLoginSummary;
   fleet: FleetStats;
   plan: ZtPlanInfo | null;
+  dailyActiveUsers: DailyActiveUsers[];
 }
 
 // --- Decision ID mapping (shared with gateway-dns) ---
@@ -59,7 +66,7 @@ export async function fetchZtSummaryData(
   since: string,
   until: string
 ): Promise<ZtSummaryData> {
-  const [resolverDecisions, blockedByPolicy, topBlockedCategories, accessLogins, fleet, categoryMap, plan] =
+  const [resolverDecisions, blockedByPolicy, topBlockedCategories, accessLogins, fleet, categoryMap, plan, dailyActiveUsers] =
     await Promise.all([
       fetchResolverDecisions(accountTag, since, until),
       fetchBlockedByPolicy(accountTag, since, until),
@@ -68,6 +75,7 @@ export async function fetchZtSummaryData(
       fetchFleetStats(accountTag),
       fetchCategoryMap(accountTag),
       fetchZtPlanInfo(accountTag),
+      fetchDailyActiveUsers(accountTag, since, until),
     ]);
 
   const totalDnsQueries = resolverDecisions.reduce((sum, d) => sum + d.count, 0);
@@ -87,6 +95,7 @@ export async function fetchZtSummaryData(
     accessLogins,
     fleet,
     plan,
+    dailyActiveUsers,
   };
 }
 
@@ -324,5 +333,57 @@ async function fetchAccessAppsCount(accountTag: string): Promise<number> {
     return map.size;
   } catch {
     return 0;
+  }
+}
+
+// ZT1: Seat utilization trend — count unique users who logged in per day
+async function fetchDailyActiveUsers(
+  accountTag: string,
+  since: string,
+  until: string
+): Promise<DailyActiveUsers[]> {
+  const query = `{
+    viewer {
+      accounts(filter: { accountTag: "${accountTag}" }) {
+        accessLoginRequestsAdaptiveGroups(
+          limit: 1000
+          filter: {
+            datetime_geq: "${since}"
+            datetime_lt: "${until}"
+            isSuccessfulLogin: 1
+          }
+          orderBy: [date_ASC]
+        ) {
+          count
+          dimensions { date userUuid }
+        }
+      }
+    }
+  }`;
+
+  interface Group {
+    count: number;
+    dimensions: { date: string; userUuid: string };
+  }
+
+  try {
+    const data = await cfGraphQL<{
+      viewer: { accounts: Array<{ accessLoginRequestsAdaptiveGroups: Group[] }> };
+    }>(query);
+
+    const byDay = new Map<string, { users: Set<string>; logins: number }>();
+    for (const g of data.viewer.accounts[0]?.accessLoginRequestsAdaptiveGroups || []) {
+      const day = g.dimensions.date;
+      const entry = byDay.get(day) || { users: new Set<string>(), logins: 0 };
+      entry.users.add(g.dimensions.userUuid);
+      entry.logins += g.count;
+      byDay.set(day, entry);
+    }
+
+    return Array.from(byDay.entries())
+      .map(([date, entry]) => ({ date, uniqueUsers: entry.users.size, logins: entry.logins }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  } catch {
+    return [];
   }
 }

@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/store";
 import { useCfData } from "@/lib/use-cf-data";
 import { fetchZtSummaryData, type ZtSummaryData } from "@/lib/queries/zt-summary";
 import ChartWrapper from "@/components/charts/chart-wrapper";
+import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
 import { HorizontalBarChart } from "@/components/charts/bar-chart";
 import StatCard from "@/components/ui/stat-card";
@@ -12,6 +13,7 @@ import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber } from "@/components/charts/theme";
 import { Monitor, Users, ShieldCheck, Laptop, AppWindow, Info } from "lucide-react";
+import { format } from "date-fns";
 
 export default function ZtSummaryPage() {
   const { capabilities } = useAuth();
@@ -165,6 +167,24 @@ export default function ZtSummaryPage() {
           )}
         </div>
       </div>
+
+      {/* ZT1: Daily Active Users Trend */}
+      {(data?.dailyActiveUsers || []).length > 0 && (
+        <ChartWrapper title="Daily Active Users" subtitle="Unique users with successful logins per day" loading={loading}>
+          <TimeSeriesChart
+            data={(data?.dailyActiveUsers || []).map((p) => ({
+              ...p,
+              date: format(new Date(p.date), "MMM d"),
+            }))}
+            xKey="date"
+            series={[
+              { key: "uniqueUsers", label: "Unique Users", color: "#3b82f6" },
+              { key: "logins", label: "Total Logins", color: "#6b7280", yAxisId: "right" },
+            ]}
+            yFormatter={formatNumber}
+          />
+        </ChartWrapper>
+      )}
 
       {/* Charts */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

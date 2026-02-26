@@ -8,6 +8,7 @@ import { fetchGatewayDnsData, type GatewayDnsData } from "@/lib/queries/gateway-
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
+import { HorizontalBarChart } from "@/components/charts/bar-chart";
 import DataTable from "@/components/charts/data-table";
 import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
@@ -199,6 +200,54 @@ export default function GatewayDnsPage() {
           />
         </ChartWrapper>
       </div>
+
+      {/* GD1/ZT4: HTTP Inspection Section */}
+      {data?.httpInspection && (
+        <>
+          <div>
+            <h2 className="text-lg font-semibold text-white">HTTP Inspection</h2>
+            <p className="mt-1 text-sm text-zinc-400">
+              Gateway HTTP/HTTPS traffic inspected via WARP — {formatNumber(data.httpInspection.totalRequests)} total requests
+            </p>
+          </div>
+
+          <ChartWrapper title="HTTP Traffic Over Time" loading={loading}>
+            <TimeSeriesChart
+              data={(data.httpInspection.timeSeries || []).map((p) => ({
+                ...p,
+                date: format(new Date(p.date), "MMM d HH:mm"),
+              }))}
+              xKey="date"
+              series={[{ key: "count", label: "HTTP Requests", color: "#8b5cf6" }]}
+              yFormatter={formatNumber}
+            />
+          </ChartWrapper>
+
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <ChartWrapper title="HTTP Actions" loading={loading}>
+              <HorizontalBarChart
+                data={(data.httpInspection.byAction || []).map((a) => ({
+                  name: a.action,
+                  value: a.count,
+                  color: a.action === "block" ? "#ef4444" : a.action === "allow" ? "#10b981" : "#6b7280",
+                }))}
+                valueFormatter={formatNumber}
+              />
+            </ChartWrapper>
+
+            <ChartWrapper title="Top HTTP Hosts" subtitle="Most-visited hosts through Gateway" loading={loading}>
+              <DataTable
+                columns={[
+                  { key: "host", label: "Host" },
+                  { key: "count", label: "Requests", align: "right", render: (v) => formatNumber(v as number) },
+                ]}
+                data={data.httpInspection.topHosts || []}
+                maxRows={10}
+              />
+            </ChartWrapper>
+          </div>
+        </>
+      )}
     </div>
   );
 }

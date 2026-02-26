@@ -40,6 +40,13 @@ interface LocationBreakdown {
   blocked: number;
 }
 
+interface HttpInspectionData {
+  totalRequests: number;
+  byAction: Array<{ action: string; count: number }>;
+  topHosts: Array<{ host: string; count: number }>;
+  timeSeries: Array<{ date: string; count: number }>;
+}
+
 export interface GatewayDnsData {
   queryVolume: DnsQueryTimeSeriesPoint[];
   topBlockedDomains: BlockedDomain[];
@@ -48,6 +55,7 @@ export interface GatewayDnsData {
   topBlockedLocations: BlockedByLocation[];
   policyBreakdown: PolicyBreakdown[];
   locationBreakdown: LocationBreakdown[];
+  httpInspection: HttpInspectionData | null;
 }
 
 // --- Decision ID mapping ---
@@ -65,7 +73,7 @@ export async function fetchGatewayDnsData(
   since: string,
   until: string
 ): Promise<GatewayDnsData> {
-  const [queryVolume, topBlockedDomains, blockedCategories, resolverDecisions, topBlockedLocations, categoryMap, userBreakdown] =
+  const [queryVolume, topBlockedDomains, blockedCategories, resolverDecisions, topBlockedLocations, categoryMap, userBreakdown, httpInspection] =
     await Promise.all([
       fetchDnsQueryVolume(accountTag, since, until),
       fetchTopBlockedDomains(accountTag, since, until),
@@ -74,6 +82,7 @@ export async function fetchGatewayDnsData(
       fetchTopBlockedLocations(accountTag, since, until),
       fetchCategoryMap(accountTag),
       fetchUserBreakdown(accountTag, since, until),
+      fetchHttpInspection(accountTag, since, until),
     ]);
 
   return {
@@ -87,6 +96,7 @@ export async function fetchGatewayDnsData(
     topBlockedLocations,
     policyBreakdown: userBreakdown.policies,
     locationBreakdown: userBreakdown.locations,
+    httpInspection,
   };
 }
 
@@ -373,4 +383,88 @@ async function fetchUserBreakdown(
     .sort((a, b) => b.total - a.total);
 
   return { policies, locations };
+}
+
+// GD1/ZT4: Gateway HTTP inspection data
+async function fetchHttpInspection(
+  accountTag: string,
+  since: string,
+  until: string
+): Promise<HttpInspectionData | null> {
+  const query = `{
+    viewer {
+      accounts(filter: { accountTag: "${accountTag}" }) {
+        byAction: gatewayL7RequestsAdaptiveGroups(
+          limit: 10
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}" }
+          orderBy: [count_DESC]
+        ) {
+          count
+          dimensions { action }
+        }
+        topHosts: gatewayL7RequestsAdaptiveGroups(
+          limit: 15
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}" }
+          orderBy: [count_DESC]
+        ) {
+          count
+          dimensions { httpHost }
+        }
+        timeSeries: gatewayL7RequestsAdaptiveGroups(
+          limit: 500
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}" }
+          orderBy: [datetimeHour_ASC]
+        ) {
+          count
+          dimensions { datetimeHour }
+        }
+      }
+    }
+  }`;
+
+  interface ActionGroup { count: number; dimensions: { action: string } }
+  interface HostGroup { count: number; dimensions: { httpHost: string } }
+  interface TimeGroup { count: number; dimensions: { datetimeHour: string } }
+
+  try {
+    const data = await cfGraphQL<{
+      viewer: {
+        accounts: Array<{
+          byAction: ActionGroup[];
+          topHosts: HostGroup[];
+          timeSeries: TimeGroup[];
+        }>;
+      };
+    }>(query);
+
+    const account = data.viewer.accounts[0];
+    if (!account) return null;
+
+    const byAction = (account.byAction || []).map((g) => ({
+      action: g.dimensions.action || "unknown",
+      count: g.count,
+    }));
+
+    const totalRequests = byAction.reduce((sum, a) => sum + a.count, 0);
+    if (totalRequests === 0) return null;
+
+    const topHosts = (account.topHosts || []).map((g) => ({
+      host: g.dimensions.httpHost || "unknown",
+      count: g.count,
+    }));
+
+    // Aggregate time series by hour
+    const byHour = new Map<string, number>();
+    for (const g of account.timeSeries || []) {
+      const hour = g.dimensions.datetimeHour;
+      byHour.set(hour, (byHour.get(hour) || 0) + g.count);
+    }
+    const timeSeries = Array.from(byHour.entries())
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    return { totalRequests, byAction, topHosts, timeSeries };
+  } catch {
+    return null;
+  }
 }
