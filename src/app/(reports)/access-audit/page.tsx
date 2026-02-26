@@ -128,6 +128,67 @@ export default function AccessAuditPage() {
           maxRows={15}
         />
       </ChartWrapper>
+
+      {/* Failed Login Investigation */}
+      {(data?.failedLoginCount || 0) > 0 && (
+        <section className="space-y-4">
+          <h2 className="text-lg font-semibold text-white">Failed Login Investigation</h2>
+          <p className="text-sm text-zinc-400">
+            {formatNumber(data?.failedLoginCount || 0)} failed login attempts detected in this period.
+          </p>
+
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <ChartWrapper title="Failed Logins by Application" loading={loading}>
+              <DataTable
+                columns={[
+                  {
+                    key: "appName",
+                    label: "Application",
+                    render: (_v, row) => {
+                      const r = row as { appId: string; appName: string | null };
+                      return <>{r.appName || r.appId}</>;
+                    },
+                  },
+                  { key: "count", label: "Failures", align: "right" as const, render: (v) => formatNumber(v as number) },
+                ]}
+                data={data?.failedByApp || []}
+                maxRows={10}
+              />
+            </ChartWrapper>
+
+            <ChartWrapper title="Failed Logins by Country" loading={loading}>
+              <DataTable
+                columns={[
+                  { key: "country", label: "Country" },
+                  { key: "count", label: "Failures", align: "right" as const, render: (v) => formatNumber(v as number) },
+                ]}
+                data={data?.failedByCountry || []}
+                maxRows={10}
+              />
+            </ChartWrapper>
+          </div>
+
+          <ChartWrapper title="Failed Login Details" subtitle="By application, country, and identity provider" loading={loading}>
+            <DataTable
+              columns={[
+                {
+                  key: "appName",
+                  label: "Application",
+                  render: (_v, row) => {
+                    const r = row as { appId: string; appName: string | null };
+                    return <>{r.appName || r.appId}</>;
+                  },
+                },
+                { key: "country", label: "Country" },
+                { key: "identityProvider", label: "Identity Provider" },
+                { key: "count", label: "Failures", align: "right" as const, render: (v) => formatNumber(v as number) },
+              ]}
+              data={data?.failedLoginDetails || []}
+              maxRows={15}
+            />
+          </ChartWrapper>
+        </section>
+      )}
     </div>
   );
 }

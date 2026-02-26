@@ -26,6 +26,9 @@ interface PostureRule {
   name: string;
   type: string;
   description: string;
+  platform: string;
+  input: string;
+  deviceScope: number;
 }
 
 interface OsDistribution {
@@ -82,6 +85,19 @@ function formatOsName(platform: string | undefined, osVersion: string | undefine
   return osVersion ? `${platform} ${osVersion}` : platform;
 }
 
+function formatPlatformName(platform: string): string {
+  const names: Record<string, string> = {
+    windows: "Windows",
+    mac: "macOS",
+    linux: "Linux",
+    ios: "iOS",
+    android: "Android",
+    chromeos: "ChromeOS",
+    all: "All platforms",
+  };
+  return names[platform] || platform;
+}
+
 // --- API Types ---
 
 interface CfDevice {
@@ -117,6 +133,8 @@ interface CfPostureRule {
   name?: string;
   type?: string;
   description?: string;
+  match?: Array<{ platform?: string }>;
+  input?: Record<string, unknown>;
 }
 
 // --- Fetchers ---
@@ -201,12 +219,50 @@ export async function fetchDevicesUsersData(
     lastLogin: u.updated_at || u.created_at || null,
   }));
 
-  // Process posture rules
-  const postureRules: PostureRule[] = postureResult.rules.map((r) => ({
-    name: r.name || "Unnamed Rule",
-    type: r.type || "Unknown",
-    description: r.description || "",
-  }));
+  // Build platform -> device count map for posture scope
+  const platformDeviceCount = new Map<string, number>();
+  for (const d of devices) {
+    const p = d.os.toLowerCase();
+    if (p.includes("windows")) platformDeviceCount.set("windows", (platformDeviceCount.get("windows") || 0) + 1);
+    else if (p.includes("macos") || p.includes("mac")) platformDeviceCount.set("mac", (platformDeviceCount.get("mac") || 0) + 1);
+    else if (p.includes("linux")) platformDeviceCount.set("linux", (platformDeviceCount.get("linux") || 0) + 1);
+    else if (p.includes("ios")) platformDeviceCount.set("ios", (platformDeviceCount.get("ios") || 0) + 1);
+    else if (p.includes("android")) platformDeviceCount.set("android", (platformDeviceCount.get("android") || 0) + 1);
+    else if (p.includes("chrome")) platformDeviceCount.set("chromeos", (platformDeviceCount.get("chromeos") || 0) + 1);
+  }
+
+  // Process posture rules with enriched details
+  const postureRules: PostureRule[] = postureResult.rules.map((r) => {
+    const platform = r.match?.[0]?.platform || "all";
+    const deviceScope = platform === "all"
+      ? devices.length
+      : platformDeviceCount.get(platform) || 0;
+
+    // Format input as human-readable requirement
+    let input = "";
+    if (r.input) {
+      if (r.type === "os_version" && r.input.version) {
+        input = `${r.input.operator || ">="} ${r.input.version}`;
+      } else if (r.type === "application" && r.input.path) {
+        input = `${r.input.running ? "Running" : "Installed"}: ${String(r.input.path).split(/[/\\]/).pop()}`;
+      } else if (r.type === "disk_encryption") {
+        input = "Disk encryption enabled";
+      } else if (r.type === "file" && r.input.path) {
+        input = `File ${r.input.exists ? "exists" : "absent"}: ${String(r.input.path).split(/[/\\]/).pop()}`;
+      } else if (r.type === "intune") {
+        input = `Intune: ${r.input.compliance_status || "compliant"}`;
+      }
+    }
+
+    return {
+      name: r.name || "Unnamed Rule",
+      type: r.type || "Unknown",
+      description: r.description || "",
+      platform: formatPlatformName(platform),
+      input,
+      deviceScope,
+    };
+  });
 
   // Aggregate OS distribution
   const osCounts = new Map<string, number>();

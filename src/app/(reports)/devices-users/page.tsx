@@ -222,6 +222,7 @@ export default function DevicesUsersPage() {
       {/* Posture Rules */}
       <ChartWrapper
         title="Device Posture Rules"
+        subtitle={`${(data?.postureRules || []).length} rules`}
         loading={loading}
         error={data?.postureError || undefined}
         errorType={data?.postureError ? "permission" : undefined}
@@ -230,7 +231,14 @@ export default function DevicesUsersPage() {
           columns={[
             { key: "name", label: "Rule Name" },
             { key: "type", label: "Type" },
-            { key: "description", label: "Description" },
+            { key: "platform", label: "Platform" },
+            { key: "input", label: "Requirement" },
+            {
+              key: "deviceScope",
+              label: "Devices in Scope",
+              align: "right",
+              render: (v) => formatNumber(v as number),
+            },
           ]}
           data={data?.postureRules || []}
           maxRows={15}
