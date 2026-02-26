@@ -11,8 +11,9 @@ import DataTable from "@/components/charts/data-table";
 import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
-import { formatNumber } from "@/components/charts/theme";
+import { formatNumber, formatPercent } from "@/components/charts/theme";
 import { format } from "date-fns";
+import { AlertTriangle, AlertCircle, Info } from "lucide-react";
 
 export default function AccessAuditPage() {
   const { capabilities } = useAuth();
@@ -110,7 +111,30 @@ export default function AccessAuditPage() {
         </ChartWrapper>
       </div>
 
-      <ChartWrapper title="Access by Application" loading={loading}>
+      {/* Anomaly Alerts (A2) */}
+      {!loading && (data?.anomalies || []).length > 0 && (
+        <div className="space-y-2">
+          {data!.anomalies.map((a, i) => {
+            const styles = {
+              critical: { border: "border-red-500/30", bg: "bg-red-500/5", text: "text-red-300", icon: <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-400" /> },
+              warning: { border: "border-yellow-500/30", bg: "bg-yellow-500/5", text: "text-yellow-300", icon: <AlertCircle size={16} className="mt-0.5 shrink-0 text-yellow-400" /> },
+              info: { border: "border-blue-500/20", bg: "bg-blue-500/5", text: "text-blue-300", icon: <Info size={16} className="mt-0.5 shrink-0 text-blue-400" /> },
+            }[a.severity];
+            return (
+              <div key={i} className={`flex items-start gap-2 rounded-md border ${styles.border} ${styles.bg} px-3 py-2`}>
+                {styles.icon}
+                <div>
+                  <p className={`text-xs font-medium ${styles.text}`}>{a.title}</p>
+                  <p className="text-xs text-zinc-400">{a.description}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Per-App Success/Failure Breakdown (A3) */}
+      <ChartWrapper title="Access by Application" subtitle="Success and failure rates per application" loading={loading}>
         <DataTable
           columns={[
             {
@@ -118,13 +142,22 @@ export default function AccessAuditPage() {
               label: "Application",
               render: (_v, row) => {
                 const r = row as { appId: string; appName: string | null };
-                return <>{r.appName || "–"}</>;
+                return <>{r.appName || r.appId}</>;
               },
             },
-            { key: "appId", label: "Application ID" },
-            { key: "count", label: "Access Events", align: "right", render: (v) => formatNumber(v as number) },
+            { key: "successful", label: "Successful", align: "right", render: (v) => formatNumber(v as number) },
+            { key: "failed", label: "Failed", align: "right", render: (v) => {
+              const n = v as number;
+              return <span className={n > 0 ? "text-red-400" : "text-zinc-600"}>{formatNumber(n)}</span>;
+            }},
+            { key: "total", label: "Total", align: "right", render: (v) => formatNumber(v as number) },
+            { key: "failureRate", label: "Failure Rate", align: "right", render: (v) => {
+              const rate = v as number;
+              const color = rate > 50 ? "text-red-400" : rate > 20 ? "text-yellow-400" : "text-zinc-400";
+              return <span className={color}>{formatPercent(rate)}</span>;
+            }},
           ]}
-          data={data?.accessByApplication || []}
+          data={data?.appBreakdown || []}
           maxRows={15}
         />
       </ChartWrapper>
