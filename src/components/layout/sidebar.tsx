@@ -19,6 +19,8 @@ import {
   ChevronRight,
   Gauge,
   Lock,
+  ShieldEllipsis,
+  HeartPulse,
 } from "lucide-react";
 import { useState } from "react";
 import type { Permission } from "@/types/cloudflare";
@@ -51,6 +53,8 @@ const navGroups: NavGroup[] = [
       { label: "Bot Analysis", href: "/bots", icon: <Bot size={18} />, requiredPermission: "firewall" },
       { label: "Performance", href: "/performance", icon: <Gauge size={18} />, requiredPermission: "zone_analytics" },
       { label: "SSL / TLS", href: "/ssl", icon: <Lock size={18} />, requiredPermission: "zone_analytics" },
+      { label: "API Shield", href: "/api-shield", icon: <ShieldEllipsis size={18} />, requiredPermission: "zone_analytics" },
+      { label: "Origin Health", href: "/origin-health", icon: <HeartPulse size={18} />, requiredPermission: "zone_analytics" },
     ],
   },
   {
