@@ -10,6 +10,9 @@ interface L4SessionTimeSeriesPoint {
 interface BlockedDestination {
   ip: string;
   count: number;
+  country: string;
+  port: number | null;
+  protocol: string;
 }
 
 interface SourceCountry {
@@ -117,7 +120,7 @@ async function fetchBlockedDestinations(
     viewer {
       accounts(filter: { accountTag: "${accountTag}" }) {
         gatewayL4SessionsAdaptiveGroups(
-          limit: 10
+          limit: 20
           filter: {
             datetime_geq: "${since}"
             datetime_lt: "${until}"
@@ -126,7 +129,7 @@ async function fetchBlockedDestinations(
           orderBy: [count_DESC]
         ) {
           count
-          dimensions { destinationIp }
+          dimensions { destinationIp dstIpCountry destinationPort transport }
         }
       }
     }
@@ -134,17 +137,35 @@ async function fetchBlockedDestinations(
 
   interface Group {
     count: number;
-    dimensions: { destinationIp: string };
+    dimensions: { destinationIp: string; dstIpCountry: string; destinationPort: number; transport: string };
   }
 
   const data = await cfGraphQL<{
     viewer: { accounts: Array<{ gatewayL4SessionsAdaptiveGroups: Group[] }> };
   }>(query);
 
-  return (data.viewer.accounts[0]?.gatewayL4SessionsAdaptiveGroups || []).map((g) => ({
-    ip: g.dimensions.destinationIp || "unknown",
-    count: g.count,
-  }));
+  // Aggregate by IP, keeping the most common port/protocol/country
+  const byIp = new Map<string, { count: number; country: string; port: number | null; protocol: string }>();
+  for (const g of data.viewer.accounts[0]?.gatewayL4SessionsAdaptiveGroups || []) {
+    const ip = g.dimensions.destinationIp || "unknown";
+    const existing = byIp.get(ip);
+    if (!existing || g.count > existing.count) {
+      const raw = g.dimensions.transport != null ? String(g.dimensions.transport) : "";
+      byIp.set(ip, {
+        count: (existing?.count || 0) + g.count,
+        country: formatCountry(g.dimensions.dstIpCountry || ""),
+        port: g.dimensions.destinationPort || null,
+        protocol: TRANSPORT_NAMES[raw] || raw || "unknown",
+      });
+    } else {
+      existing.count += g.count;
+    }
+  }
+
+  return Array.from(byIp.entries())
+    .map(([ip, data]) => ({ ip, ...data }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
 }
 
 async function fetchTopSourceCountries(

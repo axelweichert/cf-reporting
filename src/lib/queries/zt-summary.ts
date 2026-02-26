@@ -37,6 +37,13 @@ interface DailyActiveUsers {
   logins: number;
 }
 
+export interface ComplianceMetric {
+  label: string;
+  value: number; // percentage 0-100
+  detail: string;
+  status: "good" | "warning" | "critical";
+}
+
 export interface ZtSummaryData {
   totalDnsQueries: number;
   blockedDnsQueries: number;
@@ -47,6 +54,7 @@ export interface ZtSummaryData {
   fleet: FleetStats;
   plan: ZtPlanInfo | null;
   dailyActiveUsers: DailyActiveUsers[];
+  compliance: ComplianceMetric[];
 }
 
 // --- Decision ID mapping (shared with gateway-dns) ---
@@ -83,6 +91,9 @@ export async function fetchZtSummaryData(
     .filter((d) => BLOCKED_DECISION_IDS.has(d.id))
     .reduce((sum, d) => sum + d.count, 0);
 
+  // Compute compliance metrics
+  const compliance = computeComplianceMetrics(fleet, accessLogins, blockedDnsQueries, totalDnsQueries);
+
   return {
     totalDnsQueries,
     blockedDnsQueries,
@@ -96,7 +107,100 @@ export async function fetchZtSummaryData(
     fleet,
     plan,
     dailyActiveUsers,
+    compliance,
   };
+}
+
+function computeComplianceMetrics(
+  fleet: FleetStats,
+  accessLogins: AccessLoginSummary,
+  blockedDns: number,
+  totalDns: number
+): ComplianceMetric[] {
+  const metrics: ComplianceMetric[] = [];
+
+  // Device enrollment rate
+  if (fleet.totalUsers > 0) {
+    const enrollRate = fleet.totalDevices > 0
+      ? Math.min(100, (fleet.totalDevices / fleet.totalUsers) * 100)
+      : 0;
+    const status = enrollRate >= 80 ? "good" : enrollRate >= 50 ? "warning" : "critical";
+    metrics.push({
+      label: "Device Enrollment",
+      value: Math.round(enrollRate),
+      detail: `${fleet.totalDevices} devices / ${fleet.totalUsers} users`,
+      status,
+    });
+  }
+
+  // Device activity rate
+  if (fleet.totalDevices > 0) {
+    const activeRate = (fleet.activeDevices / fleet.totalDevices) * 100;
+    const status = activeRate >= 70 ? "good" : activeRate >= 40 ? "warning" : "critical";
+    metrics.push({
+      label: "Active Devices",
+      value: Math.round(activeRate),
+      detail: `${fleet.activeDevices} active in last 24h / ${fleet.totalDevices} total`,
+      status,
+    });
+  }
+
+  // Seat utilization
+  if (fleet.gatewaySeats > 0 || fleet.accessSeats > 0) {
+    const totalSeats = Math.max(fleet.gatewaySeats, fleet.accessSeats);
+    const utilRate = totalSeats > 0 ? Math.min(100, (fleet.totalUsers / totalSeats) * 100) : 0;
+    const status = utilRate >= 70 ? "good" : utilRate >= 40 ? "warning" : "critical";
+    metrics.push({
+      label: "Seat Utilization",
+      value: Math.round(utilRate),
+      detail: `${fleet.totalUsers} users / ${totalSeats} seats`,
+      status,
+    });
+  }
+
+  // Access login success rate
+  if (accessLogins.total > 0) {
+    const successRate = (accessLogins.successful / accessLogins.total) * 100;
+    const status = successRate >= 90 ? "good" : successRate >= 70 ? "warning" : "critical";
+    metrics.push({
+      label: "Login Success Rate",
+      value: Math.round(successRate),
+      detail: `${accessLogins.successful} successful / ${accessLogins.total} total`,
+      status,
+    });
+  }
+
+  // DNS threat blocking rate
+  if (totalDns > 0) {
+    const blockRate = (blockedDns / totalDns) * 100;
+    // Higher block rate isn't necessarily better - it's informational
+    const status = blockRate <= 5 ? "good" : blockRate <= 15 ? "warning" : "critical";
+    metrics.push({
+      label: "DNS Threat Block Rate",
+      value: Math.round(blockRate * 10) / 10,
+      detail: `${formatNum(blockedDns)} blocked / ${formatNum(totalDns)} total queries`,
+      status,
+    });
+  }
+
+  // Access apps configured
+  if (fleet.accessApps > 0) {
+    const status = fleet.accessApps >= 5 ? "good" : fleet.accessApps >= 2 ? "warning" : "critical";
+    metrics.push({
+      label: "Access Apps",
+      value: fleet.accessApps,
+      detail: `${fleet.accessApps} applications protected by Access`,
+      status,
+    });
+  }
+
+  return metrics;
+}
+
+function formatNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
 }
 
 // --- Individual queries ---

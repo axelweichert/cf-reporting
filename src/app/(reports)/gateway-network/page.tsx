@@ -109,10 +109,13 @@ export default function GatewayNetworkPage() {
         </ChartWrapper>
       </div>
 
-      <ChartWrapper title="Blocked Destinations" loading={loading}>
+      <ChartWrapper title="Blocked Destinations" subtitle="Enriched with country, port, and protocol" loading={loading}>
         <DataTable
           columns={[
             { key: "ip", label: "Destination IP" },
+            { key: "country", label: "Country" },
+            { key: "port", label: "Port", align: "right", render: (v) => v ? String(v) : "—" },
+            { key: "protocol", label: "Protocol", width: "80px" },
             { key: "count", label: "Blocks", align: "right", render: (v) => formatNumber(v as number) },
           ]}
           data={data?.blockedDestinations || []}

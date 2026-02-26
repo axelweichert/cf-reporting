@@ -11,23 +11,26 @@ import DataTable from "@/components/charts/data-table";
 import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
-import { formatNumber } from "@/components/charts/theme";
+import { formatNumber, formatBytes } from "@/components/charts/theme";
 import { format } from "date-fns";
+import { Info } from "lucide-react";
 
 export default function DdosPage() {
   const { capabilities } = useAuth();
-  const { selectedZone, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedAccount, selectedZone, timeRange, customStart, customEnd } = useFilterStore();
   const zones = capabilities?.zones || [];
+  const accounts = capabilities?.accounts || [];
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
+  const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
   const { data, loading, error, errorType, refetch } = useCfData<DdosData>({
     fetcher: () => {
       if (!zoneId) throw new Error("No zone available");
-      return fetchDdosData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
+      return fetchDdosData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`, accountId || undefined);
     },
-    deps: [zoneId, start, end],
+    deps: [zoneId, start, end, accountId],
   });
 
   if (!zoneId) {
@@ -197,6 +200,43 @@ export default function DdosPage() {
           </ChartWrapper>
         </div>
       </section>
+
+      {/* ── L3/L4 DDoS Section ── */}
+      {!loading && data?.l34 && data.l34.attacks.length > 0 && (
+        <section className="space-y-4">
+          <h2 className="text-lg font-semibold text-white">L3/L4 DDoS Attacks</h2>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard label="Network Attacks" value={data.l34.totalAttacks} />
+            <StatCard label="Packets Dropped" value={formatNumber(data.l34.totalPacketsDropped)} />
+            <StatCard label="Data Dropped" value={formatBytes(data.l34.totalBitsDropped / 8)} />
+          </div>
+
+          <ChartWrapper title="L3/L4 Attack Log" subtitle="Network-layer DDoS attacks detected and mitigated" loading={false}>
+            <DataTable
+              columns={[
+                { key: "start", label: "Start", render: (v) => format(new Date(v as string), "MMM d HH:mm") },
+                { key: "attackVector", label: "Vector" },
+                { key: "ipProtocol", label: "Protocol", width: "80px" },
+                { key: "destinationPort", label: "Port", align: "right", width: "80px" },
+                { key: "mitigationType", label: "Mitigation" },
+                { key: "droppedPackets", label: "Dropped Pkts", align: "right", render: (v) => formatNumber(v as number) },
+              ]}
+              data={data.l34.attacks}
+              maxRows={15}
+            />
+          </ChartWrapper>
+        </section>
+      )}
+
+      {!loading && data && !data.l34 && (
+        <div className="flex items-start gap-2 rounded-md border border-zinc-700 bg-zinc-900/50 px-3 py-2">
+          <Info size={16} className="mt-0.5 shrink-0 text-zinc-400" />
+          <p className="text-xs text-zinc-400">
+            L3/L4 DDoS attack data requires Advanced DDoS Protection or Magic Transit. Only L7 (HTTP) DDoS mitigation data is shown above.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
