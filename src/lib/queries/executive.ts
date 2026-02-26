@@ -1,4 +1,5 @@
 import { cfGraphQL, formatCountry } from "@/lib/use-cf-data";
+import { formatSourceLabel } from "@/lib/source-labels";
 
 // --- Types ---
 interface TrafficSummary {
@@ -109,7 +110,7 @@ async function fetchSecuritySummary(zoneTag: string, since: string, until: strin
         }
         ddos: firewallEventsAdaptiveGroups(
           limit: 10
-          filter: { datetime_geq: "${since}", datetime_lt: "${until}", source_in: ["l7ddos"] }
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}", source_in: ["l7ddos"], action: "block" }
         ) {
           count
         }
@@ -140,7 +141,7 @@ async function fetchSecuritySummary(zoneTag: string, since: string, until: strin
   }
 
   const topThreatVectors = Array.from(vectorMap.entries())
-    .map(([name, count]) => ({ name, count }))
+    .map(([name, count]) => ({ name: formatSourceLabel(name), count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 5);
 

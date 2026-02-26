@@ -17,11 +17,15 @@ interface AttackedPath {
 }
 
 export interface DdosData {
+  // L7 DDoS section
   ddosEventsOverTime: DdosTimeSeriesPoint[];
-  attackVectors: AttackVector[];
-  rateLimitEventsOverTime: DdosTimeSeriesPoint[];
-  topAttackedPaths: AttackedPath[];
+  ddosAttackVectors: AttackVector[];
+  ddosTopPaths: AttackedPath[];
   totalDdosEvents: number;
+  // Rate Limiting section
+  rateLimitEventsOverTime: DdosTimeSeriesPoint[];
+  rateLimitMethods: AttackVector[];
+  rateLimitTopPaths: AttackedPath[];
   totalRateLimitEvents: number;
 }
 
@@ -31,32 +35,46 @@ export async function fetchDdosData(
   since: string,
   until: string
 ): Promise<DdosData> {
-  const [ddosEventsOverTime, attackVectors, rateLimitEventsOverTime, topAttackedPaths] =
-    await Promise.all([
-      fetchDdosEventsOverTime(zoneTag, since, until),
-      fetchAttackVectors(zoneTag, since, until),
-      fetchRateLimitEventsOverTime(zoneTag, since, until),
-      fetchTopAttackedPaths(zoneTag, since, until),
-    ]);
+  const [
+    ddosEventsOverTime,
+    ddosAttackVectors,
+    ddosTopPaths,
+    rateLimitEventsOverTime,
+    rateLimitMethods,
+    rateLimitTopPaths,
+  ] = await Promise.all([
+    fetchFilteredEventsOverTime(zoneTag, since, until, ["l7ddos"], "block"),
+    fetchFilteredAttackVectors(zoneTag, since, until, ["l7ddos"], "block"),
+    fetchFilteredTopPaths(zoneTag, since, until, ["l7ddos"], "block"),
+    fetchFilteredEventsOverTime(zoneTag, since, until, ["ratelimit"]),
+    fetchFilteredAttackVectors(zoneTag, since, until, ["ratelimit"]),
+    fetchFilteredTopPaths(zoneTag, since, until, ["ratelimit"]),
+  ]);
 
   const totalDdosEvents = ddosEventsOverTime.reduce((sum, p) => sum + p.count, 0);
   const totalRateLimitEvents = rateLimitEventsOverTime.reduce((sum, p) => sum + p.count, 0);
 
   return {
     ddosEventsOverTime,
-    attackVectors,
-    rateLimitEventsOverTime,
-    topAttackedPaths,
+    ddosAttackVectors,
+    ddosTopPaths,
     totalDdosEvents,
+    rateLimitEventsOverTime,
+    rateLimitMethods,
+    rateLimitTopPaths,
     totalRateLimitEvents,
   };
 }
 
-async function fetchDdosEventsOverTime(
+async function fetchFilteredEventsOverTime(
   zoneTag: string,
   since: string,
-  until: string
+  until: string,
+  sources: string[],
+  action?: string
 ): Promise<DdosTimeSeriesPoint[]> {
+  const sourceFilter = `source_in: [${sources.map((s) => `"${s}"`).join(", ")}]`;
+  const actionFilter = action ? `action: "${action}"` : "";
   const query = `{
     viewer {
       zones(filter: { zoneTag: "${zoneTag}" }) {
@@ -65,8 +83,8 @@ async function fetchDdosEventsOverTime(
           filter: {
             datetime_geq: "${since}"
             datetime_lt: "${until}"
-            action: "block"
-            source_in: ["l7ddos"]
+            ${actionFilter}
+            ${sourceFilter}
           }
           orderBy: [datetimeHour_ASC]
         ) {
@@ -92,11 +110,15 @@ async function fetchDdosEventsOverTime(
   }));
 }
 
-async function fetchAttackVectors(
+async function fetchFilteredAttackVectors(
   zoneTag: string,
   since: string,
-  until: string
+  until: string,
+  sources: string[],
+  action?: string
 ): Promise<AttackVector[]> {
+  const sourceFilter = `source_in: [${sources.map((s) => `"${s}"`).join(", ")}]`;
+  const actionFilter = action ? `action: "${action}"` : "";
   const query = `{
     viewer {
       zones(filter: { zoneTag: "${zoneTag}" }) {
@@ -105,7 +127,8 @@ async function fetchAttackVectors(
           filter: {
             datetime_geq: "${since}"
             datetime_lt: "${until}"
-            source_in: ["l7ddos"]
+            ${actionFilter}
+            ${sourceFilter}
           }
           orderBy: [count_DESC]
         ) {
@@ -131,50 +154,15 @@ async function fetchAttackVectors(
   }));
 }
 
-async function fetchRateLimitEventsOverTime(
+async function fetchFilteredTopPaths(
   zoneTag: string,
   since: string,
-  until: string
-): Promise<DdosTimeSeriesPoint[]> {
-  const query = `{
-    viewer {
-      zones(filter: { zoneTag: "${zoneTag}" }) {
-        firewallEventsAdaptiveGroups(
-          limit: 1000
-          filter: {
-            datetime_geq: "${since}"
-            datetime_lt: "${until}"
-            source_in: ["ratelimit"]
-          }
-          orderBy: [datetimeHour_ASC]
-        ) {
-          count
-          dimensions { datetimeHour }
-        }
-      }
-    }
-  }`;
-
-  interface Group {
-    count: number;
-    dimensions: { datetimeHour: string };
-  }
-
-  const data = await cfGraphQL<{
-    viewer: { zones: Array<{ firewallEventsAdaptiveGroups: Group[] }> };
-  }>(query);
-
-  return (data.viewer.zones[0]?.firewallEventsAdaptiveGroups || []).map((g) => ({
-    date: g.dimensions.datetimeHour,
-    count: g.count,
-  }));
-}
-
-async function fetchTopAttackedPaths(
-  zoneTag: string,
-  since: string,
-  until: string
+  until: string,
+  sources: string[],
+  action?: string
 ): Promise<AttackedPath[]> {
+  const sourceFilter = `source_in: [${sources.map((s) => `"${s}"`).join(", ")}]`;
+  const actionFilter = action ? `action: "${action}"` : "";
   const query = `{
     viewer {
       zones(filter: { zoneTag: "${zoneTag}" }) {
@@ -183,7 +171,8 @@ async function fetchTopAttackedPaths(
           filter: {
             datetime_geq: "${since}"
             datetime_lt: "${until}"
-            source_in: ["l7ddos", "ratelimit"]
+            ${actionFilter}
+            ${sourceFilter}
           }
           orderBy: [count_DESC]
         ) {

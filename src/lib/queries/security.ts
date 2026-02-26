@@ -1,4 +1,5 @@
 import { cfGraphQL, fetchFirewallRuleMap, formatCountry } from "@/lib/use-cf-data";
+import { formatSourceLabel } from "@/lib/source-labels";
 
 // --- Types ---
 interface WAFTimeSeriesPoint {
@@ -276,7 +277,7 @@ async function fetchSourceBreakdown(
   }>(query);
 
   return (data.viewer.zones[0]?.firewallEventsAdaptiveGroups || []).map((g) => ({
-    name: g.dimensions.source || "unknown",
+    name: formatSourceLabel(g.dimensions.source || "unknown"),
     value: g.count,
   }));
 }

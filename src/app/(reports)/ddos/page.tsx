@@ -38,18 +38,17 @@ export default function DdosPage() {
     );
   }
 
-  const ddosTimeFormatted = (data?.ddosEventsOverTime || []).map((p) => ({
-    ...p,
-    date: format(new Date(p.date), "MMM d HH:mm"),
-  }));
+  const formatTime = (points: Array<{ date: string; count: number }>) =>
+    points.map((p) => ({
+      ...p,
+      date: format(new Date(p.date), "MMM d HH:mm"),
+    }));
 
-  const rateLimitTimeFormatted = (data?.rateLimitEventsOverTime || []).map((p) => ({
-    ...p,
-    date: format(new Date(p.date), "MMM d HH:mm"),
-  }));
+  const ddosTime = formatTime(data?.ddosEventsOverTime || []);
+  const rlTime = formatTime(data?.rateLimitEventsOverTime || []);
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
+    <div className="mx-auto max-w-7xl space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-white">DDoS & Rate Limiting</h1>
         <p className="mt-1 text-sm text-zinc-400">
@@ -61,84 +60,143 @@ export default function DdosPage() {
         <ErrorMessage type={errorType} message={error} onRetry={refetch} />
       )}
 
-      {/* Stat Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {loading ? (
-          <>
-            <CardSkeleton />
-            <CardSkeleton />
-          </>
-        ) : (
-          <>
-            <StatCard label="L7 DDoS Events" value={formatNumber(data?.totalDdosEvents || 0)} />
-            <StatCard label="Rate Limit Events" value={formatNumber(data?.totalRateLimitEvents || 0)} />
-          </>
-        )}
-      </div>
+      {/* ── L7 DDoS Section ── */}
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-white">L7 DDoS Mitigation</h2>
 
-      {/* L7 DDoS Events Over Time */}
-      <ChartWrapper
-        title="L7 DDoS Events Over Time"
-        subtitle="Blocked requests from L7 DDoS mitigation"
-        loading={loading}
-      >
-        {ddosTimeFormatted.length > 0 ? (
-          <TimeSeriesChart
-            data={ddosTimeFormatted}
-            xKey="date"
-            series={[{ key: "count", label: "DDoS Events", color: "#ef4444" }]}
-            yFormatter={formatNumber}
-          />
-        ) : (
-          <p className="py-12 text-center text-sm text-zinc-500">
-            No L7 DDoS events detected in this period
-          </p>
-        )}
-      </ChartWrapper>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {loading ? (
+            <>
+              <CardSkeleton />
+              <CardSkeleton />
+            </>
+          ) : (
+            <>
+              <StatCard label="L7 DDoS Blocked" value={formatNumber(data?.totalDdosEvents || 0)} />
+              <StatCard
+                label="Attack Methods"
+                value={formatNumber((data?.ddosAttackVectors || []).length)}
+              />
+            </>
+          )}
+        </div>
 
-      {/* Rate Limiting Over Time */}
-      <ChartWrapper
-        title="Rate Limiting Events Over Time"
-        loading={loading}
-      >
-        {rateLimitTimeFormatted.length > 0 ? (
-          <TimeSeriesChart
-            data={rateLimitTimeFormatted}
-            xKey="date"
-            series={[{ key: "count", label: "Rate Limit Events", color: "#eab308" }]}
-            yFormatter={formatNumber}
-          />
-        ) : (
-          <p className="py-12 text-center text-sm text-zinc-500">
-            No rate limiting events detected in this period
-          </p>
-        )}
-      </ChartWrapper>
-
-      {/* Two columns: Attack Vectors + Top Attacked Paths */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ChartWrapper title="DDoS Attack Methods" loading={loading}>
-          <HorizontalBarChart
-            data={(data?.attackVectors || []).map((v) => ({
-              name: v.method,
-              value: v.count,
-            }))}
-            valueFormatter={formatNumber}
-            barColor="#ef4444"
-          />
+        <ChartWrapper
+          title="L7 DDoS Events Over Time"
+          subtitle="Blocked requests from L7 DDoS mitigation"
+          loading={loading}
+        >
+          {ddosTime.length > 0 ? (
+            <TimeSeriesChart
+              data={ddosTime}
+              xKey="date"
+              series={[{ key: "count", label: "DDoS Events", color: "#ef4444" }]}
+              yFormatter={formatNumber}
+            />
+          ) : (
+            <p className="py-12 text-center text-sm text-zinc-500">
+              No L7 DDoS events detected in this period
+            </p>
+          )}
         </ChartWrapper>
 
-        <ChartWrapper title="Top Attacked Paths" loading={loading}>
-          <DataTable
-            columns={[
-              { key: "path", label: "Path" },
-              { key: "count", label: "Events", align: "right", render: (v) => formatNumber(v as number) },
-            ]}
-            data={data?.topAttackedPaths || []}
-            maxRows={10}
-          />
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <ChartWrapper title="DDoS Attack Methods" loading={loading}>
+            {(data?.ddosAttackVectors || []).length > 0 ? (
+              <HorizontalBarChart
+                data={(data?.ddosAttackVectors || []).map((v) => ({
+                  name: v.method,
+                  value: v.count,
+                }))}
+                valueFormatter={formatNumber}
+                barColor="#ef4444"
+              />
+            ) : (
+              <p className="py-12 text-center text-sm text-zinc-500">
+                No DDoS attack methods detected
+              </p>
+            )}
+          </ChartWrapper>
+
+          <ChartWrapper title="Top DDoS Targeted Paths" loading={loading}>
+            <DataTable
+              columns={[
+                { key: "path", label: "Path" },
+                { key: "count", label: "Events", align: "right" as const, render: (v) => formatNumber(v as number) },
+              ]}
+              data={data?.ddosTopPaths || []}
+              maxRows={10}
+            />
+          </ChartWrapper>
+        </div>
+      </section>
+
+      {/* ── Rate Limiting Section ── */}
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-white">Rate Limiting</h2>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {loading ? (
+            <>
+              <CardSkeleton />
+              <CardSkeleton />
+            </>
+          ) : (
+            <>
+              <StatCard label="Rate Limit Events" value={formatNumber(data?.totalRateLimitEvents || 0)} />
+              <StatCard
+                label="Targeted Paths"
+                value={formatNumber((data?.rateLimitTopPaths || []).length)}
+              />
+            </>
+          )}
+        </div>
+
+        <ChartWrapper title="Rate Limiting Events Over Time" loading={loading}>
+          {rlTime.length > 0 ? (
+            <TimeSeriesChart
+              data={rlTime}
+              xKey="date"
+              series={[{ key: "count", label: "Rate Limit Events", color: "#eab308" }]}
+              yFormatter={formatNumber}
+            />
+          ) : (
+            <p className="py-12 text-center text-sm text-zinc-500">
+              No rate limiting events detected in this period
+            </p>
+          )}
         </ChartWrapper>
-      </div>
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <ChartWrapper title="Rate Limited Methods" loading={loading}>
+            {(data?.rateLimitMethods || []).length > 0 ? (
+              <HorizontalBarChart
+                data={(data?.rateLimitMethods || []).map((v) => ({
+                  name: v.method,
+                  value: v.count,
+                }))}
+                valueFormatter={formatNumber}
+                barColor="#eab308"
+              />
+            ) : (
+              <p className="py-12 text-center text-sm text-zinc-500">
+                No rate limited methods detected
+              </p>
+            )}
+          </ChartWrapper>
+
+          <ChartWrapper title="Top Rate Limited Paths" loading={loading}>
+            <DataTable
+              columns={[
+                { key: "path", label: "Path" },
+                { key: "count", label: "Events", align: "right" as const, render: (v) => formatNumber(v as number) },
+              ]}
+              data={data?.rateLimitTopPaths || []}
+              maxRows={10}
+            />
+          </ChartWrapper>
+        </div>
+      </section>
     </div>
   );
 }
