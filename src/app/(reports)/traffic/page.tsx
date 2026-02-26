@@ -95,16 +95,41 @@ export default function TrafficPage() {
         />
       </ChartWrapper>
 
-      {/* Bandwidth Over Time */}
-      <ChartWrapper title="Bandwidth Over Time" loading={loading}>
+      {/* Bandwidth: Cached vs Uncached */}
+      <ChartWrapper title="Bandwidth Over Time" subtitle="Cached vs origin" loading={loading}>
         <TimeSeriesChart
-          data={timeSeriesFormatted}
+          data={(data?.bandwidthByCache || []).map((p) => ({
+            ...p,
+            date: format(new Date(p.date), "MMM d HH:mm"),
+          }))}
           xKey="date"
           series={[
-            { key: "bandwidth", label: "Bandwidth", color: "#3b82f6" },
+            { key: "cached", label: "Cached (CDN)", color: "#10b981" },
+            { key: "uncached", label: "Origin", color: "#f97316" },
           ]}
+          stacked
           yFormatter={formatBytes}
         />
+      </ChartWrapper>
+
+      {/* Error Rate Trend */}
+      <ChartWrapper title="Error Rate Over Time" subtitle="4xx and 5xx responses" loading={loading}>
+        {(data?.errorTrend || []).length > 0 ? (
+          <TimeSeriesChart
+            data={(data?.errorTrend || []).map((p) => ({
+              ...p,
+              date: format(new Date(p.date), "MMM d HH:mm"),
+            }))}
+            xKey="date"
+            series={[
+              { key: "4xx", label: "4xx Client Errors", color: "#eab308" },
+              { key: "5xx", label: "5xx Server Errors", color: "#ef4444" },
+            ]}
+            yFormatter={formatNumber}
+          />
+        ) : (
+          <p className="py-12 text-center text-sm text-zinc-500">No errors detected in this period</p>
+        )}
       </ChartWrapper>
 
       {/* Two-column layout: Cache + Status Codes */}
@@ -128,6 +153,14 @@ export default function TrafficPage() {
           />
         </ChartWrapper>
       </div>
+
+      {/* Content Type Breakdown */}
+      <ChartWrapper title="Content Type Distribution" subtitle="By response content type" loading={loading}>
+        <HorizontalBarChart
+          data={(data?.contentTypes || []).slice(0, 10)}
+          valueFormatter={formatNumber}
+        />
+      </ChartWrapper>
 
       {/* Two-column: Top Paths + Top Countries */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

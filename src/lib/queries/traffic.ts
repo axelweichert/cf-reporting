@@ -30,6 +30,23 @@ interface CacheStats {
   ratio: number;
 }
 
+interface ContentTypeItem {
+  name: string;
+  value: number;
+}
+
+interface ErrorTrendPoint {
+  date: string;
+  "4xx": number;
+  "5xx": number;
+}
+
+interface BandwidthCachePoint {
+  date: string;
+  cached: number;
+  uncached: number;
+}
+
 export interface TrafficData {
   timeSeries: TimeSeriesPoint[];
   statusCodes: StatusCodeGroup[];
@@ -38,6 +55,9 @@ export interface TrafficData {
   cache: CacheStats;
   totalRequests: number;
   totalBandwidth: number;
+  contentTypes: ContentTypeItem[];
+  errorTrend: ErrorTrendPoint[];
+  bandwidthByCache: BandwidthCachePoint[];
 }
 
 // --- Queries ---
@@ -46,12 +66,15 @@ export async function fetchTrafficData(
   since: string,
   until: string
 ): Promise<TrafficData> {
-  const [timeSeries, statusCodes, topPaths, topCountries, cacheData] = await Promise.all([
+  const [timeSeries, statusCodes, topPaths, topCountries, cacheData, contentTypes, errorTrend, bandwidthByCache] = await Promise.all([
     fetchTimeSeries(zoneTag, since, until),
     fetchStatusCodes(zoneTag, since, until),
     fetchTopPaths(zoneTag, since, until),
     fetchTopCountries(zoneTag, since, until),
     fetchCacheStats(zoneTag, since, until),
+    fetchContentTypes(zoneTag, since, until),
+    fetchErrorTrend(zoneTag, since, until),
+    fetchBandwidthByCache(zoneTag, since, until),
   ]);
 
   const totalRequests = timeSeries.reduce((sum, p) => sum + p.requests, 0);
@@ -65,6 +88,9 @@ export async function fetchTrafficData(
     cache: cacheData,
     totalRequests,
     totalBandwidth,
+    contentTypes,
+    errorTrend,
+    bandwidthByCache,
   };
 }
 
@@ -265,4 +291,120 @@ async function fetchCacheStats(zoneTag: string, since: string, until: string): P
     total,
     ratio: total > 0 ? (hit / total) * 100 : 0,
   };
+}
+
+async function fetchContentTypes(zoneTag: string, since: string, until: string): Promise<ContentTypeItem[]> {
+  const query = `{
+    viewer {
+      zones(filter: { zoneTag: "${zoneTag}" }) {
+        httpRequestsAdaptiveGroups(
+          limit: 15
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}" }
+          orderBy: [count_DESC]
+        ) {
+          count
+          dimensions { edgeResponseContentTypeName }
+        }
+      }
+    }
+  }`;
+
+  interface Group {
+    count: number;
+    dimensions: { edgeResponseContentTypeName: string };
+  }
+
+  const data = await cfGraphQL<{ viewer: { zones: Array<{ httpRequestsAdaptiveGroups: Group[] }> } }>(query);
+
+  return (data.viewer.zones[0]?.httpRequestsAdaptiveGroups || []).map((g) => ({
+    name: g.dimensions.edgeResponseContentTypeName || "unknown",
+    value: g.count,
+  }));
+}
+
+async function fetchErrorTrend(zoneTag: string, since: string, until: string): Promise<ErrorTrendPoint[]> {
+  const query = `{
+    viewer {
+      zones(filter: { zoneTag: "${zoneTag}" }) {
+        httpRequestsAdaptiveGroups(
+          limit: 5000
+          filter: {
+            datetime_geq: "${since}"
+            datetime_lt: "${until}"
+            edgeResponseStatus_geq: 400
+          }
+          orderBy: [datetimeHour_ASC]
+        ) {
+          count
+          dimensions { datetimeHour edgeResponseStatus }
+        }
+      }
+    }
+  }`;
+
+  interface Group {
+    count: number;
+    dimensions: { datetimeHour: string; edgeResponseStatus: number };
+  }
+
+  const data = await cfGraphQL<{ viewer: { zones: Array<{ httpRequestsAdaptiveGroups: Group[] }> } }>(query);
+
+  const byHour = new Map<string, ErrorTrendPoint>();
+  for (const g of data.viewer.zones[0]?.httpRequestsAdaptiveGroups || []) {
+    const hour = g.dimensions.datetimeHour;
+    const existing = byHour.get(hour) || { date: hour, "4xx": 0, "5xx": 0 };
+    const cls = Math.floor(g.dimensions.edgeResponseStatus / 100);
+    if (cls === 4) existing["4xx"] += g.count;
+    else if (cls === 5) existing["5xx"] += g.count;
+    byHour.set(hour, existing);
+  }
+
+  return Array.from(byHour.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+async function fetchBandwidthByCache(zoneTag: string, since: string, until: string): Promise<BandwidthCachePoint[]> {
+  const chunks = splitDateRange(since, until);
+  const chunkResults = await Promise.all(
+    chunks.map(async (c) => {
+      const query = `{
+        viewer {
+          zones(filter: { zoneTag: "${zoneTag}" }) {
+            httpRequestsAdaptiveGroups(
+              limit: 1000
+              filter: { datetime_geq: "${c.since}", datetime_lt: "${c.until}" }
+              orderBy: [datetimeHour_ASC]
+            ) {
+              dimensions { datetimeHour cacheStatus }
+              sum { edgeResponseBytes }
+            }
+          }
+        }
+      }`;
+
+      interface Group {
+        dimensions: { datetimeHour: string; cacheStatus: string };
+        sum: { edgeResponseBytes: number };
+      }
+
+      const data = await cfGraphQL<{ viewer: { zones: Array<{ httpRequestsAdaptiveGroups: Group[] }> } }>(query);
+      return data.viewer.zones[0]?.httpRequestsAdaptiveGroups || [];
+    })
+  );
+
+  const byHour = new Map<string, BandwidthCachePoint>();
+  const CACHED_STATUSES = new Set(["hit", "stale", "revalidated"]);
+  for (const groups of chunkResults) {
+    for (const g of groups) {
+      const hour = g.dimensions.datetimeHour;
+      const existing = byHour.get(hour) || { date: hour, cached: 0, uncached: 0 };
+      if (CACHED_STATUSES.has(g.dimensions.cacheStatus.toLowerCase())) {
+        existing.cached += g.sum.edgeResponseBytes;
+      } else {
+        existing.uncached += g.sum.edgeResponseBytes;
+      }
+      byHour.set(hour, existing);
+    }
+  }
+
+  return Array.from(byHour.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
