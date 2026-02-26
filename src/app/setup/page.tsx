@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/store";
 import type { TokenType } from "@/types/cloudflare";
-import { Shield, Eye, EyeOff, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Shield, Eye, EyeOff, Loader2, AlertCircle, CheckCircle2, Sun, Moon } from "lucide-react";
+import { useTheme } from "@/lib/theme";
 
 export default function SetupPage() {
   const [tokenType, setTokenType] = useState<TokenType>("user");
@@ -14,6 +15,7 @@ export default function SetupPage() {
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
   const { setAuth, setLoading: setAuthLoading } = useAuth();
+  const { theme, toggleTheme } = useTheme();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -53,7 +55,14 @@ export default function SetupPage() {
       : "Enter your Cloudflare Account API token";
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-950 p-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-zinc-950 p-4">
+      <button
+        onClick={toggleTheme}
+        className="absolute right-4 top-4 rounded-lg p-2 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white"
+        aria-label="Toggle theme"
+      >
+        {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+      </button>
       <div className="w-full max-w-lg">
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-orange-500/10">
