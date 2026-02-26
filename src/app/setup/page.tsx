@@ -54,13 +54,13 @@ export default function SetupPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-950 p-4">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-lg">
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-orange-500/10">
             <Shield className="h-8 w-8 text-orange-500" />
           </div>
-          <h1 className="text-2xl font-bold text-white">cf-reporting</h1>
-          <p className="mt-2 text-base text-zinc-400">
+          <h1 className="text-3xl font-bold tracking-tight text-white">cf-reporting</h1>
+          <p className="mt-2 text-lg text-zinc-300">
             Enter your Cloudflare API token to get started
           </p>
         </div>
@@ -77,10 +77,10 @@ export default function SetupPage() {
                   setToken("");
                   setError(null);
                 }}
-                className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                className={`flex-1 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
                   tokenType === type
                     ? "bg-zinc-700 text-white"
-                    : "text-zinc-400 hover:text-zinc-300"
+                    : "text-zinc-400 hover:text-zinc-200"
                 }`}
                 disabled={loading}
               >
@@ -90,7 +90,7 @@ export default function SetupPage() {
           </div>
 
           <div>
-            <label htmlFor="token" className="mb-1.5 block text-sm font-medium text-zinc-200">
+            <label htmlFor="token" className="mb-1.5 block text-sm font-semibold text-zinc-100">
               {tokenLabel}
             </label>
             <div className="relative">
@@ -100,7 +100,7 @@ export default function SetupPage() {
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
                 placeholder={tokenPlaceholder}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 pr-10 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 pr-10 text-base text-zinc-100 placeholder:text-zinc-500 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
                 disabled={loading}
                 autoFocus
               />
@@ -121,7 +121,7 @@ export default function SetupPage() {
           </div>
 
           {error && (
-            <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-sm text-red-400">
+            <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-sm text-red-300">
               <AlertCircle size={16} className="mt-0.5 shrink-0" />
               {error}
             </div>
@@ -130,7 +130,7 @@ export default function SetupPage() {
           <button
             type="submit"
             disabled={loading || !token.trim()}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-orange-500 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-orange-500 px-4 py-3 text-base font-semibold text-white transition-colors hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? (
               <>
@@ -144,26 +144,29 @@ export default function SetupPage() {
         </form>
 
         <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <h3 className="mb-2 text-sm font-medium text-zinc-200">Required permissions</h3>
-          <ul className="space-y-1.5 text-sm text-zinc-400">
+          <h3 className="mb-3 text-sm font-semibold text-zinc-100">Required permissions</h3>
+          <ul className="space-y-2 text-sm text-zinc-300 leading-relaxed">
             {[
-              "Account Settings (read)",
-              "Zone Analytics (read)",
-              "Firewall Services (read)",
-              "DNS (read)",
-              "Zero Trust (read) – optional",
-              "Access: Apps and Policies (read) – optional",
-              "Gateway (read) – optional",
+              { name: "Account Settings (read)", optional: false },
+              { name: "Zone Analytics (read)", optional: false },
+              { name: "Firewall Services (read)", optional: false },
+              { name: "DNS (read)", optional: false },
+              { name: "Zero Trust (read)", optional: true },
+              { name: "Access: Apps and Policies (read)", optional: true },
+              { name: "Gateway (read)", optional: true },
             ].map((p) => (
-              <li key={p} className="flex items-center gap-2">
-                <CheckCircle2 size={14} className="text-zinc-500" />
-                {p}
+              <li key={p.name} className="flex items-center gap-2">
+                <CheckCircle2 size={14} className={p.optional ? "shrink-0 text-zinc-500" : "shrink-0 text-emerald-500/70"} />
+                <span>
+                  {p.name}
+                  {p.optional && <span className="ml-1 text-zinc-500">– optional</span>}
+                </span>
               </li>
             ))}
           </ul>
         </div>
 
-        <p className="mt-4 text-center text-sm text-zinc-500">
+        <p className="mt-4 text-center text-sm leading-relaxed text-zinc-400">
           Your token is encrypted in an httpOnly cookie – it never reaches client-side JavaScript and is never stored on disk. The server only decrypts it in memory per request.
         </p>
       </div>
