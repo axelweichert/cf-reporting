@@ -60,6 +60,81 @@ export interface TrafficData {
   bandwidthByCache: BandwidthCachePoint[];
 }
 
+// Lightweight summary for period-over-period comparison
+export interface TrafficSummaryStats {
+  totalRequests: number;
+  totalBandwidth: number;
+  cacheRatio: number;
+  errorRate4xx: number;
+  errorRate5xx: number;
+}
+
+export async function fetchTrafficSummaryStats(
+  zoneTag: string,
+  since: string,
+  until: string
+): Promise<TrafficSummaryStats> {
+  const query = `{
+    viewer {
+      zones(filter: { zoneTag: "${zoneTag}" }) {
+        total: httpRequestsAdaptiveGroups(
+          limit: 1
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}" }
+        ) {
+          count
+          sum { edgeResponseBytes }
+        }
+        cached: httpRequestsAdaptiveGroups(
+          limit: 1
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}", cacheStatus: "hit" }
+        ) {
+          count
+        }
+        errors4xx: httpRequestsAdaptiveGroups(
+          limit: 1
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}", edgeResponseStatus_geq: 400, edgeResponseStatus_lt: 500 }
+        ) {
+          count
+        }
+        errors5xx: httpRequestsAdaptiveGroups(
+          limit: 1
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}", edgeResponseStatus_geq: 500 }
+        ) {
+          count
+        }
+      }
+    }
+  }`;
+
+  interface Group { count: number; sum?: { edgeResponseBytes: number } }
+
+  const data = await cfGraphQL<{
+    viewer: {
+      zones: Array<{
+        total: Group[];
+        cached: Group[];
+        errors4xx: Group[];
+        errors5xx: Group[];
+      }>;
+    };
+  }>(query);
+
+  const zone = data.viewer.zones[0];
+  const totalRequests = (zone?.total || []).reduce((s, g) => s + g.count, 0);
+  const totalBandwidth = (zone?.total || []).reduce((s, g) => s + (g.sum?.edgeResponseBytes || 0), 0);
+  const cachedRequests = (zone?.cached || []).reduce((s, g) => s + g.count, 0);
+  const errors4xx = (zone?.errors4xx || []).reduce((s, g) => s + g.count, 0);
+  const errors5xx = (zone?.errors5xx || []).reduce((s, g) => s + g.count, 0);
+
+  return {
+    totalRequests,
+    totalBandwidth,
+    cacheRatio: totalRequests > 0 ? (cachedRequests / totalRequests) * 100 : 0,
+    errorRate4xx: totalRequests > 0 ? (errors4xx / totalRequests) * 100 : 0,
+    errorRate5xx: totalRequests > 0 ? (errors5xx / totalRequests) * 100 : 0,
+  };
+}
+
 // --- Queries ---
 export async function fetchTrafficData(
   zoneTag: string,

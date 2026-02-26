@@ -122,3 +122,16 @@ export function getDateRange(timeRange: string, customStart?: string | null, cus
     end: end.toISOString().split("T")[0],
   };
 }
+
+// Helper: get the previous period of the same duration for period-over-period comparison
+export function getPreviousPeriod(start: string, end: string): { start: string; end: string } {
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  const durationMs = endDate.getTime() - startDate.getTime();
+  const prevEnd = new Date(startDate.getTime());
+  const prevStart = new Date(startDate.getTime() - durationMs);
+  return {
+    start: prevStart.toISOString().split("T")[0],
+    end: prevEnd.toISOString().split("T")[0],
+  };
+}

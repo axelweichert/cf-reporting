@@ -14,7 +14,7 @@ import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber, SERIES_COLORS } from "@/components/charts/theme";
 import { format } from "date-fns";
-import { Zap } from "lucide-react";
+import { Zap, AlertCircle } from "lucide-react";
 
 export default function DnsPage() {
   const { capabilities } = useAuth();
@@ -229,6 +229,48 @@ export default function DnsPage() {
           data={data?.dnsRecords || []}
         />
       </ChartWrapper>
+
+      {/* D4: Stale/Unused Record Detection */}
+      {!loading && data && data.staleRecords.totalStale > 0 && (
+        <section className="space-y-4">
+          <div className="flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/5 px-3 py-2">
+            <AlertCircle size={16} className="mt-0.5 shrink-0 text-yellow-400" />
+            <div>
+              <p className="text-xs font-medium text-yellow-300">
+                {data.staleRecords.totalStale} potentially stale DNS record{data.staleRecords.totalStale !== 1 ? "s" : ""} detected
+              </p>
+              <p className="text-xs text-zinc-400">
+                These records received no queries (or only NXDOMAIN responses) during the selected period.
+                {data.staleRecords.byType.length > 0 && (
+                  <> By type: {data.staleRecords.byType.map((t) => `${t.type} (${t.count})`).join(", ")}.</>
+                )}
+              </p>
+            </div>
+          </div>
+
+          {data.staleRecords.oldestUnqueried.length > 0 && (
+            <ChartWrapper title="Oldest Unqueried Records" subtitle="Candidates for cleanup, sorted by last modified" loading={false}>
+              <DataTable
+                columns={[
+                  { key: "name", label: "Record Name" },
+                  { key: "type", label: "Type", width: "80px" },
+                  {
+                    key: "daysSinceModified",
+                    label: "Last Modified",
+                    align: "right",
+                    render: (v) => {
+                      const days = v as number;
+                      const color = days > 180 ? "text-red-400" : days > 90 ? "text-yellow-400" : "text-zinc-400";
+                      return <span className={color}>{days}d ago</span>;
+                    },
+                  },
+                ]}
+                data={data.staleRecords.oldestUnqueried}
+              />
+            </ChartWrapper>
+          )}
+        </section>
+      )}
     </div>
   );
 }

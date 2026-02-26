@@ -1,9 +1,9 @@
 "use client";
 
-import { useFilterStore, getDateRange } from "@/lib/store";
+import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useCfData } from "@/lib/use-cf-data";
-import { fetchTrafficData, type TrafficData } from "@/lib/queries/traffic";
+import { fetchTrafficData, fetchTrafficSummaryStats, type TrafficData, type TrafficSummaryStats } from "@/lib/queries/traffic";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -17,12 +17,13 @@ import { format } from "date-fns";
 
 export default function TrafficPage() {
   const { capabilities } = useAuth();
-  const { selectedZone, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedZone, timeRange, customStart, customEnd, compareEnabled } = useFilterStore();
   const zones = capabilities?.zones || [];
 
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+  const prev = getPreviousPeriod(start, end);
 
   const { data, loading, error, errorType, refetch } = useCfData<TrafficData>({
     fetcher: () => {
@@ -30,6 +31,15 @@ export default function TrafficPage() {
       return fetchTrafficData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
     },
     deps: [zoneId, start, end],
+  });
+
+  // Period-over-period comparison (E2, T8)
+  const { data: prevStats } = useCfData<TrafficSummaryStats>({
+    fetcher: () => {
+      if (!zoneId || !compareEnabled) throw new Error("skip");
+      return fetchTrafficSummaryStats(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
+    },
+    deps: [zoneId, prev.start, prev.end, compareEnabled],
   });
 
   if (!zoneId) {
@@ -50,6 +60,16 @@ export default function TrafficPage() {
     ...s,
     color: STATUS_COLORS[s.name] || "#6b7280",
   }));
+
+  // Compute period-over-period changes
+  function pctChange(current: number, previous: number | undefined): number | undefined {
+    if (previous === undefined || previous === 0) return undefined;
+    return ((current - previous) / previous) * 100;
+  }
+
+  const reqChange = compareEnabled && prevStats ? pctChange(data?.totalRequests || 0, prevStats.totalRequests) : undefined;
+  const bwChange = compareEnabled && prevStats ? pctChange(data?.totalBandwidth || 0, prevStats.totalBandwidth) : undefined;
+  const cacheChange = compareEnabled && prevStats ? pctChange(data?.cache.ratio || 0, prevStats.cacheRatio) : undefined;
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -75,9 +95,9 @@ export default function TrafficPage() {
           </>
         ) : data ? (
           <>
-            <StatCard label="Total Requests" value={formatNumber(data.totalRequests)} />
-            <StatCard label="Total Bandwidth" value={formatBytes(data.totalBandwidth)} />
-            <StatCard label="Cache Hit Ratio" value={formatPercent(data.cache.ratio)} />
+            <StatCard label="Total Requests" value={formatNumber(data.totalRequests)} change={reqChange} />
+            <StatCard label="Total Bandwidth" value={formatBytes(data.totalBandwidth)} change={bwChange} />
+            <StatCard label="Cache Hit Ratio" value={formatPercent(data.cache.ratio)} change={cacheChange} />
             <StatCard label="Cached Requests" value={formatNumber(data.cache.hit)} />
           </>
         ) : null}

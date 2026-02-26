@@ -18,12 +18,21 @@ interface DnsRecord {
   content: string;
   ttl: number;
   proxied: boolean;
+  created_on?: string;
+  modified_on?: string;
 }
 
 interface DnsRecordHealth extends DnsRecord {
   queryCount: number;
   hasNxdomain: boolean;
   status: "active" | "unqueried" | "error";
+  daysSinceModified: number | null;
+}
+
+interface StaleRecordSummary {
+  totalStale: number;
+  byType: Array<{ type: string; count: number }>;
+  oldestUnqueried: Array<{ name: string; type: string; daysSinceModified: number }>;
 }
 
 interface TopQueriedRecord {
@@ -47,6 +56,7 @@ export interface DnsData {
   nxdomainHotspots: TopQueriedRecord[];
   totalQueries: number;
   latency: DnsLatency;
+  staleRecords: StaleRecordSummary;
 }
 
 // --- Queries ---
@@ -74,6 +84,7 @@ export async function fetchDnsData(
     aggregates.nxdomainHotspots.map((n) => n.name.toLowerCase())
   );
 
+  const now = Date.now();
   const dnsRecords: DnsRecordHealth[] = rawRecords.map((record) => {
     const recordName = record.name.toLowerCase();
     const queryCount = queriedNames.get(recordName) || 0;
@@ -81,8 +92,14 @@ export async function fetchDnsData(
     let status: "active" | "unqueried" | "error" = "unqueried";
     if (hasNxdomain) status = "error";
     else if (queryCount > 0) status = "active";
-    return { ...record, queryCount, hasNxdomain, status };
+    const daysSinceModified = record.modified_on
+      ? Math.floor((now - new Date(record.modified_on).getTime()) / (1000 * 60 * 60 * 24))
+      : null;
+    return { ...record, queryCount, hasNxdomain, status, daysSinceModified };
   });
+
+  // D4: Stale record summary
+  const staleRecords = buildStaleRecordSummary(dnsRecords);
 
   return {
     queryVolumeByType: queryVolume.timeSeries,
@@ -93,6 +110,7 @@ export async function fetchDnsData(
     nxdomainHotspots: aggregates.nxdomainHotspots,
     totalQueries,
     latency: aggregates.latency,
+    staleRecords,
   };
 }
 
@@ -314,4 +332,31 @@ async function fetchQueryVolumeByType(
 
 async function fetchDnsRecords(zoneTag: string): Promise<DnsRecord[]> {
   return cfRestPaginated<DnsRecord>(`/zones/${zoneTag}/dns_records`);
+}
+
+// D4: Build stale record summary from health-annotated records
+function buildStaleRecordSummary(records: DnsRecordHealth[]): StaleRecordSummary {
+  const stale = records.filter((r) => r.status === "unqueried" || r.status === "error");
+
+  // Group by type
+  const byType = new Map<string, number>();
+  for (const r of stale) {
+    byType.set(r.type, (byType.get(r.type) || 0) + 1);
+  }
+  const byTypeArr = Array.from(byType.entries())
+    .map(([type, count]) => ({ type, count }))
+    .sort((a, b) => b.count - a.count);
+
+  // Oldest unqueried records (candidates for cleanup)
+  const oldestUnqueried = stale
+    .filter((r) => r.status === "unqueried" && r.daysSinceModified !== null)
+    .sort((a, b) => (b.daysSinceModified || 0) - (a.daysSinceModified || 0))
+    .slice(0, 10)
+    .map((r) => ({
+      name: r.name,
+      type: r.type,
+      daysSinceModified: r.daysSinceModified || 0,
+    }));
+
+  return { totalStale: stale.length, byType: byTypeArr, oldestUnqueried };
 }
