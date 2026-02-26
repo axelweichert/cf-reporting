@@ -12,12 +12,52 @@ function parseAppName(raw: string): string {
   return raw;
 }
 
+// Risk categories: categories that indicate higher risk for shadow IT
+const HIGH_RISK_CATEGORIES = new Set([
+  "Security Threats", "Malware", "Phishing", "Spam",
+  "Adult Themes", "Gambling", "Questionable Content",
+  "New Domains", "Newly Seen Domains", "DGA Domains",
+]);
+const MEDIUM_RISK_CATEGORIES = new Set([
+  "File Sharing", "P2P/File Sharing", "Personal VPN",
+  "Proxy/Anonymizer", "Cryptocurrency",
+]);
+
+export type AppTag = "sanctioned" | "unsanctioned" | "unclassified";
+export type RiskLevel = "critical" | "high" | "medium" | "low";
+
+export function computeRiskLevel(
+  category: string,
+  tag: AppTag,
+  count: number,
+  maxCount: number
+): RiskLevel {
+  // Unsanctioned + risky category = critical
+  const categories = category.split(", ");
+  const hasHighRisk = categories.some((c) => HIGH_RISK_CATEGORIES.has(c));
+  const hasMediumRisk = categories.some((c) => MEDIUM_RISK_CATEGORIES.has(c));
+  const isHighVolume = maxCount > 0 && count / maxCount > 0.3;
+
+  if (tag === "unsanctioned" && hasHighRisk) return "critical";
+  if (tag === "unsanctioned" && (hasMediumRisk || isHighVolume)) return "high";
+  if (hasHighRisk) return "high";
+  if (tag === "unsanctioned") return "medium";
+  if (hasMediumRisk) return "medium";
+  return "low";
+}
+
 // --- Types ---
-interface DiscoveredApp {
+export interface DiscoveredApp {
   name: string;
   rawName: string; // original value for GraphQL filtering
   category: string;
   count: number;
+}
+
+export interface UserAppMapping {
+  email: string;
+  apps: string[];
+  totalRequests: number;
 }
 
 interface CategoryBreakdownItem {
@@ -36,6 +76,7 @@ export interface ShadowItData {
   usageTrends: AppUsageTrend[];
   trendAppNames: string[];
   onlyBlockedLogged: boolean;
+  userAppMappings: UserAppMapping[];
 }
 
 // --- Main fetch ---
@@ -44,10 +85,11 @@ export async function fetchShadowItData(
   since: string,
   until: string
 ): Promise<ShadowItData> {
-  const [discoveredApplications, categoryBreakdown, resolverDecisions] = await Promise.all([
+  const [discoveredApplications, categoryBreakdown, resolverDecisions, userAppMappings] = await Promise.all([
     fetchDiscoveredApplications(accountTag, since, until),
     fetchCategoryBreakdown(accountTag, since, until),
     fetchResolverDecisionsSummary(accountTag, since, until),
+    fetchUserAppMappings(accountTag, since, until),
   ]);
 
   // Fetch usage trends for the top 5 discovered apps
@@ -69,6 +111,7 @@ export async function fetchShadowItData(
     usageTrends: usageTrendsResult,
     trendAppNames: top5DisplayNames,
     onlyBlockedLogged,
+    userAppMappings,
   };
 }
 
@@ -255,6 +298,66 @@ async function fetchUsageTrends(
   }
 
   return allPoints.sort((a, b) => (a.date as string).localeCompare(b.date as string));
+}
+
+async function fetchUserAppMappings(
+  accountTag: string,
+  since: string,
+  until: string
+): Promise<UserAppMapping[]> {
+  // Use L7 gateway data which has email + applicationNames dimensions
+  const query = `{
+    viewer {
+      accounts(filter: { accountTag: "${accountTag}" }) {
+        gatewayL7RequestsAdaptiveGroups(
+          limit: 200
+          filter: {
+            datetime_geq: "${since}"
+            datetime_lt: "${until}"
+            email_neq: ""
+          }
+          orderBy: [count_DESC]
+        ) {
+          count
+          dimensions { email applicationNames }
+        }
+      }
+    }
+  }`;
+
+  interface Group {
+    count: number;
+    dimensions: { email: string; applicationNames: string[] };
+  }
+
+  try {
+    const data = await cfGraphQL<{
+      viewer: { accounts: Array<{ gatewayL7RequestsAdaptiveGroups: Group[] }> };
+    }>(query);
+
+    // Aggregate: for each user, collect their unique apps and total requests
+    const byUser = new Map<string, { apps: Set<string>; total: number }>();
+    for (const g of data.viewer.accounts[0]?.gatewayL7RequestsAdaptiveGroups || []) {
+      const email = g.dimensions.email;
+      if (!email) continue;
+      const existing = byUser.get(email) || { apps: new Set(), total: 0 };
+      existing.total += g.count;
+      for (const app of g.dimensions.applicationNames || []) {
+        if (app) existing.apps.add(app);
+      }
+      byUser.set(email, existing);
+    }
+
+    return Array.from(byUser.entries())
+      .map(([email, { apps, total }]) => ({
+        email,
+        apps: Array.from(apps).sort(),
+        totalRequests: total,
+      }))
+      .sort((a, b) => b.totalRequests - a.totalRequests);
+  } catch {
+    return [];
+  }
 }
 
 async function fetchResolverDecisionsSummary(
