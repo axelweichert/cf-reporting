@@ -17,6 +17,8 @@ import {
   Monitor,
   ChevronDown,
   ChevronRight,
+  Gauge,
+  Lock,
 } from "lucide-react";
 import { useState } from "react";
 import type { Permission } from "@/types/cloudflare";
@@ -47,6 +49,8 @@ const navGroups: NavGroup[] = [
       { label: "Security Posture", href: "/security", icon: <Shield size={18} />, requiredPermission: "firewall" },
       { label: "DDoS & Rate Limiting", href: "/ddos", icon: <Zap size={18} />, requiredPermission: "zone_analytics" },
       { label: "Bot Analysis", href: "/bots", icon: <Bot size={18} />, requiredPermission: "firewall" },
+      { label: "Performance", href: "/performance", icon: <Gauge size={18} />, requiredPermission: "zone_analytics" },
+      { label: "SSL / TLS", href: "/ssl", icon: <Lock size={18} />, requiredPermission: "zone_analytics" },
     ],
   },
   {
