@@ -12,7 +12,7 @@ import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber, formatBytes, formatPercent, STATUS_COLORS } from "@/components/charts/theme";
-import { AlertTriangle, Info, AlertCircle } from "lucide-react";
+import { AlertTriangle, Info, AlertCircle, Zap, Server } from "lucide-react";
 
 export default function ExecutivePage() {
   const { capabilities } = useAuth();
@@ -50,6 +50,11 @@ export default function ExecutivePage() {
     critical: "border-red-500/20 bg-red-500/10",
   };
 
+  function fmtMs(ms: number): string {
+    if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
+    return `${ms}ms`;
+  }
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 print:space-y-4 print:text-black">
       {/* Header */}
@@ -62,6 +67,14 @@ export default function ExecutivePage() {
 
       {error && !loading && (
         <ErrorMessage type={errorType} message={error} onRetry={refetch} />
+      )}
+
+      {/* Auto-generated Summary */}
+      {!loading && data?.summary && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-5 print:border-gray-300 print:bg-white">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-zinc-400 print:text-gray-500">Summary</h2>
+          <p className="text-sm leading-relaxed text-zinc-300 print:text-gray-700">{data.summary}</p>
+        </div>
       )}
 
       {/* Key Metrics */}
@@ -83,7 +96,61 @@ export default function ExecutivePage() {
         )}
       </div>
 
-      {/* Security Summary */}
+      {/* Performance Metrics */}
+      {!loading && data && (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 print:grid-cols-2">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <Zap size={16} className="text-blue-400" />
+              <h3 className="text-sm font-medium text-zinc-300">Time to First Byte (TTFB)</h3>
+            </div>
+            <div className="grid grid-cols-4 gap-3">
+              <div>
+                <p className="text-xs text-zinc-500">Avg</p>
+                <p className="text-lg font-semibold text-white">{fmtMs(data.performance.ttfb.avg)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-zinc-500">P50</p>
+                <p className="text-lg font-semibold text-white">{fmtMs(data.performance.ttfb.p50)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-zinc-500">P95</p>
+                <p className="text-lg font-semibold text-yellow-400">{fmtMs(data.performance.ttfb.p95)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-zinc-500">P99</p>
+                <p className="text-lg font-semibold text-red-400">{fmtMs(data.performance.ttfb.p99)}</p>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <Server size={16} className="text-orange-400" />
+              <h3 className="text-sm font-medium text-zinc-300">Origin Response Time</h3>
+            </div>
+            <div className="grid grid-cols-4 gap-3">
+              <div>
+                <p className="text-xs text-zinc-500">Avg</p>
+                <p className="text-lg font-semibold text-white">{fmtMs(data.performance.originResponseTime.avg)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-zinc-500">P50</p>
+                <p className="text-lg font-semibold text-white">{fmtMs(data.performance.originResponseTime.p50)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-zinc-500">P95</p>
+                <p className="text-lg font-semibold text-yellow-400">{fmtMs(data.performance.originResponseTime.p95)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-zinc-500">P99</p>
+                <p className="text-lg font-semibold text-red-400">{fmtMs(data.performance.originResponseTime.p99)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Charts */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 print:grid-cols-2">
         <ChartWrapper title="Response Status Codes" loading={loading}>
           <DonutChart
