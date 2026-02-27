@@ -121,7 +121,6 @@ export default function FilterBar({
           value={selectedAccount || ""}
           onChange={(e) => {
             setSelectedAccount(e.target.value || null);
-            setSelectedZone(null);
           }}
           className="h-9 rounded-md border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-200 outline-none focus:border-orange-500"
         >

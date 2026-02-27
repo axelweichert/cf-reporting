@@ -3,6 +3,36 @@
 import { createContext, useContext, useState, useCallback, createElement, type ReactNode } from "react";
 import type { Permission, CloudflareAccount, CloudflareZone, TokenCapabilities } from "@/types/cloudflare";
 
+// ---- Session storage helpers ----
+const STORAGE_KEY = "cf-reporting-filters";
+
+function loadFilters(): {
+  account: string | null;
+  zone: string | null;
+  timeRange: string;
+} {
+  if (typeof window === "undefined") return { account: null, zone: null, timeRange: "7d" };
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return { account: null, zone: null, timeRange: "7d" };
+    const parsed = JSON.parse(raw);
+    return {
+      account: parsed.account ?? null,
+      zone: parsed.zone ?? null,
+      timeRange: parsed.timeRange ?? "7d",
+    };
+  } catch {
+    return { account: null, zone: null, timeRange: "7d" };
+  }
+}
+
+function saveFilters(account: string | null, zone: string | null, timeRange: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ account, zone, timeRange }));
+  } catch { /* ignore quota errors */ }
+}
+
 // ---- Filter Store ----
 interface FilterState {
   selectedAccount: string | null;
@@ -27,12 +57,29 @@ export function useFilterStore(): FilterState {
 }
 
 export function FilterProvider({ children }: { children: ReactNode }) {
-  const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
-  const [selectedZone, setSelectedZone] = useState<string | null>(null);
-  const [timeRange, setTimeRange] = useState("7d");
+  const saved = loadFilters();
+  const [selectedAccount, _setSelectedAccount] = useState<string | null>(saved.account);
+  const [selectedZone, _setSelectedZone] = useState<string | null>(saved.zone);
+  const [timeRange, _setTimeRange] = useState(saved.timeRange);
   const [compareEnabled, setCompareEnabled] = useState(false);
   const [customStart, setCustomStart] = useState<string | null>(null);
   const [customEnd, setCustomEnd] = useState<string | null>(null);
+
+  const setSelectedAccount = useCallback((id: string | null) => {
+    _setSelectedAccount(id);
+    _setSelectedZone(null);
+    saveFilters(id, null, timeRange);
+  }, [timeRange]);
+
+  const setSelectedZone = useCallback((id: string | null) => {
+    _setSelectedZone(id);
+    saveFilters(selectedAccount, id, timeRange);
+  }, [selectedAccount, timeRange]);
+
+  const setTimeRange = useCallback((range: string) => {
+    _setTimeRange(range);
+    saveFilters(selectedAccount, selectedZone, range);
+  }, [selectedAccount, selectedZone]);
 
   const setCustomRange = useCallback((start: string, end: string) => {
     setCustomStart(start);

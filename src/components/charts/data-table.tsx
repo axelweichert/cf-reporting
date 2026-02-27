@@ -186,7 +186,7 @@ export default function DataTable<T extends Record<string, any>>({
 
       {/* Pagination */}
       {paginated && sortedData.length > pageSize && (
-        <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
+        <div className="mt-3 flex items-center justify-between text-xs text-zinc-500" data-table-pagination>
           <span>
             Showing {showFrom}–{showTo} of {sortedData.length}
             {filteredData.length !== data.length && ` (filtered from ${data.length})`}

@@ -96,13 +96,15 @@ html.light .recharts-legend-item-text { color: #71717a !important; }
   .text-white, .text-zinc-100, .text-zinc-200, .text-zinc-300 { color: black !important; }
   .text-zinc-400, .text-zinc-500 { color: #6b7280 !important; }
 
-  /* Hide chrome: sidebar, nav */
+  /* Hide chrome: sidebar, nav, filter bar */
   nav, aside { display: none !important; }
+  .print\:hidden { display: none !important; }
   main { margin: 0 !important; padding: 1rem !important; }
 
   /* Hide interactive table elements */
   [data-table-search], [data-table-pagination] { display: none !important; }
   input[type="text"], input[type="search"] { display: none !important; }
+  button, select { display: none !important; }
 
   /* Compact spacing */
   .space-y-6 > * + * { margin-top: 1rem; }
@@ -110,4 +112,18 @@ html.light .recharts-legend-item-text { color: #71717a !important; }
 
   /* Avoid page breaks inside charts/cards */
   .rounded-xl, .rounded-lg { break-inside: avoid; }
+
+  /* Tables: shrink font & allow horizontal fit on A4 */
+  table { font-size: 0.7rem !important; word-break: break-word; }
+  th, td { padding: 0.3rem 0.5rem !important; font-size: 0.7rem !important; }
+  .overflow-x-auto { overflow: visible !important; }
+
+  /* Recharts legend: allow wrapping and smaller font */
+  .recharts-legend-wrapper { font-size: 0.65rem !important; }
+  .recharts-legend-item { margin-bottom: 2px !important; }
+  .recharts-legend-item-text { font-size: 0.65rem !important; }
+
+  /* Ensure SVG charts don't overflow */
+  .recharts-wrapper { max-width: 100% !important; }
+  svg { max-width: 100% !important; }
 }
