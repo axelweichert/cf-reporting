@@ -51,7 +51,7 @@ export default function SecurityPage() {
   }));
 
   const totalWAFEvents = (data?.wafTimeSeries || []).reduce(
-    (sum, p) => sum + p.block + p.challenge + p.managed_challenge + p.js_challenge + p.log,
+    (sum, p) => sum + p.block + p.challenge + p.managed_challenge + p.js_challenge + p.challenge_solved + p.log,
     0
   );
   const totalBlocks = (data?.wafTimeSeries || []).reduce((sum, p) => sum + p.block, 0);
@@ -111,6 +111,7 @@ export default function SecurityPage() {
           series={[
             { key: "block", label: "Block", color: ACTION_COLORS.block },
             { key: "managed_challenge", label: "Managed Challenge", color: ACTION_COLORS.managed_challenge },
+            { key: "challenge_solved", label: "Challenge Solved", color: ACTION_COLORS.challenge_solved },
             { key: "challenge", label: "Challenge", color: ACTION_COLORS.challenge },
             { key: "js_challenge", label: "JS Challenge", color: ACTION_COLORS.js_challenge },
             { key: "log", label: "Log", color: ACTION_COLORS.log },

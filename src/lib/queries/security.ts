@@ -8,6 +8,7 @@ interface WAFTimeSeriesPoint {
   challenge: number;
   managed_challenge: number;
   js_challenge: number;
+  challenge_solved: number;
   log: number;
 }
 
@@ -197,6 +198,7 @@ async function fetchWAFTimeSeries(
       challenge: 0,
       managed_challenge: 0,
       js_challenge: 0,
+      challenge_solved: 0,
       log: 0,
     };
 
@@ -209,6 +211,8 @@ async function fetchWAFTimeSeries(
       existing.managed_challenge += g.count;
     } else if (action === "js_challenge") {
       existing.js_challenge += g.count;
+    } else if (action === "managed_challenge_bypassed" || action === "managed_challenge_interactive_solved" || action === "managed_challenge_non_interactive_solved") {
+      existing.challenge_solved += g.count;
     } else if (action === "log") {
       existing.log += g.count;
     }

@@ -34,6 +34,7 @@ export const ACTION_COLORS: Record<string, string> = {
   challenge: "#eab308",
   managed_challenge: "#f97316",
   js_challenge: "#a855f7",
+  challenge_solved: "#10b981",
   log: "#3b82f6",
   allow: "#10b981",
   bypass: "#6b7280",
