@@ -100,7 +100,7 @@ export async function fetchSslData(
     stats: {
       totalRequests,
       encryptedRequests,
-      encryptedPercent: totalRequests > 0 ? Math.round((encryptedRequests / totalRequests) * 1000) / 10 : 0,
+      encryptedPercent: totalRequests > 0 ? Math.round((encryptedRequests / totalRequests) * 10000) / 100 : 0,
       tlsv13Percent: totalRequests > 0 ? Math.round((tlsv13Requests / totalRequests) * 1000) / 10 : 0,
       http3Percent: totalRequests > 0 ? Math.round((http3Requests / totalRequests) * 1000) / 10 : 0,
       certCount: certificates.length,
