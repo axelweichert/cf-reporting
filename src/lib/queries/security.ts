@@ -410,7 +410,7 @@ async function fetchChallengeSolveRates(
     challenged += g.count;
   }
 
-  // Fetch solved challenges separately (action = allow after challenge)
+  // Fetch solved challenges (managed challenge bypassed / solved)
   const solvedQuery = `{
     viewer {
       zones(filter: { zoneTag: "${zoneTag}" }) {
@@ -419,7 +419,7 @@ async function fetchChallengeSolveRates(
           filter: {
             datetime_geq: "${since}"
             datetime_lt: "${until}"
-            action: "challenge_solved"
+            action_in: ["managed_challenge_bypassed", "managed_challenge_interactive_solved", "managed_challenge_non_interactive_solved"]
           }
         ) {
           count
