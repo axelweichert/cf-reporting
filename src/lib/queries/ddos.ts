@@ -69,9 +69,9 @@ export async function fetchDdosData(
     rateLimitTopPaths,
     l34,
   ] = await Promise.all([
-    fetchFilteredEventsOverTime(zoneTag, since, until, ["l7ddos"], "block"),
-    fetchFilteredAttackVectors(zoneTag, since, until, ["l7ddos"], "block"),
-    fetchFilteredTopPaths(zoneTag, since, until, ["l7ddos"], "block"),
+    fetchFilteredEventsOverTime(zoneTag, since, until, ["l7ddos"]),
+    fetchFilteredAttackVectors(zoneTag, since, until, ["l7ddos"]),
+    fetchFilteredTopPaths(zoneTag, since, until, ["l7ddos"]),
     fetchFilteredEventsOverTime(zoneTag, since, until, ["ratelimit"]),
     fetchFilteredAttackVectors(zoneTag, since, until, ["ratelimit"]),
     fetchFilteredTopPaths(zoneTag, since, until, ["ratelimit"]),
