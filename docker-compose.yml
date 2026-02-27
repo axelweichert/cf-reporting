@@ -9,4 +9,17 @@ services:
       - CF_API_TOKEN=${CF_API_TOKEN:-}
       # Pre-configure Account API token (alternative to CF_API_TOKEN)
       - CF_ACCOUNT_TOKEN=${CF_ACCOUNT_TOKEN:-}
+      # SMTP settings for email report delivery (optional — can also configure via UI)
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_SECURE=${SMTP_SECURE:-true}
+    # Uncomment to enable persistent email config (schedules survive restarts)
+    # volumes:
+    #   - cf-reporting-data:/app/data
     restart: unless-stopped
+
+# volumes:
+#   cf-reporting-data:

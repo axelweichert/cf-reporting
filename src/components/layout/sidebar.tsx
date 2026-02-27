@@ -21,6 +21,7 @@ import {
   Lock,
   ShieldEllipsis,
   HeartPulse,
+  Settings,
 } from "lucide-react";
 import { useState } from "react";
 import type { Permission } from "@/types/cloudflare";
@@ -78,6 +79,12 @@ const navGroups: NavGroup[] = [
     label: "Reports",
     items: [
       { label: "Executive Report", href: "/executive", icon: <FileText size={18} /> },
+    ],
+  },
+  {
+    label: "System",
+    items: [
+      { label: "Settings", href: "/settings", icon: <Settings size={18} /> },
     ],
   },
 ];

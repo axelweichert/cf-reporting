@@ -25,6 +25,9 @@ ENV PORT=3000
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
+# Create optional persistent data directory (for email config/schedules)
+RUN mkdir -p /app/data && chown nextjs:nodejs /app/data
+
 # Copy standalone output
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
