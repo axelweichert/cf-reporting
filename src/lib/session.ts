@@ -35,11 +35,3 @@ export const sessionOptions: SessionOptions = {
 };
 
 export type { SessionData };
-
-/**
- * Check whether SESSION_SECRET was explicitly provided (not auto-generated).
- * Required for persistent config storage (email schedules, SMTP credentials).
- */
-export function isSecretExplicit(): boolean {
-  return !!secret && secret.length >= 32 && secret !== "build-placeholder-00000000000000000000";
-}

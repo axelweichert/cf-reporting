@@ -1,21 +1,13 @@
-import { cookies } from "next/headers";
-import { getIronSession } from "iron-session";
-import { sessionOptions } from "@/lib/session";
-import type { SessionData } from "@/types/cloudflare";
+import { getAuthenticatedSession } from "@/lib/auth-helpers";
 import type { EmailStatus } from "@/types/email";
-import { getSmtpConfig, getSchedules, getPersistenceStatus } from "@/lib/config/config-store";
-import { isSecretExplicit } from "@/lib/config/crypto";
+import { resolveSmtpConfig, getSmtpFromEnv } from "@/lib/email/smtp-client";
 
 /** GET: Return email delivery system status */
 export async function GET() {
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-  if (!session.token && !process.env.CF_API_TOKEN) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const session = await getAuthenticatedSession();
+  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-  const smtp = getSmtpConfig();
-  const { persistentMode } = getPersistenceStatus();
-  const schedules = getSchedules();
+  const smtp = resolveSmtpConfig(session.smtp);
 
   let schedulerRunning = false;
   try {
@@ -25,14 +17,22 @@ export async function GET() {
     // Scheduler module may not be loaded
   }
 
+  let activeSchedules = 0;
+  try {
+    const { getSchedules } = await import("@/lib/scheduler");
+    activeSchedules = getSchedules().filter((s) => s.enabled).length;
+  } catch {
+    // Scheduler module may not be loaded
+  }
+
   const status: EmailStatus = {
-    persistentMode,
-    secretExplicit: isSecretExplicit(),
     smtpConfigured: smtp.source !== "none",
     smtpSource: smtp.source,
     schedulerRunning,
-    activeSchedules: schedules.filter((s) => s.enabled).length,
+    activeSchedules,
     cfApiTokenSet: !!process.env.CF_API_TOKEN,
+    smtpEnvConfigured: getSmtpFromEnv() !== null,
+    appPasswordSet: !!process.env.APP_PASSWORD,
   };
 
   return Response.json(status);

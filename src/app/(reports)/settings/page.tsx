@@ -71,7 +71,7 @@ export default function SettingsPage() {
       if (smtpRes.ok) {
         const data = await smtpRes.json();
         setSmtpConfig(data.smtp);
-        if (data.smtp.source === "config" || data.smtp.source === "none") {
+        if (data.smtp.source !== "env") {
           setSmtpForm((prev) => ({
             ...prev,
             host: data.smtp.host || prev.host,
@@ -206,20 +206,21 @@ export default function SettingsPage() {
           System Status
         </h2>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatusBadge label="Persistence" value={status?.persistentMode ? "Enabled" : "In-Memory"} ok={status?.persistentMode} />
           <StatusBadge label="SMTP" value={status?.smtpConfigured ? `Via ${status.smtpSource}` : "Not configured"} ok={status?.smtpConfigured} />
           <StatusBadge label="Scheduler" value={status?.schedulerRunning ? "Running" : "Stopped"} ok={status?.schedulerRunning} />
           <StatusBadge label="CF_API_TOKEN" value={status?.cfApiTokenSet ? "Set" : "Not set"} ok={status?.cfApiTokenSet} />
+          <StatusBadge label="Site Password" value={status?.appPasswordSet ? "Enabled" : "Disabled"} ok={status?.appPasswordSet} />
         </div>
-        {!status?.persistentMode && (
-          <p className="mt-3 text-xs text-yellow-400/80">
-            <AlertTriangle size={12} className="mr-1 inline" />
-            Running in non-persistent mode. Mount a volume to /app/data and set SESSION_SECRET to persist configuration across restarts.
+        {!status?.cfApiTokenSet && (
+          <p className="mt-3 text-xs text-zinc-500">
+            Scheduled delivery requires CF_API_TOKEN and SMTP_* environment variables.
           </p>
         )}
-        {!status?.cfApiTokenSet && (
-          <p className="mt-2 text-xs text-zinc-500">
-            Scheduled delivery requires CF_API_TOKEN environment variable. &quot;Send Now&quot; works with your current session.
+        {smtpConfig?.source === "session" && (
+          <p className="mt-2 text-xs text-yellow-400/80">
+            <AlertTriangle size={12} className="mr-1 inline" />
+            SMTP settings are stored in your browser session and will be lost when the session expires.
+            Set SMTP_* environment variables for persistent configuration.
           </p>
         )}
       </div>
@@ -239,12 +240,12 @@ export default function SettingsPage() {
         )}
 
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <InputField label="SMTP Host" value={smtpForm.host} onChange={(v) => setSmtpForm({ ...smtpForm, host: v })} placeholder="smtp.example.com" disabled={isEnvSmtp} />
-          <InputField label="Port" value={smtpForm.port} onChange={(v) => setSmtpForm({ ...smtpForm, port: v })} placeholder="587" disabled={isEnvSmtp} />
-          <InputField label="Username" value={smtpForm.user} onChange={(v) => setSmtpForm({ ...smtpForm, user: v })} placeholder="user@example.com" disabled={isEnvSmtp} />
-          <InputField label="Password" value={smtpForm.password} onChange={(v) => setSmtpForm({ ...smtpForm, password: v })} placeholder={smtpConfig?.passwordSet ? "••••••••" : "Enter password"} type="password" disabled={isEnvSmtp} />
-          <InputField label="From Address" value={smtpForm.fromAddress} onChange={(v) => setSmtpForm({ ...smtpForm, fromAddress: v })} placeholder="reports@example.com" disabled={isEnvSmtp} />
-          <InputField label="From Name" value={smtpForm.fromName} onChange={(v) => setSmtpForm({ ...smtpForm, fromName: v })} placeholder="cf-reporting" disabled={isEnvSmtp} />
+          <InputField label="SMTP Host" value={isEnvSmtp ? (smtpConfig?.host || "") : smtpForm.host} onChange={(v) => setSmtpForm({ ...smtpForm, host: v })} placeholder="smtp.example.com" disabled={isEnvSmtp} />
+          <InputField label="Port" value={isEnvSmtp ? String(smtpConfig?.port || 587) : smtpForm.port} onChange={(v) => setSmtpForm({ ...smtpForm, port: v })} placeholder="587" disabled={isEnvSmtp} />
+          <InputField label="Username" value={isEnvSmtp ? (smtpConfig?.user || "") : smtpForm.user} onChange={(v) => setSmtpForm({ ...smtpForm, user: v })} placeholder="user@example.com" disabled={isEnvSmtp} />
+          <InputField label="Password" value={isEnvSmtp ? "" : smtpForm.password} onChange={(v) => setSmtpForm({ ...smtpForm, password: v })} placeholder={smtpConfig?.passwordSet ? "••••••••" : "Enter password"} type="password" disabled={isEnvSmtp} />
+          <InputField label="From Address" value={isEnvSmtp ? (smtpConfig?.fromAddress || "") : smtpForm.fromAddress} onChange={(v) => setSmtpForm({ ...smtpForm, fromAddress: v })} placeholder="reports@example.com" disabled={isEnvSmtp} />
+          <InputField label="From Name" value={isEnvSmtp ? (smtpConfig?.fromName || "") : smtpForm.fromName} onChange={(v) => setSmtpForm({ ...smtpForm, fromName: v })} placeholder="cf-reporting" disabled={isEnvSmtp} />
         </div>
 
         <div className="mt-3 flex items-center gap-2">
@@ -253,7 +254,7 @@ export default function SettingsPage() {
             className="flex items-center gap-2 text-sm text-zinc-300"
             disabled={isEnvSmtp}
           >
-            {smtpForm.secure
+            {(isEnvSmtp ? smtpConfig?.secure : smtpForm.secure)
               ? <ToggleRight size={20} className="text-emerald-400" />
               : <ToggleLeft size={20} className="text-zinc-500" />}
             TLS / SSL
@@ -303,7 +304,7 @@ export default function SettingsPage() {
             </button>
             <button
               onClick={() => setShowNewSchedule(true)}
-              disabled={!status?.cfApiTokenSet || !status?.smtpConfigured}
+              disabled={!status?.cfApiTokenSet || !status?.smtpEnvConfigured}
               className="flex items-center gap-2 rounded-lg bg-purple-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-purple-600 disabled:opacity-50"
             >
               <Plus size={14} />
@@ -315,9 +316,20 @@ export default function SettingsPage() {
         {!status?.cfApiTokenSet && (
           <p className="mt-3 text-xs text-yellow-400/80">
             <AlertTriangle size={12} className="mr-1 inline" />
-            Set CF_API_TOKEN environment variable to enable scheduled email delivery.
+            Set CF_API_TOKEN and SMTP_* environment variables to enable scheduled email delivery.
           </p>
         )}
+
+        {status?.cfApiTokenSet && !status?.smtpEnvConfigured && (
+          <p className="mt-3 text-xs text-yellow-400/80">
+            <AlertTriangle size={12} className="mr-1 inline" />
+            Set SMTP_* environment variables to enable scheduled email delivery. Session-based SMTP cannot be used for schedules.
+          </p>
+        )}
+
+        <p className="mt-2 text-xs text-zinc-500">
+          Schedules are stored in memory and will be lost on container restart. They require CF_API_TOKEN and SMTP environment variables.
+        </p>
 
         {schedules.length === 0 && (
           <p className="mt-4 text-center text-sm text-zinc-500">No schedules configured</p>

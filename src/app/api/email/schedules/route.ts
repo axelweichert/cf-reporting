@@ -1,27 +1,6 @@
-import { cookies } from "next/headers";
-import { getIronSession } from "iron-session";
-import { sessionOptions } from "@/lib/session";
-import type { SessionData } from "@/types/cloudflare";
+import { getAuthenticatedSession, validateOrigin } from "@/lib/auth-helpers";
 import type { ScheduleFrequency, ReportType } from "@/types/email";
-import { getSchedules, addSchedule, deleteSchedule, updateSchedule } from "@/lib/config/config-store";
 import { NextRequest } from "next/server";
-
-function validateOrigin(request: NextRequest): Response | null {
-  const origin = request.headers.get("origin");
-  const host = request.headers.get("host");
-  if (!origin || !host) return null;
-  try {
-    if (new URL(origin).host !== host) return Response.json({ error: "Forbidden" }, { status: 403 });
-  } catch {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
-  return null;
-}
-
-async function requireAuth(): Promise<boolean> {
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-  return !!(session.token || process.env.CF_API_TOKEN);
-}
 
 function buildCronExpression(frequency: ScheduleFrequency, hour: number, dayOfWeek?: number, dayOfMonth?: number): string {
   switch (frequency) {
@@ -38,10 +17,15 @@ function buildCronExpression(frequency: ScheduleFrequency, hour: number, dayOfWe
 
 /** GET: List all schedules */
 export async function GET() {
-  const authed = await requireAuth();
-  if (!authed) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await getAuthenticatedSession();
+  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-  return Response.json({ schedules: getSchedules() });
+  try {
+    const { getSchedules } = await import("@/lib/scheduler");
+    return Response.json({ schedules: getSchedules() });
+  } catch {
+    return Response.json({ schedules: [] });
+  }
 }
 
 interface CreateScheduleBody {
@@ -62,8 +46,8 @@ export async function POST(request: NextRequest) {
   const originError = validateOrigin(request);
   if (originError) return originError;
 
-  const authed = await requireAuth();
-  if (!authed) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await getAuthenticatedSession();
+  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   if (!process.env.CF_API_TOKEN) {
     return Response.json(
@@ -79,8 +63,16 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    if (body.hour < 0 || body.hour > 23) {
+    if (typeof body.hour !== "number" || body.hour < 0 || body.hour > 23) {
       return Response.json({ error: "Hour must be 0-23 (UTC)" }, { status: 400 });
+    }
+
+    // Validate dayOfWeek and dayOfMonth
+    if (body.frequency === "weekly" && body.dayOfWeek != null && (body.dayOfWeek < 0 || body.dayOfWeek > 6)) {
+      return Response.json({ error: "Day of week must be 0-6 (Sunday-Saturday)" }, { status: 400 });
+    }
+    if (body.frequency === "monthly" && body.dayOfMonth != null && (body.dayOfMonth < 1 || body.dayOfMonth > 31)) {
+      return Response.json({ error: "Day of month must be 1-31" }, { status: 400 });
     }
 
     if (body.recipients.length > 10) {
@@ -89,12 +81,13 @@ export async function POST(request: NextRequest) {
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     for (const email of body.recipients) {
-      if (!emailRegex.test(email)) {
+      if (typeof email !== "string" || !emailRegex.test(email)) {
         return Response.json({ error: `Invalid email address: ${email}` }, { status: 400 });
       }
     }
 
-    // Limit total schedules
+    const { getSchedules, addSchedule } = await import("@/lib/scheduler");
+
     if (getSchedules().length >= 20) {
       return Response.json({ error: "Maximum 20 schedules allowed" }, { status: 400 });
     }
@@ -116,14 +109,6 @@ export async function POST(request: NextRequest) {
       subject: body.subject,
     });
 
-    // Notify scheduler of new schedule
-    try {
-      const { reloadSchedules } = await import("@/lib/scheduler");
-      reloadSchedules();
-    } catch {
-      // Scheduler may not be initialized yet
-    }
-
     return Response.json({ success: true, schedule });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to create schedule";
@@ -136,25 +121,21 @@ export async function DELETE(request: NextRequest) {
   const originError = validateOrigin(request);
   if (originError) return originError;
 
-  const authed = await requireAuth();
-  if (!authed) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await getAuthenticatedSession();
+  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const url = new URL(request.url);
   const id = url.searchParams.get("id");
   if (!id) return Response.json({ error: "Missing schedule ID" }, { status: 400 });
 
-  const deleted = deleteSchedule(id);
-  if (!deleted) return Response.json({ error: "Schedule not found" }, { status: 404 });
-
-  // Notify scheduler
   try {
-    const { reloadSchedules } = await import("@/lib/scheduler");
-    reloadSchedules();
+    const { deleteSchedule } = await import("@/lib/scheduler");
+    const deleted = deleteSchedule(id);
+    if (!deleted) return Response.json({ error: "Schedule not found" }, { status: 404 });
+    return Response.json({ success: true });
   } catch {
-    // Scheduler may not be initialized
+    return Response.json({ error: "Scheduler not available" }, { status: 500 });
   }
-
-  return Response.json({ success: true });
 }
 
 /** PATCH: Update a schedule (enable/disable) */
@@ -162,23 +143,16 @@ export async function PATCH(request: NextRequest) {
   const originError = validateOrigin(request);
   if (originError) return originError;
 
-  const authed = await requireAuth();
-  if (!authed) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await getAuthenticatedSession();
+  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
     const body = await request.json() as { id: string; enabled?: boolean };
     if (!body.id) return Response.json({ error: "Missing schedule ID" }, { status: 400 });
 
+    const { updateSchedule } = await import("@/lib/scheduler");
     const updated = updateSchedule(body.id, { enabled: body.enabled });
     if (!updated) return Response.json({ error: "Schedule not found" }, { status: 404 });
-
-    // Notify scheduler
-    try {
-      const { reloadSchedules } = await import("@/lib/scheduler");
-      reloadSchedules();
-    } catch {
-      // Scheduler may not be initialized
-    }
 
     return Response.json({ success: true, schedule: updated });
   } catch (err) {

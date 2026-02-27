@@ -16,6 +16,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function checkSession() {
       try {
+        // First check if APP_PASSWORD gate is required
+        const loginRes = await fetch("/api/auth/login");
+        const loginData = await loginRes.json();
+
+        if (loginData.required && !loginData.authenticated) {
+          // APP_PASSWORD is set but user hasn't authenticated
+          if (pathname !== "/login") {
+            router.replace("/login");
+          }
+          setLoading(false);
+          return;
+        }
+
         const res = await fetch("/api/auth/session");
         const data = await res.json();
         if (data.authenticated) {
@@ -36,7 +49,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           router.replace("/setup");
         }
       } catch {
-        if (pathname !== "/setup") {
+        if (pathname !== "/setup" && pathname !== "/login") {
           router.replace("/setup");
         }
       } finally {
@@ -46,8 +59,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     checkSession();
   }, [setAuth, setLoading, router, pathname]);
 
-  // Setup page gets no shell
-  if (pathname === "/setup") {
+  // Login and setup pages get no shell
+  if (pathname === "/setup" || pathname === "/login") {
     return <>{children}</>;
   }
 

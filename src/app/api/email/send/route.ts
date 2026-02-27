@@ -1,7 +1,4 @@
-import { cookies } from "next/headers";
-import { getIronSession } from "iron-session";
-import { sessionOptions } from "@/lib/session";
-import type { SessionData } from "@/types/cloudflare";
+import { requireAuth, validateOrigin } from "@/lib/auth-helpers";
 import type { ReportType } from "@/types/email";
 import { sendReportEmail } from "@/lib/email/smtp-client";
 import { fetchExecutiveDataServer, fetchSecurityDataServer } from "@/lib/email/report-data";
@@ -9,18 +6,6 @@ import { renderExecutiveEmail } from "@/lib/email/templates/executive";
 import { renderSecurityEmail } from "@/lib/email/templates/security";
 import { getDateRange } from "@/lib/store-server";
 import { NextRequest } from "next/server";
-
-function validateOrigin(request: NextRequest): Response | null {
-  const origin = request.headers.get("origin");
-  const host = request.headers.get("host");
-  if (!origin || !host) return null;
-  try {
-    if (new URL(origin).host !== host) return Response.json({ error: "Forbidden" }, { status: 403 });
-  } catch {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
-  return null;
-}
 
 interface SendRequest {
   reportType: ReportType;
@@ -36,11 +21,10 @@ export async function POST(request: NextRequest) {
   const originError = validateOrigin(request);
   if (originError) return originError;
 
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-  const token = session.token || process.env.CF_API_TOKEN;
-  if (!token) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireAuth();
+  if (!auth) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { session, token } = auth;
 
   try {
     const body = await request.json() as SendRequest;
@@ -51,7 +35,7 @@ export async function POST(request: NextRequest) {
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     for (const email of body.recipients) {
-      if (!emailRegex.test(email)) {
+      if (typeof email !== "string" || !emailRegex.test(email)) {
         return Response.json({ error: `Invalid email address: ${email}` }, { status: 400 });
       }
     }
@@ -67,7 +51,10 @@ export async function POST(request: NextRequest) {
     };
 
     let html: string;
-    let subject = body.subject || "";
+    // Sanitize subject: strip CRLF, limit length
+    let subject = typeof body.subject === "string"
+      ? body.subject.replace(/[\r\n]/g, "").slice(0, 200)
+      : "";
 
     switch (body.reportType) {
       case "executive": {
@@ -84,12 +71,12 @@ export async function POST(request: NextRequest) {
       }
       default:
         return Response.json(
-          { error: `Report type "${body.reportType}" is not yet supported for email delivery. Supported: executive, security` },
+          { error: "Unsupported report type. Supported: executive, security" },
           { status: 400 }
         );
     }
 
-    await sendReportEmail(body.recipients, subject, html);
+    await sendReportEmail(body.recipients, subject, html, session.smtp);
 
     return Response.json({ success: true, message: `Report sent to ${body.recipients.length} recipient(s)` });
   } catch (err) {

@@ -11,6 +11,9 @@ async function getClient(): Promise<CloudflareClient | null> {
     sessionOptions
   );
 
+  // Enforce APP_PASSWORD gate
+  if (process.env.APP_PASSWORD && !session.siteAuthenticated) return null;
+
   const token = session.token || process.env.CF_API_TOKEN;
   if (!token) return null;
 

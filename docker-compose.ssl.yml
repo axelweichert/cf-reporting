@@ -16,6 +16,13 @@ services:
       - SESSION_SECRET=${SESSION_SECRET}
       - CF_API_TOKEN=${CF_API_TOKEN:-}
       - CF_ACCOUNT_TOKEN=${CF_ACCOUNT_TOKEN:-}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_SECURE=${SMTP_SECURE:-true}
+      - APP_PASSWORD=${APP_PASSWORD:-}
       - SECURE_COOKIES=true
     restart: unless-stopped
 

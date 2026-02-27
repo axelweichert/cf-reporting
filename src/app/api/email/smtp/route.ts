@@ -2,76 +2,82 @@ import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { sessionOptions } from "@/lib/session";
 import type { SessionData } from "@/types/cloudflare";
-import type { SmtpConfigInput } from "@/types/email";
-import { getSmtpConfig, saveSmtpConfig, getPersistenceStatus } from "@/lib/config/config-store";
+import { getAuthenticatedSession, validateOrigin } from "@/lib/auth-helpers";
+import { resolveSmtpConfig, getSmtpFromEnv } from "@/lib/email/smtp-client";
 import { NextRequest } from "next/server";
-
-function validateOrigin(request: NextRequest): Response | null {
-  const origin = request.headers.get("origin");
-  const host = request.headers.get("host");
-  if (!origin || !host) return null;
-  try {
-    if (new URL(origin).host !== host) return Response.json({ error: "Forbidden" }, { status: 403 });
-  } catch {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
-  return null;
-}
-
-async function requireAuth(): Promise<SessionData | null> {
-  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-  if (session.token || process.env.CF_API_TOKEN) return session;
-  return null;
-}
 
 /** GET: Return current SMTP config (password masked) */
 export async function GET() {
-  const session = await requireAuth();
+  const session = await getAuthenticatedSession();
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
+  const smtp = resolveSmtpConfig(session.smtp);
+
   return Response.json({
-    smtp: getSmtpConfig(),
-    persistence: getPersistenceStatus(),
+    smtp: {
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
+      user: smtp.user,
+      passwordSet: !!smtp.password,
+      fromAddress: smtp.fromAddress,
+      fromName: smtp.fromName,
+      source: smtp.source,
+    },
   });
 }
 
-/** POST: Save SMTP configuration */
+/** POST: Save SMTP configuration to session */
 export async function POST(request: NextRequest) {
   const originError = validateOrigin(request);
   if (originError) return originError;
 
-  const session = await requireAuth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const authSession = await getAuthenticatedSession();
+  if (!authSession) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  // If env SMTP is set, don't allow UI overrides
+  if (getSmtpFromEnv()) {
+    return Response.json({ error: "SMTP is configured via environment variables and cannot be changed from the UI" }, { status: 400 });
+  }
 
   try {
-    const body = await request.json() as SmtpConfigInput;
+    const body = await request.json();
 
-    // Validate required fields
-    if (!body.host || !body.port || !body.user || !body.password || !body.fromAddress) {
+    // Type validation
+    if (typeof body.host !== "string" || typeof body.user !== "string" || typeof body.password !== "string" || typeof body.fromAddress !== "string") {
+      return Response.json({ error: "Invalid field types" }, { status: 400 });
+    }
+
+    if (!body.host || !body.user || !body.password || !body.fromAddress) {
       return Response.json({ error: "Missing required SMTP fields" }, { status: 400 });
     }
 
-    // Validate port
-    if (body.port < 1 || body.port > 65535) {
+    const port = typeof body.port === "number" ? body.port : parseInt(body.port, 10);
+    if (isNaN(port) || port < 1 || port > 65535) {
       return Response.json({ error: "Invalid port number" }, { status: 400 });
     }
 
-    // Validate from address
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(body.fromAddress)) {
       return Response.json({ error: "Invalid from address" }, { status: 400 });
     }
 
-    const { persistentMode } = getPersistenceStatus();
-
-    saveSmtpConfig(body);
+    // Re-read session to save (getAuthenticatedSession doesn't return a mutable session)
+    const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
+    session.smtp = {
+      host: body.host.trim(),
+      port,
+      secure: body.secure ?? true,
+      user: body.user.trim(),
+      password: body.password,
+      fromAddress: body.fromAddress.trim(),
+      fromName: (typeof body.fromName === "string" ? body.fromName.trim() : "") || "cf-reporting",
+    };
+    await session.save();
 
     return Response.json({
       success: true,
-      persistent: persistentMode,
-      message: persistentMode
-        ? "SMTP configuration saved persistently."
-        : "SMTP configuration saved in memory (will be lost on restart).",
+      message: "SMTP configuration saved to your session. It will persist until your session expires.",
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to save SMTP configuration";

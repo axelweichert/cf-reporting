@@ -23,6 +23,11 @@ export async function GET() {
     sessionOptions
   );
 
+  // If APP_PASSWORD is set, require site authentication before proceeding
+  if (process.env.APP_PASSWORD && !session.siteAuthenticated) {
+    return Response.json({ authenticated: false });
+  }
+
   // Check env vars first (CF_API_TOKEN = user token, CF_ACCOUNT_TOKEN = account token)
   if (!session.token) {
     const envUserToken = process.env.CF_API_TOKEN;

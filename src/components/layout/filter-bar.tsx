@@ -34,6 +34,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/devices-users": "Devices & Users",
   "/executive": "Executive Report",
   "/settings": "Settings",
+  "/login": "Login",
 };
 
 interface FilterBarProps {

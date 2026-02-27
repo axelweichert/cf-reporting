@@ -11,6 +11,11 @@ export async function GET() {
     sessionOptions
   );
 
+  // Enforce APP_PASSWORD gate
+  if (process.env.APP_PASSWORD && !session.siteAuthenticated) {
+    return Response.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
   const token = session.token || process.env.CF_API_TOKEN;
   if (!token) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
