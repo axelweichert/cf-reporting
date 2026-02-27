@@ -299,14 +299,22 @@ async function fetchQueryVolumeByType(
   since: string,
   until: string
 ): Promise<{ timeSeries: DnsTimeSeriesPoint[]; types: string[] }> {
-  // Split into daily chunks to avoid GraphQL limit: 1000 truncation
-  // (7 days x 24 hours x ~20 query types = 3360 groups, far exceeds 1000)
+  const startMs = new Date(since).getTime();
+  const endMs = new Date(until).getTime();
+  const daySpan = (endMs - startMs) / (1000 * 60 * 60 * 24);
+
+  // For ranges > 2 days, use daily granularity in a single query (avoids slow chunking).
+  // 7 days × ~20 query types = ~140 groups, well within the 1000 limit.
+  // For shorter ranges, use hourly granularity with daily chunks.
+  if (daySpan > 2) {
+    return fetchQueryVolumeByDay(zoneTag, since, until);
+  }
+
   const chunks = splitDateRange(since, until);
   const chunkResults = await Promise.all(
     chunks.map((c) => fetchQueryVolumeChunk(zoneTag, c.since, c.until))
   );
 
-  // Merge all chunks
   const allTypes = new Set<string>();
   const merged = new Map<string, DnsTimeSeriesPoint>();
 
@@ -327,6 +335,55 @@ async function fetchQueryVolumeByType(
       (a.date as string).localeCompare(b.date as string)
     ),
     types: Array.from(allTypes).sort(),
+  };
+}
+
+async function fetchQueryVolumeByDay(
+  zoneTag: string,
+  since: string,
+  until: string
+): Promise<{ timeSeries: DnsTimeSeriesPoint[]; types: string[] }> {
+  const query = `{
+    viewer {
+      zones(filter: { zoneTag: "${zoneTag}" }) {
+        dnsAnalyticsAdaptiveGroups(
+          limit: 1000
+          filter: { datetime_geq: "${since}", datetime_lt: "${until}" }
+          orderBy: [date_ASC]
+        ) {
+          count
+          dimensions { date queryType }
+        }
+      }
+    }
+  }`;
+
+  interface Group {
+    count: number;
+    dimensions: { date: string; queryType: string };
+  }
+
+  const data = await cfGraphQL<{
+    viewer: { zones: Array<{ dnsAnalyticsAdaptiveGroups: Group[] }> };
+  }>(query);
+
+  const types = new Set<string>();
+  const byDate = new Map<string, DnsTimeSeriesPoint>();
+
+  for (const g of data.viewer.zones[0]?.dnsAnalyticsAdaptiveGroups || []) {
+    const day = g.dimensions.date;
+    const qType = g.dimensions.queryType || "OTHER";
+    types.add(qType);
+    const existing = byDate.get(day) || { date: day };
+    existing[qType] = ((existing[qType] as number) || 0) + g.count;
+    byDate.set(day, existing);
+  }
+
+  return {
+    timeSeries: Array.from(byDate.values()).sort((a, b) =>
+      (a.date as string).localeCompare(b.date as string)
+    ),
+    types: Array.from(types).sort(),
   };
 }
 
