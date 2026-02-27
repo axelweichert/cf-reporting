@@ -31,8 +31,88 @@ interface ProtocolDistribution {
 
 interface ColoPerformance {
   colo: string;
+  city: string;
+  country: string;
   requests: number;
   avgTtfb: number;
+}
+
+// Cloudflare edge location IATA codes → city + country
+const COLO_MAP: Record<string, { city: string; country: string }> = {
+  AMS: { city: "Amsterdam", country: "Netherlands" },
+  ARN: { city: "Stockholm", country: "Sweden" },
+  ATL: { city: "Atlanta", country: "United States" },
+  BKK: { city: "Bangkok", country: "Thailand" },
+  BOM: { city: "Mumbai", country: "India" },
+  BOS: { city: "Boston", country: "United States" },
+  BRU: { city: "Brussels", country: "Belgium" },
+  BUD: { city: "Budapest", country: "Hungary" },
+  CDG: { city: "Paris", country: "France" },
+  CPH: { city: "Copenhagen", country: "Denmark" },
+  DAL: { city: "Dallas", country: "United States" },
+  DEL: { city: "New Delhi", country: "India" },
+  DEN: { city: "Denver", country: "United States" },
+  DFW: { city: "Dallas-Fort Worth", country: "United States" },
+  DOH: { city: "Doha", country: "Qatar" },
+  DUB: { city: "Dublin", country: "Ireland" },
+  DUS: { city: "Düsseldorf", country: "Germany" },
+  EWR: { city: "Newark", country: "United States" },
+  EZE: { city: "Buenos Aires", country: "Argentina" },
+  FCO: { city: "Rome", country: "Italy" },
+  FRA: { city: "Frankfurt", country: "Germany" },
+  GIG: { city: "Rio de Janeiro", country: "Brazil" },
+  GRU: { city: "São Paulo", country: "Brazil" },
+  HAM: { city: "Hamburg", country: "Germany" },
+  HEL: { city: "Helsinki", country: "Finland" },
+  HKG: { city: "Hong Kong", country: "Hong Kong" },
+  HND: { city: "Tokyo", country: "Japan" },
+  IAD: { city: "Ashburn", country: "United States" },
+  IAH: { city: "Houston", country: "United States" },
+  ICN: { city: "Seoul", country: "South Korea" },
+  IST: { city: "Istanbul", country: "Turkey" },
+  JNB: { city: "Johannesburg", country: "South Africa" },
+  KIX: { city: "Osaka", country: "Japan" },
+  KUL: { city: "Kuala Lumpur", country: "Malaysia" },
+  LAX: { city: "Los Angeles", country: "United States" },
+  LHR: { city: "London", country: "United Kingdom" },
+  LIS: { city: "Lisbon", country: "Portugal" },
+  MAD: { city: "Madrid", country: "Spain" },
+  MAN: { city: "Manchester", country: "United Kingdom" },
+  MEL: { city: "Melbourne", country: "Australia" },
+  MEX: { city: "Mexico City", country: "Mexico" },
+  MIA: { city: "Miami", country: "United States" },
+  MRS: { city: "Marseille", country: "France" },
+  MUC: { city: "Munich", country: "Germany" },
+  MXP: { city: "Milan", country: "Italy" },
+  NRT: { city: "Tokyo", country: "Japan" },
+  ORD: { city: "Chicago", country: "United States" },
+  OSL: { city: "Oslo", country: "Norway" },
+  OTP: { city: "Bucharest", country: "Romania" },
+  PDX: { city: "Portland", country: "United States" },
+  PHL: { city: "Philadelphia", country: "United States" },
+  PHX: { city: "Phoenix", country: "United States" },
+  PRG: { city: "Prague", country: "Czech Republic" },
+  QRO: { city: "Querétaro", country: "Mexico" },
+  SCL: { city: "Santiago", country: "Chile" },
+  SEA: { city: "Seattle", country: "United States" },
+  SFO: { city: "San Francisco", country: "United States" },
+  SIN: { city: "Singapore", country: "Singapore" },
+  SJC: { city: "San Jose", country: "United States" },
+  SOF: { city: "Sofia", country: "Bulgaria" },
+  SYD: { city: "Sydney", country: "Australia" },
+  TLV: { city: "Tel Aviv", country: "Israel" },
+  TPE: { city: "Taipei", country: "Taiwan" },
+  VIE: { city: "Vienna", country: "Austria" },
+  WAW: { city: "Warsaw", country: "Poland" },
+  YUL: { city: "Montreal", country: "Canada" },
+  YVR: { city: "Vancouver", country: "Canada" },
+  YYZ: { city: "Toronto", country: "Canada" },
+  ZAG: { city: "Zagreb", country: "Croatia" },
+  ZRH: { city: "Zurich", country: "Switzerland" },
+};
+
+function resolveColoCode(code: string): { city: string; country: string } {
+  return COLO_MAP[code] || { city: code, country: "Unknown" };
 }
 
 export interface PerformanceData {
@@ -319,10 +399,16 @@ async function fetchByColo(
 
   return (data.viewer.zones[0]?.httpRequestsAdaptiveGroups || [])
     .filter((g) => g.dimensions.coloCode)
-    .map((g) => ({
-      colo: g.dimensions.coloCode,
-      requests: g.count,
-      avgTtfb: Math.round(g.avg.edgeTimeToFirstByteMs || 0),
-    }))
+    .map((g) => {
+      const code = g.dimensions.coloCode;
+      const info = resolveColoCode(code);
+      return {
+        colo: `${info.city} (${code})`,
+        city: info.city,
+        country: info.country,
+        requests: g.count,
+        avgTtfb: Math.round(g.avg.edgeTimeToFirstByteMs || 0),
+      };
+    })
     .slice(0, 15);
 }

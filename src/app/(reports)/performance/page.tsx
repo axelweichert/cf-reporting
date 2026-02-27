@@ -101,7 +101,8 @@ export default function PerformancePage() {
         <ChartWrapper title="Top Edge Locations" subtitle="By request volume" loading={loading}>
           <DataTable
             columns={[
-              { key: "colo", label: "Colo" },
+              { key: "colo", label: "Location" },
+              { key: "country", label: "Country" },
               { key: "requests", label: "Requests", align: "right", render: (v) => formatNumber(v as number) },
               { key: "avgTtfb", label: "Avg TTFB", align: "right", render: (v) => `${v}ms` },
             ]}
