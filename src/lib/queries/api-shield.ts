@@ -3,6 +3,7 @@ import { cfGraphQL, cfRest, cfRestPaginated } from "@/lib/use-cf-data";
 // --- Types ---
 
 interface ApiOperation {
+  operationId: string;
   method: string;
   host: string;
   endpoint: string;
@@ -19,6 +20,7 @@ interface DiscoveredEndpoint {
 
 interface EndpointTraffic {
   endpointId: string;
+  endpointPath: string;
   requests: number;
   status2xx: number;
   status4xx: number;
@@ -80,12 +82,22 @@ export async function fetchApiShieldData(
     ? Math.round(discovered.reduce((sum, d) => sum + d.avgRequestsPerHour, 0) / discovered.length * 10) / 10
     : 0;
 
+  // Cross-reference endpoint IDs with managed operations to get readable paths
+  const opMap = new Map<string, string>();
+  for (const op of managed) {
+    opMap.set(op.operationId, `${op.method} ${op.host}${op.endpoint}`);
+  }
+  const enrichedTraffic = endpointTraffic.map((t) => ({
+    ...t,
+    endpointPath: opMap.get(t.endpointId) || t.endpointId,
+  }));
+
   return {
     managedOperations: managed.slice(0, 50),
     discoveredEndpoints: discovered.slice(0, 30),
     methodDistribution,
     sessionTraffic,
-    topEndpointTraffic: endpointTraffic,
+    topEndpointTraffic: enrichedTraffic,
     stats: {
       totalManaged: managed.length,
       totalDiscovered: discovered.length,
@@ -109,6 +121,7 @@ async function fetchManagedOperations(zoneTag: string): Promise<ApiOperation[]> 
     }>(`/zones/${zoneTag}/api_gateway/operations`);
 
     return ops.map((o) => ({
+      operationId: o.operation_id,
       method: o.method,
       host: o.host,
       endpoint: o.endpoint,
@@ -241,7 +254,7 @@ async function fetchEndpointTraffic(
     const byEndpoint = new Map<string, EndpointTraffic>();
     for (const g of data.viewer.zones[0]?.apiGatewayMatchedSessionIDsPerEndpointAdaptiveGroups || []) {
       const id = g.dimensions.apiGatewayMatchedEndpointId;
-      const existing = byEndpoint.get(id) || { endpointId: id, requests: 0, status2xx: 0, status4xx: 0, status5xx: 0 };
+      const existing = byEndpoint.get(id) || { endpointId: id, endpointPath: id, requests: 0, status2xx: 0, status4xx: 0, status5xx: 0 };
       existing.requests += g.count;
 
       const code = g.dimensions.responseStatusCode;

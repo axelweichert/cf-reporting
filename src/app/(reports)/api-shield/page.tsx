@@ -146,8 +146,8 @@ export default function ApiShieldPage() {
         <ChartWrapper title="Top Endpoint Traffic" subtitle="By total requests with status breakdown" loading={loading}>
           <DataTable
             columns={[
-              { key: "endpointId", label: "Endpoint ID", render: (v) => (
-                <span className="font-mono text-xs">{String(v).slice(0, 8)}...</span>
+              { key: "endpointPath", label: "Endpoint", render: (v) => (
+                <span className="font-mono text-xs">{String(v)}</span>
               )},
               { key: "requests", label: "Requests", align: "right", render: (v) => formatNumber(v as number) },
               { key: "status2xx", label: "2xx", align: "right", render: (v) => formatNumber(v as number) },
