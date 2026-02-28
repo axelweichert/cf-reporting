@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useSearchParams } from "next/navigation";
 import {
   ChevronUp,
   ChevronDown,
@@ -41,9 +40,8 @@ export default function DataTable<T extends Record<string, any>>({
   sortable = true,
   paginated: paginatedProp = true,
 }: DataTableProps<T>) {
-  const searchParams = useSearchParams();
-  const isPdfMode = searchParams.get("_pdf") === "true";
   // In PDF mode, disable pagination to show all rows
+  const isPdfMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("_pdf") === "true";
   const paginated = isPdfMode ? false : paginatedProp;
 
   const [searchQuery, setSearchQuery] = useState("");

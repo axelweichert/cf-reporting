@@ -149,7 +149,7 @@ export async function generatePdf({
       displayHeaderFooter: true,
     });
 
-    return Buffer.from(pdfBuffer);
+    return pdfBuffer;
   } finally {
     activePdfCount--;
     if (context) {
