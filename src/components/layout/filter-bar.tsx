@@ -79,7 +79,7 @@ export default function FilterBar({
     }
   };
 
-  const isReportPage = pathname !== "/" && pathname !== "/setup" && pathname !== "/dashboard";
+  const isReportPage = pathname !== "/" && pathname !== "/setup" && pathname !== "/dashboard" && pathname !== "/settings" && pathname !== "/login";
 
   const filteredZones = zones.filter((z) => {
     if (selectedAccount && z.account.id !== selectedAccount) return false;

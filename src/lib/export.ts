@@ -18,6 +18,9 @@ interface PdfExportParams {
  * Falls back to window.print() if the API call fails.
  */
 export async function exportPDF(params: PdfExportParams): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60_000);
+
   try {
     const body: Record<string, string> = { path: params.pathname };
     if (params.zone) body.zone = params.zone;
@@ -30,6 +33,7 @@ export async function exportPDF(params: PdfExportParams): Promise<void> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
 
     if (!res.ok) {
@@ -57,6 +61,8 @@ export async function exportPDF(params: PdfExportParams): Promise<void> {
   } catch (err) {
     console.warn("[PDF Export] Server-side generation failed, falling back to print dialog:", err);
     window.print();
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

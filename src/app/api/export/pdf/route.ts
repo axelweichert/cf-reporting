@@ -35,11 +35,11 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  // Validate the requested path
+  // Validate the requested path (must be a known exportable route, no query strings)
   const { path } = body;
-  if (!path || !EXPORTABLE_PATHS.has(path)) {
+  if (!path || typeof path !== "string" || path.includes("?") || !EXPORTABLE_PATHS.has(path)) {
     return Response.json(
-      { error: `Invalid path. Exportable pages: ${[...EXPORTABLE_PATHS].join(", ")}` },
+      { error: "Invalid or non-exportable report path" },
       { status: 400 }
     );
   }

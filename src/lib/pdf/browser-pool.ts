@@ -1,9 +1,12 @@
-import type { Browser } from "playwright";
+import type { Browser, BrowserContext } from "playwright";
 
 /** Maximum concurrent PDF generations */
 const MAX_CONCURRENT = 3;
 /** Timeout per PDF generation (ms) */
 const PDF_TIMEOUT = 30_000;
+/** Viewport width for consistent chart rendering (matches typical desktop) */
+const VIEWPORT_WIDTH = 1280;
+const VIEWPORT_HEIGHT = 900;
 
 let browserInstance: Browser | null = null;
 let browserLaunchPromise: Promise<Browser> | null = null;
@@ -20,30 +23,33 @@ async function getBrowser(): Promise<Browser> {
   if (browserLaunchPromise) return browserLaunchPromise;
 
   browserLaunchPromise = (async () => {
-    // Dynamic import — playwright is only loaded server-side
-    const { chromium } = await import("playwright");
+    try {
+      const { chromium } = await import("playwright");
 
-    const executablePath =
-      process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined;
+      const executablePath =
+        process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined;
 
-    const browser = await chromium.launch({
-      executablePath,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-      ],
-    });
+      const browser = await chromium.launch({
+        executablePath,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+        ],
+      });
 
-    browser.on("disconnected", () => {
-      browserInstance = null;
+      browser.on("disconnected", () => {
+        browserInstance = null;
+        browserLaunchPromise = null;
+      });
+
+      browserInstance = browser;
+      return browser;
+    } finally {
+      // Always clear the launch promise so retries are possible on failure
       browserLaunchPromise = null;
-    });
-
-    browserInstance = browser;
-    browserLaunchPromise = null;
-    return browser;
+    }
   })();
 
   return browserLaunchPromise;
@@ -72,12 +78,13 @@ export async function generatePdf({
   }
 
   activePdfCount++;
+  let context: BrowserContext | null = null;
 
   try {
     const browser = await getBrowser();
-    const context = await browser.newContext({
-      // Bypass HTTPS issues for localhost
+    context = await browser.newContext({
       ignoreHTTPSErrors: true,
+      viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
     });
 
     // Set the session cookie so the internal request is authenticated
@@ -142,10 +149,14 @@ export async function generatePdf({
       displayHeaderFooter: true,
     });
 
-    await context.close();
     return Buffer.from(pdfBuffer);
   } finally {
     activePdfCount--;
+    if (context) {
+      await context.close().catch(() => {
+        /* best-effort cleanup */
+      });
+    }
   }
 }
 
