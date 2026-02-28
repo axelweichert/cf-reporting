@@ -17,6 +17,7 @@
     "nodemailer": "^8.0.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "playwright": "^1.58.2",
     "recharts": "^3.7.0"
   },
   "devDependencies": {
@@ -27,7 +28,6 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
-    "playwright": "^1.58.2",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

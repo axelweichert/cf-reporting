@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider, FilterProvider } from "@/lib/store";
@@ -33,7 +34,9 @@ export default function RootLayout({
         <ThemeProvider>
           <AuthProvider>
             <FilterProvider>
-              <AppShell>{children}</AppShell>
+              <Suspense>
+                <AppShell>{children}</AppShell>
+              </Suspense>
             </FilterProvider>
           </AuthProvider>
         </ThemeProvider>

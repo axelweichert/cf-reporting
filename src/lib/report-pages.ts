@@ -1,0 +1,22 @@
+/** Shared page title map — used by filter-bar, PDF export, and email system. */
+export const PAGE_TITLES: Record<string, string> = {
+  "/dashboard": "Dashboard",
+  "/traffic": "Traffic Overview",
+  "/security": "Security Posture",
+  "/ddos": "DDoS & Rate Limiting",
+  "/bots": "Bot Analysis",
+  "/dns": "DNS Analytics",
+  "/performance": "Performance",
+  "/ssl": "SSL / TLS",
+  "/api-shield": "API Shield",
+  "/origin-health": "Origin Health",
+  "/zt-summary": "Zero Trust Summary",
+  "/gateway-dns": "Gateway DNS & HTTP",
+  "/gateway-network": "Gateway Network",
+  "/access-audit": "Access Audit",
+  "/shadow-it": "Shadow IT",
+  "/devices-users": "Devices & Users",
+  "/executive": "Executive Report",
+  "/settings": "Settings",
+  "/login": "Login",
+};

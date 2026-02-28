@@ -6,23 +6,42 @@ import type { Permission, CloudflareAccount, CloudflareZone, TokenCapabilities }
 // ---- Session storage helpers ----
 const STORAGE_KEY = "cf-reporting-filters";
 
-function loadFilters(): {
+interface FilterDefaults {
   account: string | null;
   zone: string | null;
   timeRange: string;
-} {
-  if (typeof window === "undefined") return { account: null, zone: null, timeRange: "7d" };
+  customStart: string | null;
+  customEnd: string | null;
+}
+
+function loadFilters(): FilterDefaults {
+  if (typeof window === "undefined") return { account: null, zone: null, timeRange: "7d", customStart: null, customEnd: null };
+
+  // In PDF mode, read filters from URL params instead of sessionStorage
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("_pdf") === "true") {
+    return {
+      account: params.get("account"),
+      zone: params.get("zone"),
+      timeRange: params.get("timeRange") || "7d",
+      customStart: params.get("customStart"),
+      customEnd: params.get("customEnd"),
+    };
+  }
+
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return { account: null, zone: null, timeRange: "7d" };
+    if (!raw) return { account: null, zone: null, timeRange: "7d", customStart: null, customEnd: null };
     const parsed = JSON.parse(raw);
     return {
       account: parsed.account ?? null,
       zone: parsed.zone ?? null,
       timeRange: parsed.timeRange ?? "7d",
+      customStart: null,
+      customEnd: null,
     };
   } catch {
-    return { account: null, zone: null, timeRange: "7d" };
+    return { account: null, zone: null, timeRange: "7d", customStart: null, customEnd: null };
   }
 }
 
@@ -62,8 +81,8 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   const [selectedZone, _setSelectedZone] = useState<string | null>(saved.zone);
   const [timeRange, _setTimeRange] = useState(saved.timeRange);
   const [compareEnabled, setCompareEnabled] = useState(false);
-  const [customStart, setCustomStart] = useState<string | null>(null);
-  const [customEnd, setCustomEnd] = useState<string | null>(null);
+  const [customStart, setCustomStart] = useState<string | null>(saved.customStart);
+  const [customEnd, setCustomEnd] = useState<string | null>(saved.customEnd);
 
   const setSelectedAccount = useCallback((id: string | null) => {
     _setSelectedAccount(id);

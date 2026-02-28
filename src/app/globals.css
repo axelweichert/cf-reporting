@@ -88,6 +88,10 @@ html.light select option { background-color: #f4f4f5; color: #18181b; }
 html.light .recharts-legend-item-text { color: #71717a !important; }
 
 /* ===== Print styles (PDF export) ===== */
+@page {
+  margin: 1cm 1cm 1.5cm 1cm;
+}
+
 @media print {
   body { background: white !important; color: black !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .bg-zinc-950, .bg-zinc-900, .bg-zinc-900\/50 { background: white !important; }

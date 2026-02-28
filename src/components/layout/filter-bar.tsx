@@ -3,6 +3,7 @@
 import { useFilterStore } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
 import { exportPDF, exportHTML } from "@/lib/export";
+import { PAGE_TITLES } from "@/lib/report-pages";
 import {
   PanelLeftClose,
   PanelLeft,
@@ -10,32 +11,11 @@ import {
   Sun,
   Moon,
   Download,
+  Loader2,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import type { CloudflareAccount, CloudflareZone } from "@/types/cloudflare";
 import { useState, useRef, useEffect } from "react";
-
-const PAGE_TITLES: Record<string, string> = {
-  "/dashboard": "Dashboard",
-  "/traffic": "Traffic Overview",
-  "/security": "Security Posture",
-  "/ddos": "DDoS & Rate Limiting",
-  "/bots": "Bot Analysis",
-  "/dns": "DNS Analytics",
-  "/performance": "Performance",
-  "/ssl": "SSL / TLS",
-  "/api-shield": "API Shield",
-  "/origin-health": "Origin Health",
-  "/zt-summary": "Zero Trust Summary",
-  "/gateway-dns": "Gateway DNS & HTTP",
-  "/gateway-network": "Gateway Network",
-  "/access-audit": "Access Audit",
-  "/shadow-it": "Shadow IT",
-  "/devices-users": "Devices & Users",
-  "/executive": "Executive Report",
-  "/settings": "Settings",
-  "/login": "Login",
-};
 
 interface FilterBarProps {
   accounts: CloudflareAccount[];
@@ -78,8 +58,26 @@ export default function FilterBar({
   const [zoneSearch, setZoneSearch] = useState("");
   const [showZoneDropdown, setShowZoneDropdown] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const zoneDropdownRef = useRef<HTMLDivElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  const handlePdfExport = async () => {
+    setPdfLoading(true);
+    setShowExportMenu(false);
+    try {
+      await exportPDF({
+        pathname,
+        zone: selectedZone,
+        account: selectedAccount,
+        timeRange,
+        customStart,
+        customEnd,
+      });
+    } finally {
+      setPdfLoading(false);
+    }
+  };
 
   const isReportPage = pathname !== "/" && pathname !== "/setup" && pathname !== "/dashboard";
 
@@ -250,17 +248,22 @@ export default function FilterBar({
             <div className="mx-1 h-6 w-px bg-zinc-700" />
             <div className="relative" ref={exportMenuRef}>
               <button
-                onClick={() => setShowExportMenu(!showExportMenu)}
-                className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors print:hidden"
+                onClick={() => !pdfLoading && setShowExportMenu(!showExportMenu)}
+                disabled={pdfLoading}
+                className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors print:hidden disabled:opacity-60"
                 aria-label="Download report"
               >
-                <Download size={14} />
-                Export
+                {pdfLoading ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Download size={14} />
+                )}
+                {pdfLoading ? "Generating..." : "Export"}
               </button>
-              {showExportMenu && (
+              {showExportMenu && !pdfLoading && (
                 <div className="absolute right-0 top-full z-50 mt-1 w-44 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl">
                   <button
-                    onClick={() => { exportPDF(); setShowExportMenu(false); }}
+                    onClick={handlePdfExport}
                     className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white"
                   >
                     Download as PDF

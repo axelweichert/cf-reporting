@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import Sidebar from "./sidebar";
 import FilterBar from "./filter-bar";
 import { useAuth } from "@/lib/store";
@@ -12,6 +12,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { authenticated, capabilities, loading, setAuth, setLoading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const isPdfMode = searchParams.get("_pdf") === "true";
 
   useEffect(() => {
     async function checkSession() {
@@ -74,6 +76,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   if (!authenticated) {
     return null;
+  }
+
+  // PDF mode: render content only, no sidebar/filter-bar/transitions
+  if (isPdfMode) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-100">
+        <main className="p-6">
+          <ErrorBoundary>{children}</ErrorBoundary>
+        </main>
+      </div>
+    );
   }
 
   const accounts = capabilities?.accounts || [];
