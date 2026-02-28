@@ -15,13 +15,13 @@ interface PdfExportParams {
   accountName?: string | null;
 }
 
-/** Build a descriptive filename slug from report title, account, zone, and date */
+/** Build a descriptive filename: date-account-zone-report.ext */
 function buildExportFilename(title: string, ext: string, accountName?: string | null, zoneName?: string | null): string {
   const dateStr = new Date().toISOString().split("T")[0];
-  const parts = [title];
+  const parts = [dateStr];
   if (accountName) parts.push(accountName);
   if (zoneName) parts.push(zoneName);
-  parts.push(dateStr);
+  parts.push(title);
   return parts
     .join(" ")
     .replace(/[^a-zA-Z0-9 .-]/g, "")

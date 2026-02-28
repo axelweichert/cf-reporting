@@ -55,6 +55,7 @@ export function HorizontalBarChart({
   barColor = CHART_COLORS.primary,
 }: HorizontalBarChartProps) {
   const chartHeight = height || Math.max(200, data.length * 36);
+  const isPdf = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("_pdf") === "true";
 
   return (
     <ResponsiveContainer width="100%" height={chartHeight}>
@@ -78,7 +79,7 @@ export function HorizontalBarChart({
           width={120}
         />
         <Tooltip content={<BarTooltip valueFormatter={valueFormatter} />} />
-        <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={24}>
+        <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={24} isAnimationActive={!isPdf}>
           {data.map((entry, index) => (
             <Cell key={`cell-${index}`} fill={entry.color || barColor} />
           ))}
@@ -109,6 +110,8 @@ export function GroupedBarChart({
   yFormatter = formatNumber,
   stacked = false,
 }: GroupedBarChartProps) {
+  const isPdf = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("_pdf") === "true";
+
   return (
     <ResponsiveContainer width="100%" height={height}>
       <RechartsBarChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
@@ -145,6 +148,7 @@ export function GroupedBarChart({
             stackId={stacked ? "stack" : undefined}
             radius={stacked ? undefined : [4, 4, 0, 0]}
             maxBarSize={40}
+            isAnimationActive={!isPdf}
           />
         ))}
       </RechartsBarChart>

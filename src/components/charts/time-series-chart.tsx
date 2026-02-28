@@ -72,6 +72,7 @@ export default function TimeSeriesChart({
   stacked = false,
 }: TimeSeriesChartProps) {
   const hasRightAxis = series.some((s) => s.yAxisId === "right");
+  const isPdf = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("_pdf") === "true";
 
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -127,6 +128,7 @@ export default function TimeSeriesChart({
             stackId={stacked && !s.yAxisId ? "stack" : undefined}
             yAxisId={s.yAxisId || "left"}
             dot={false}
+            isAnimationActive={!isPdf}
           />
         ))}
       </AreaChart>

@@ -54,6 +54,8 @@ export default function DonutChart({
   centerValue,
   valueFormatter = formatNumber,
 }: DonutChartProps) {
+  const isPdf = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("_pdf") === "true";
+
   return (
     <div className="relative">
       <ResponsiveContainer width="100%" height={height}>
@@ -67,6 +69,7 @@ export default function DonutChart({
             dataKey="value"
             paddingAngle={2}
             strokeWidth={0}
+            isAnimationActive={!isPdf}
           >
             {data.map((entry, index) => (
               <Cell

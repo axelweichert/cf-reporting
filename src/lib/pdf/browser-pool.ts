@@ -64,6 +64,10 @@ interface PdfOptions {
   sessionCookie: string;
   /** Report title for the PDF header */
   title?: string;
+  /** Account name for PDF document title */
+  accountName?: string;
+  /** Zone name for PDF document title */
+  zoneName?: string;
 }
 
 /**
@@ -74,6 +78,8 @@ export async function generatePdf({
   url,
   sessionCookie,
   title,
+  accountName,
+  zoneName,
 }: PdfOptions): Promise<Buffer> {
   if (activePdfCount >= MAX_CONCURRENT) {
     throw new Error("Too many concurrent PDF generations. Please try again.");
@@ -136,9 +142,16 @@ export async function generatePdf({
     await page.emulateMedia({ media: "screen" });
 
     // Apply light theme for PDF (white background, dark text)
-    await page.evaluate(() => {
+    // Build a descriptive document title for the PDF tab/viewer
+    const docTitleParts = [title || "Report"];
+    if (accountName) docTitleParts.push(accountName);
+    if (zoneName) docTitleParts.push(zoneName);
+    const docTitle = docTitleParts.join(" – ");
+
+    await page.evaluate((dt: string) => {
       document.documentElement.classList.add("light");
-    });
+      document.title = dt;
+    }, docTitle);
 
     // Resize viewport to A4 content width so ResponsiveContainer fits charts
     await page.setViewportSize({ width: A4_CONTENT_WIDTH, height: VIEWPORT_HEIGHT });
@@ -146,7 +159,7 @@ export async function generatePdf({
     // Wait for ResponsiveContainer to re-measure and React to re-render
     await page.waitForTimeout(1000);
 
-    // Clean up elements that shouldn't appear in the PDF
+    // Clean up elements and apply PDF-specific layout fixes
     await page.evaluate(() => {
       // Hide interactive elements
       document.querySelectorAll("button, select, input").forEach((el) => {
@@ -163,6 +176,31 @@ export async function generatePdf({
         .forEach((el) => {
           (el as HTMLElement).style.display = "none";
         });
+      // Remove Next.js dev indicator (dark circle with "N" in dev mode)
+      document
+        .querySelectorAll("nextjs-portal, [data-nextjs-dialog-overlay], [data-nextjs-toast]")
+        .forEach((el) => el.remove());
+
+      // Prevent page breaks from splitting charts — keep each card together
+      document
+        .querySelectorAll(".rounded-xl, .rounded-lg")
+        .forEach((el) => {
+          const h = el as HTMLElement;
+          h.style.breakInside = "avoid";
+          h.style.pageBreakInside = "avoid";
+        });
+
+    });
+
+    // Freeze chart layout: disable ResizeObserver so that page.pdf()'s
+    // internal print layout pass doesn't trigger ResponsiveContainer
+    // to re-render charts at a different size (which breaks pie arcs).
+    await page.evaluate(() => {
+      window.ResizeObserver = class ResizeObserver {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      };
     });
 
     const now = new Date();

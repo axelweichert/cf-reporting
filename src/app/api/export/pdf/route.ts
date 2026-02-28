@@ -72,14 +72,16 @@ export async function POST(request: NextRequest) {
       url: internalUrl.toString(),
       sessionCookie,
       title,
+      accountName: body.accountName,
+      zoneName: body.zoneName,
     });
 
-    // Build a descriptive filename: report-account-zone-date.pdf
+    // Build filename: date-account-zone-report.pdf
     const dateStr = new Date().toISOString().split("T")[0];
-    const parts = [title];
+    const parts = [dateStr];
     if (body.accountName) parts.push(body.accountName);
     if (body.zoneName) parts.push(body.zoneName);
-    parts.push(dateStr);
+    parts.push(title);
     const filename = parts
       .join(" ")
       .replace(/[^a-zA-Z0-9 .-]/g, "")
