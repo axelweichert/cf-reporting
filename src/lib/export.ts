@@ -11,6 +11,22 @@ interface PdfExportParams {
   timeRange?: string;
   customStart?: string | null;
   customEnd?: string | null;
+  zoneName?: string | null;
+  accountName?: string | null;
+}
+
+/** Build a descriptive filename slug from report title, account, zone, and date */
+function buildExportFilename(title: string, ext: string, accountName?: string | null, zoneName?: string | null): string {
+  const dateStr = new Date().toISOString().split("T")[0];
+  const parts = [title];
+  if (accountName) parts.push(accountName);
+  if (zoneName) parts.push(zoneName);
+  parts.push(dateStr);
+  return parts
+    .join(" ")
+    .replace(/[^a-zA-Z0-9 .-]/g, "")
+    .replace(/\s+/g, "-")
+    .toLowerCase() + `.${ext}`;
 }
 
 /**
@@ -28,6 +44,8 @@ export async function exportPDF(params: PdfExportParams): Promise<void> {
     if (params.timeRange) body.timeRange = params.timeRange;
     if (params.customStart) body.customStart = params.customStart;
     if (params.customEnd) body.customEnd = params.customEnd;
+    if (params.zoneName) body.zoneName = params.zoneName;
+    if (params.accountName) body.accountName = params.accountName;
 
     const res = await fetch("/api/export/pdf", {
       method: "POST",
@@ -66,7 +84,7 @@ export async function exportPDF(params: PdfExportParams): Promise<void> {
   }
 }
 
-export function exportHTML(title: string) {
+export function exportHTML(title: string, accountName?: string | null, zoneName?: string | null) {
   const main = document.querySelector("main");
   if (!main) return;
 
@@ -87,6 +105,29 @@ export function exportHTML(title: string) {
     note.style.marginTop = "0.25rem";
     note.textContent = "Note: Only the currently visible page of data is included in this export.";
     el.parentNode?.insertBefore(note, el.nextSibling);
+  });
+
+  // Fix Recharts chart centering: ResponsiveContainer sets fixed pixel widths via
+  // inline styles on .recharts-wrapper. Override to width:100% so charts center properly.
+  clone.querySelectorAll(".recharts-responsive-container").forEach((el) => {
+    (el as HTMLElement).style.width = "100%";
+  });
+  clone.querySelectorAll(".recharts-wrapper").forEach((el) => {
+    const wrapper = el as HTMLElement;
+    wrapper.style.width = "100%";
+    // Also fix the SVG inside to scale with the container
+    const svg = wrapper.querySelector("svg");
+    if (svg) {
+      const origWidth = svg.getAttribute("width");
+      const origHeight = svg.getAttribute("height");
+      if (origWidth && origHeight) {
+        svg.setAttribute("viewBox", `0 0 ${origWidth} ${origHeight}`);
+        svg.setAttribute("width", "100%");
+        svg.removeAttribute("height");
+        svg.style.maxWidth = "100%";
+        svg.style.height = "auto";
+      }
+    }
   });
 
   // Grab computed styles from SVG chart elements so they render correctly standalone
@@ -331,7 +372,7 @@ export function exportHTML(title: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${title.replace(/[^a-zA-Z0-9-_ ]/g, "").replace(/\s+/g, "-").toLowerCase()}.html`;
+  a.download = buildExportFilename(title, "html", accountName, zoneName);
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

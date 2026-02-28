@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, createElement, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, createElement, type ReactNode } from "react";
 import type { Permission, CloudflareAccount, CloudflareZone, TokenCapabilities } from "@/types/cloudflare";
 
 // ---- Session storage helpers ----
@@ -83,6 +83,24 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   const [compareEnabled, setCompareEnabled] = useState(false);
   const [customStart, setCustomStart] = useState<string | null>(saved.customStart);
   const [customEnd, setCustomEnd] = useState<string | null>(saved.customEnd);
+
+  // Re-read URL params on client mount for PDF mode
+  // (SSR renders with window=undefined → all filters null; hydration doesn't re-run useState)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("_pdf") === "true") {
+      const zone = params.get("zone");
+      const account = params.get("account");
+      const tr = params.get("timeRange");
+      const cs = params.get("customStart");
+      const ce = params.get("customEnd");
+      if (zone) _setSelectedZone(zone);
+      if (account) _setSelectedAccount(account);
+      if (tr) _setTimeRange(tr);
+      if (cs) setCustomStart(cs);
+      if (ce) setCustomEnd(ce);
+    }
+  }, []);
 
   const setSelectedAccount = useCallback((id: string | null) => {
     _setSelectedAccount(id);

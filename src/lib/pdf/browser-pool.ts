@@ -4,9 +4,11 @@ import type { Browser, BrowserContext } from "playwright";
 const MAX_CONCURRENT = 3;
 /** Timeout per PDF generation (ms) */
 const PDF_TIMEOUT = 30_000;
-/** Viewport width for consistent chart rendering (matches typical desktop) */
+/** Viewport width for initial page load (desktop layout to trigger data fetching) */
 const VIEWPORT_WIDTH = 1280;
 const VIEWPORT_HEIGHT = 900;
+/** A4 content width at 96dpi: 210mm - 2×10mm margins = 190mm ≈ 718px */
+const A4_CONTENT_WIDTH = 718;
 
 let browserInstance: Browser | null = null;
 let browserLaunchPromise: Promise<Browser> | null = null;
@@ -125,6 +127,43 @@ export async function generatePdf({
 
     // Small extra delay for animations to finish
     await page.waitForTimeout(500);
+
+    // --- PDF rendering strategy ---
+    // Problem: @media print causes Recharts' ResponsiveContainer to collapse
+    // to width: 0, rendering all charts invisible.
+    // Solution: Use screen media + resize viewport to A4 content width.
+    // ResponsiveContainer re-measures and sizes charts to fit the PDF page.
+    await page.emulateMedia({ media: "screen" });
+
+    // Apply light theme for PDF (white background, dark text)
+    await page.evaluate(() => {
+      document.documentElement.classList.add("light");
+    });
+
+    // Resize viewport to A4 content width so ResponsiveContainer fits charts
+    await page.setViewportSize({ width: A4_CONTENT_WIDTH, height: VIEWPORT_HEIGHT });
+
+    // Wait for ResponsiveContainer to re-measure and React to re-render
+    await page.waitForTimeout(1000);
+
+    // Clean up elements that shouldn't appear in the PDF
+    await page.evaluate(() => {
+      // Hide interactive elements
+      document.querySelectorAll("button, select, input").forEach((el) => {
+        (el as HTMLElement).style.display = "none";
+      });
+      document
+        .querySelectorAll("[data-table-search], [data-table-pagination]")
+        .forEach((el) => {
+          (el as HTMLElement).style.display = "none";
+        });
+      // Hide Recharts tooltip wrappers (can appear as artifacts)
+      document
+        .querySelectorAll(".recharts-tooltip-wrapper")
+        .forEach((el) => {
+          (el as HTMLElement).style.display = "none";
+        });
+    });
 
     const now = new Date();
     const timestamp = now.toLocaleDateString("en-US", {

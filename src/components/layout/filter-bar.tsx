@@ -62,6 +62,9 @@ export default function FilterBar({
   const zoneDropdownRef = useRef<HTMLDivElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
+  const selectedZoneName = zones.find((z) => z.id === selectedZone)?.name;
+  const selectedAccountName = accounts.find((a) => a.id === selectedAccount)?.name;
+
   const handlePdfExport = async () => {
     setPdfLoading(true);
     setShowExportMenu(false);
@@ -73,6 +76,8 @@ export default function FilterBar({
         timeRange,
         customStart,
         customEnd,
+        zoneName: selectedZoneName,
+        accountName: selectedAccountName,
       });
     } finally {
       setPdfLoading(false);
@@ -86,8 +91,6 @@ export default function FilterBar({
     if (zoneSearch) return z.name.toLowerCase().includes(zoneSearch.toLowerCase());
     return true;
   });
-
-  const selectedZoneName = zones.find((z) => z.id === selectedZone)?.name;
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -269,7 +272,7 @@ export default function FilterBar({
                     Download as PDF
                   </button>
                   <button
-                    onClick={() => { exportHTML(PAGE_TITLES[pathname] || "Report"); setShowExportMenu(false); }}
+                    onClick={() => { exportHTML(PAGE_TITLES[pathname] || "Report", selectedAccountName, selectedZoneName); setShowExportMenu(false); }}
                     className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white"
                   >
                     Download as HTML

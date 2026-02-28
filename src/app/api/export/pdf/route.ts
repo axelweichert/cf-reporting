@@ -10,6 +10,8 @@ interface PdfRequest {
   timeRange?: string;
   customStart?: string;
   customEnd?: string;
+  zoneName?: string;
+  accountName?: string;
 }
 
 /** Valid report paths that can be exported as PDF */
@@ -72,13 +74,17 @@ export async function POST(request: NextRequest) {
       title,
     });
 
-    // Build a descriptive filename
+    // Build a descriptive filename: report-account-zone-date.pdf
     const dateStr = new Date().toISOString().split("T")[0];
-    const slug = title
-      .replace(/[^a-zA-Z0-9 ]/g, "")
+    const parts = [title];
+    if (body.accountName) parts.push(body.accountName);
+    if (body.zoneName) parts.push(body.zoneName);
+    parts.push(dateStr);
+    const filename = parts
+      .join(" ")
+      .replace(/[^a-zA-Z0-9 .-]/g, "")
       .replace(/\s+/g, "-")
-      .toLowerCase();
-    const filename = `${slug}-${dateStr}.pdf`;
+      .toLowerCase() + ".pdf";
 
     return new Response(new Uint8Array(pdfBuffer), {
       status: 200,
