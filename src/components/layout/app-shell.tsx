@@ -61,6 +61,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     checkSession();
   }, [setAuth, setLoading, router, pathname]);
 
+  // Redirect to setup when logged out (e.g. after clicking Logout)
+  useEffect(() => {
+    if (!loading && !authenticated && pathname !== "/setup" && pathname !== "/login") {
+      router.replace("/setup");
+    }
+  }, [loading, authenticated, pathname, router]);
+
   // Login and setup pages get no shell
   if (pathname === "/setup" || pathname === "/login") {
     return <>{children}</>;
