@@ -101,7 +101,7 @@ export default function ApiShieldPage() {
             <StatCard label="Discovered Endpoints" value={formatNumber(data?.stats.totalDiscovered || 0)} />
             <StatCard label="Awaiting Review" value={formatNumber(data?.stats.discoveredInReview || 0)} />
             <StatCard label="Avg Req/Hour" value={data?.stats.avgRequestsPerHour?.toFixed(1) || "0"} />
-            <StatCard label="Session ID" value={data?.stats.sessionIdentifier || "—"} />
+            <StatCard label="Session ID" value={data?.stats.sessionIdentifier || "–"} />
           </>
         )}
       </div>

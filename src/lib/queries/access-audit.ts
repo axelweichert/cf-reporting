@@ -495,7 +495,7 @@ function detectAnomalies(
     });
   }
 
-  // 4. Spike detection — days with failed logins > 3× the average
+  // 4. Spike detection – days with failed logins > 3× the average
   const failedByDay = loginTimeSeries.filter((p) => p.failed > 0);
   if (failedByDay.length >= 3) {
     const avgFailed = failedByDay.reduce((s, p) => s + p.failed, 0) / failedByDay.length;

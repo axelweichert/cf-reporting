@@ -26,7 +26,7 @@ interface ReportMeta {
 }
 
 export function renderExecutiveEmail(data: ExecutiveData, meta: ReportMeta): string {
-  const subtitle = `${meta.zoneName} — ${meta.startDate} to ${meta.endDate}`;
+  const subtitle = `${meta.zoneName} – ${meta.startDate} to ${meta.endDate}`;
 
   const content = [
     emailHeader("Executive Report", subtitle),
@@ -106,5 +106,5 @@ export function renderExecutiveEmail(data: ExecutiveData, meta: ReportMeta): str
     emailFooter(meta.dashboardUrl),
   ];
 
-  return emailWrapper(`Executive Report — ${meta.zoneName}`, content.filter(Boolean).join("\n"));
+  return emailWrapper(`Executive Report – ${meta.zoneName}`, content.filter(Boolean).join("\n"));
 }

@@ -1,6 +1,6 @@
 // --- SMTP Configuration ---
 
-// SMTP config as stored in session (plaintext password — session cookie is encrypted by iron-session)
+// SMTP config as stored in session (plaintext password – session cookie is encrypted by iron-session)
 export interface SmtpConfig {
   host: string;
   port: number;
@@ -11,7 +11,7 @@ export interface SmtpConfig {
   fromName: string;
 }
 
-// Input from API (same shape — no separate encryption layer needed)
+// Input from API (same shape – no separate encryption layer needed)
 export type SmtpConfigInput = SmtpConfig;
 
 // Response to client (password masked)

@@ -23,7 +23,7 @@ interface ReportMeta {
 }
 
 export function renderSecurityEmail(data: SecurityEmailData, meta: ReportMeta): string {
-  const subtitle = `${meta.zoneName} — ${meta.startDate} to ${meta.endDate}`;
+  const subtitle = `${meta.zoneName} – ${meta.startDate} to ${meta.endDate}`;
 
   const content = [
     emailHeader("Security Report", subtitle),
@@ -84,5 +84,5 @@ export function renderSecurityEmail(data: SecurityEmailData, meta: ReportMeta): 
     emailFooter(meta.dashboardUrl),
   ];
 
-  return emailWrapper(`Security Report — ${meta.zoneName}`, content.filter(Boolean).join("\n"));
+  return emailWrapper(`Security Report – ${meta.zoneName}`, content.filter(Boolean).join("\n"));
 }

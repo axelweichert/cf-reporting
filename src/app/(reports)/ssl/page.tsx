@@ -89,7 +89,7 @@ export default function SslPage() {
             <StatCard label="Encrypted" value={`${data?.stats.encryptedPercent || 0}%`} icon={<ShieldCheck size={18} />} />
             <StatCard label="TLS 1.3" value={`${data?.stats.tlsv13Percent || 0}%`} />
             <StatCard label="HTTP/3" value={`${data?.stats.http3Percent || 0}%`} />
-            <StatCard label="SSL Mode" value={SSL_MODE_LABELS[data?.settings.mode || ""] || data?.settings.mode || "—"} />
+            <StatCard label="SSL Mode" value={SSL_MODE_LABELS[data?.settings.mode || ""] || data?.settings.mode || "–"} />
             <StatCard label="Certificates" value={data?.stats.certCount || 0} />
           </>
         )}
@@ -149,7 +149,7 @@ export default function SslPage() {
                   </div>
                   <div>
                     <span className="text-zinc-500">Algorithms:</span>{" "}
-                    <span className="text-zinc-300">{cert.signatureAlgorithms.join(", ") || "—"}</span>
+                    <span className="text-zinc-300">{cert.signatureAlgorithms.join(", ") || "–"}</span>
                   </div>
                   {cert.expiresOn && (
                     <div>

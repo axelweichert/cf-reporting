@@ -127,7 +127,7 @@ export default function GatewayNetworkPage() {
           columns={[
             { key: "ip", label: "Destination IP" },
             { key: "country", label: "Country" },
-            { key: "port", label: "Port", align: "right", render: (v) => v ? String(v) : "—" },
+            { key: "port", label: "Port", align: "right", render: (v) => v ? String(v) : "–" },
             { key: "protocol", label: "Protocol", width: "80px" },
             { key: "count", label: "Blocks", align: "right", render: (v) => formatNumber(v as number) },
           ]}

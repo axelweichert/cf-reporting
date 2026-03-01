@@ -156,7 +156,7 @@ export default function OriginHealthPage() {
         <ChartWrapper title="Origin Status Breakdown" subtitle="By HTTP status code" loading={loading}>
           <DataTable
             columns={[
-              { key: "status", label: "Status", render: (v) => (v as number) === 0 ? "—" : String(v) },
+              { key: "status", label: "Status", render: (v) => (v as number) === 0 ? "–" : String(v) },
               { key: "statusGroup", label: "Group", render: (v) => <StatusGroupBadge group={v as string} /> },
               { key: "requests", label: "Requests", align: "right", render: (v) => formatNumber(v as number) },
               { key: "avgResponseTime", label: "Avg Response", align: "right", render: (v) => `${v}ms` },

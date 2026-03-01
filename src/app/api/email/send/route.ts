@@ -60,13 +60,13 @@ export async function POST(request: NextRequest) {
       case "executive": {
         const data = await fetchExecutiveDataServer(token, body.zoneId, since, until);
         html = renderExecutiveEmail(data, meta);
-        if (!subject) subject = `[cf-reporting] Executive Report — ${meta.zoneName} — ${start} to ${end}`;
+        if (!subject) subject = `[cf-reporting] Executive Report – ${meta.zoneName} – ${start} to ${end}`;
         break;
       }
       case "security": {
         const data = await fetchSecurityDataServer(token, body.zoneId, since, until);
         html = renderSecurityEmail(data, meta);
-        if (!subject) subject = `[cf-reporting] Security Report — ${meta.zoneName} — ${start} to ${end}`;
+        if (!subject) subject = `[cf-reporting] Security Report – ${meta.zoneName} – ${start} to ${end}`;
         break;
       }
       default:

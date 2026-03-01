@@ -13,7 +13,7 @@ const effectiveSecret = secret && secret.length >= 32
       if (!secret || secret === "build-placeholder-00000000000000000000") {
         const generated = randomUUID() + randomUUID();
         console.warn(
-          "SESSION_SECRET not set — using an auto-generated secret. " +
+          "SESSION_SECRET not set – using an auto-generated secret. " +
           "Sessions will not persist across container restarts. " +
           "Set SESSION_SECRET to a 32+ character string for persistent sessions."
         );

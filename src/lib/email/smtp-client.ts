@@ -115,7 +115,7 @@ function createTransport(config: ResolvedSmtpConfig): Transporter {
 
 // --- Public API ---
 
-/** Sanitize a name field for use in email From header — strips injection characters. */
+/** Sanitize a name field for use in email From header – strips injection characters. */
 function sanitizeName(name: string): string {
   return name.replace(/["\r\n<>]/g, "").trim() || "cf-reporting";
 }
@@ -199,7 +199,7 @@ export async function sendReportEmail(
   }
 }
 
-/** Check if SMTP is configured via env vars (for scheduler — no session available). */
+/** Check if SMTP is configured via env vars (for scheduler – no session available). */
 export function isSmtpConfiguredViaEnv(): boolean {
   return getSmtpFromEnv() !== null;
 }

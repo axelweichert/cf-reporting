@@ -440,7 +440,7 @@ async function fetchAccessAppsCount(accountTag: string): Promise<number> {
   }
 }
 
-// ZT1: Seat utilization trend — count unique users who logged in per day
+// ZT1: Seat utilization trend – count unique users who logged in per day
 async function fetchDailyActiveUsers(
   accountTag: string,
   since: string,

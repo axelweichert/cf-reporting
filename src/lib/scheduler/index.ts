@@ -6,7 +6,7 @@
  * Only runs when SMTP env vars AND CF_API_TOKEN are configured.
  *
  * Schedules are stored in-memory (configured via env or API).
- * They do NOT survive restarts — this is by design (stateless app).
+ * They do NOT survive restarts – this is by design (stateless app).
  */
 
 import cron, { type ScheduledTask } from "node-cron";
@@ -62,13 +62,13 @@ export function initScheduler(): void {
 
   const token = process.env.CF_API_TOKEN;
   if (!token) {
-    console.log("[scheduler] CF_API_TOKEN not set — scheduled email delivery disabled");
+    console.log("[scheduler] CF_API_TOKEN not set – scheduled email delivery disabled");
     return;
   }
 
   if (!isSmtpConfiguredViaEnv()) {
-    console.log("[scheduler] SMTP env vars not configured — scheduled email delivery disabled");
-    // Don't return — SMTP might be configured later. We'll check on each run.
+    console.log("[scheduler] SMTP env vars not configured – scheduled email delivery disabled");
+    // Don't return – SMTP might be configured later. We'll check on each run.
   }
 
   _running = true;
@@ -144,20 +144,20 @@ async function runSchedule(scheduleId: string): Promise<void> {
       case "executive": {
         const data = await fetchExecutiveDataServer(token, schedule.zoneId, since, until);
         html = renderExecutiveEmail(data, meta);
-        if (!subject) subject = `[cf-reporting] Executive Report — ${meta.zoneName} — ${start} to ${end}`;
+        if (!subject) subject = `[cf-reporting] Executive Report – ${meta.zoneName} – ${start} to ${end}`;
         break;
       }
       case "security": {
         const data = await fetchSecurityDataServer(token, schedule.zoneId, since, until);
         html = renderSecurityEmail(data, meta);
-        if (!subject) subject = `[cf-reporting] Security Report — ${meta.zoneName} — ${start} to ${end}`;
+        if (!subject) subject = `[cf-reporting] Security Report – ${meta.zoneName} – ${start} to ${end}`;
         break;
       }
       default:
         throw new Error(`Unsupported report type: ${schedule.reportType}`);
     }
 
-    // No session SMTP — scheduler always uses env SMTP
+    // No session SMTP – scheduler always uses env SMTP
     await sendReportEmail(schedule.recipients, subject, html);
     updateRunStatus(scheduleId, "success");
     console.log(`[scheduler] Successfully sent ${schedule.reportType} report to ${schedule.recipients.length} recipient(s)`);

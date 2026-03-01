@@ -37,7 +37,7 @@ interface ColoPerformance {
   avgTtfb: number;
 }
 
-// All 302 Cloudflare edge locations — IATA codes → city + country
+// All 302 Cloudflare edge locations – IATA codes → city + country
 // Source: https://speed.cloudflare.com/locations
 const COLO_MAP: Record<string, { city: string; country: string }> = {
   AAE: { city: "Annabah", country: "Algeria" },

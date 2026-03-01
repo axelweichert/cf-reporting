@@ -37,10 +37,10 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check if session cookie exists (lightweight check — full auth is in route handlers)
+  // Check if session cookie exists (lightweight check – full auth is in route handlers)
   const sessionCookie = request.cookies.get("cf-reporting-session");
   if (!sessionCookie) {
-    // No session at all — redirect to login for page requests, 401 for API
+    // No session at all – redirect to login for page requests, 401 for API
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Authentication required" }, { status: 401 });
     }

@@ -207,7 +207,7 @@ export default function GatewayDnsPage() {
           <div>
             <h2 className="text-lg font-semibold text-white">HTTP Inspection</h2>
             <p className="mt-1 text-sm text-zinc-400">
-              Gateway HTTP/HTTPS traffic inspected via WARP — {formatNumber(data.httpInspection.totalRequests)} total requests
+              Gateway HTTP/HTTPS traffic inspected via WARP – {formatNumber(data.httpInspection.totalRequests)} total requests
             </p>
           </div>
 

@@ -415,7 +415,7 @@ function generateExecutiveSummary(
   if (traffic.cacheHitRatio >= 80) {
     parts.push(`Cache performance is strong with a ${traffic.cacheHitRatio.toFixed(1)}% hit ratio, meaning the majority of traffic is served from Cloudflare's edge without reaching the origin.`);
   } else if (traffic.cacheHitRatio >= 50) {
-    parts.push(`The cache hit ratio of ${traffic.cacheHitRatio.toFixed(1)}% indicates room for improvement — optimizing cache rules could reduce origin load and improve response times.`);
+    parts.push(`The cache hit ratio of ${traffic.cacheHitRatio.toFixed(1)}% indicates room for improvement – optimizing cache rules could reduce origin load and improve response times.`);
   } else {
     parts.push(`The cache hit ratio of ${traffic.cacheHitRatio.toFixed(1)}% is low, meaning most requests reach the origin server. Improving caching strategy should be a priority.`);
   }
@@ -432,7 +432,7 @@ function generateExecutiveSummary(
     } else if (rate4xx > 10) {
       parts.push(`Client errors (4xx) account for ${rate4xx.toFixed(1)}% of responses, which may indicate broken links, misconfigured redirects, or overly restrictive access rules.`);
     } else {
-      parts.push(`Error rates are healthy — 5xx server errors are at ${rate5xx.toFixed(2)}% and 4xx client errors at ${rate4xx.toFixed(1)}%.`);
+      parts.push(`Error rates are healthy – 5xx server errors are at ${rate5xx.toFixed(2)}% and 4xx client errors at ${rate4xx.toFixed(1)}%.`);
     }
   }
 

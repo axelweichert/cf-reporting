@@ -1,4 +1,4 @@
-/** Shared page title map — used by filter-bar, PDF export, and email system. */
+/** Shared page title map – used by filter-bar, PDF export, and email system. */
 export const PAGE_TITLES: Record<string, string> = {
   "/dashboard": "Dashboard",
   "/traffic": "Traffic Overview",

@@ -118,7 +118,7 @@ export async function generatePdf({
     await page
       .waitForSelector(".animate-pulse", { state: "hidden", timeout: 10_000 })
       .catch(() => {
-        /* no skeletons — fine */
+        /* no skeletons – fine */
       });
 
     // Wait for at least one chart or stat card to be visible
@@ -181,7 +181,7 @@ export async function generatePdf({
         .querySelectorAll("nextjs-portal, [data-nextjs-dialog-overlay], [data-nextjs-toast]")
         .forEach((el) => el.remove());
 
-      // Prevent page breaks from splitting charts — keep each card together
+      // Prevent page breaks from splitting charts – keep each card together
       document
         .querySelectorAll(".rounded-xl, .rounded-lg")
         .forEach((el) => {

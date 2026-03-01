@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "Invalid password" }, { status: 401 });
     }
 
-    // Success — set session flag (don't reset rate limit to prevent abuse)
+    // Success – set session flag (don't reset rate limit to prevent abuse)
     const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
     session.siteAuthenticated = true;
     await session.save();

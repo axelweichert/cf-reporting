@@ -114,7 +114,7 @@ export async function fetchSecurityDataServer(
     fetchTopCountriesBlocked(client, zoneTag, since, until),
   ]);
 
-  // Get top block rules (simplified — no rule name resolution in email context)
+  // Get top block rules (simplified – no rule name resolution in email context)
   const rules = await fetchTopRules(client, zoneTag, since, until);
 
   return {
@@ -496,14 +496,14 @@ function generateExecutiveSummary(
   } else if (traffic.cacheHitRatio >= 50) {
     parts.push(`The cache hit ratio of ${traffic.cacheHitRatio.toFixed(1)}% indicates room for improvement.`);
   } else {
-    parts.push(`The cache hit ratio of ${traffic.cacheHitRatio.toFixed(1)}% is low — improving caching strategy should be a priority.`);
+    parts.push(`The cache hit ratio of ${traffic.cacheHitRatio.toFixed(1)}% is low – improving caching strategy should be a priority.`);
   }
 
   const total = statusCodes.reduce((s, c) => s + c.value, 0);
   if (total > 0) {
     const rate5xx = ((statusCodes.find((c) => c.name === "5xx")?.value || 0) / total) * 100;
     if (rate5xx > 1) parts.push(`Server error rate is elevated at ${rate5xx.toFixed(1)}%.`);
-    else parts.push(`Error rates are healthy — 5xx at ${rate5xx.toFixed(2)}%.`);
+    else parts.push(`Error rates are healthy – 5xx at ${rate5xx.toFixed(2)}%.`);
   }
 
   parts.push(`Performance: median TTFB ${fmtMs(performance.ttfb.p50)} (P95: ${fmtMs(performance.ttfb.p95)}), origin response ${fmtMs(performance.originResponseTime.p50)} (P95: ${fmtMs(performance.originResponseTime.p95)}).`);
