@@ -261,28 +261,8 @@ export function formatCountry(input: string): string {
   return code ? `${input} (${code})` : input;
 }
 
-// Helper: Split a date range into daily chunks for GraphQL queries to avoid limit truncation
-export function splitDateRange(since: string, until: string): Array<{ since: string; until: string }> {
-  const start = new Date(since);
-  const end = new Date(until);
-  const chunks: Array<{ since: string; until: string }> = [];
-
-  const current = new Date(start);
-  while (current < end) {
-    const chunkEnd = new Date(current);
-    chunkEnd.setUTCDate(chunkEnd.getUTCDate() + 1);
-    if (chunkEnd > end) chunkEnd.setTime(end.getTime());
-
-    chunks.push({
-      since: current.toISOString(),
-      until: chunkEnd.toISOString(),
-    });
-
-    current.setUTCDate(current.getUTCDate() + 1);
-  }
-
-  return chunks;
-}
+// Re-export from shared module for backwards compatibility
+export { splitDateRange } from "@/lib/date-utils";
 
 // Helper: Fetch Cloudflare One / Zero Trust plan info (cached per account)
 export interface ZtPlanInfo {

@@ -1,6 +1,7 @@
 /**
  * Next.js instrumentation hook.
- * Runs once when the server starts. Used to initialize the email scheduler.
+ * Runs once when the server starts. Used to initialize the email scheduler
+ * and the data collector.
  */
 
 export async function register() {
@@ -8,5 +9,8 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { initScheduler } = await import("@/lib/scheduler");
     initScheduler();
+
+    const { initCollector } = await import("@/lib/collector");
+    initCollector();
   }
 }

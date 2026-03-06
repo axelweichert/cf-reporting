@@ -18,4 +18,12 @@ services:
       - SMTP_SECURE=${SMTP_SECURE:-true}
       # Optional: protect the site with a password (required when env tokens are set)
       - APP_PASSWORD=${APP_PASSWORD:-}
+      # Data collection settings (optional)
+      - COLLECTION_SCHEDULE=${COLLECTION_SCHEDULE:-0 */6 * * *}
+      - DATA_RETENTION_DAYS=${DATA_RETENTION_DAYS:-90}
+    volumes:
+      - cf_data:/app/data
     restart: unless-stopped
+
+volumes:
+  cf_data:

@@ -24,6 +24,11 @@ services:
       - SMTP_SECURE=${SMTP_SECURE:-true}
       - APP_PASSWORD=${APP_PASSWORD:-}
       - SECURE_COOKIES=true
+      # Data collection settings (optional)
+      - COLLECTION_SCHEDULE=${COLLECTION_SCHEDULE:-0 */6 * * *}
+      - DATA_RETENTION_DAYS=${DATA_RETENTION_DAYS:-90}
+    volumes:
+      - cf_data:/app/data
     restart: unless-stopped
 
   caddy:
@@ -46,5 +51,6 @@ services:
     restart: unless-stopped
 
 volumes:
+  cf_data:
   caddy_data:
   caddy_config:

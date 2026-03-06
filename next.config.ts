@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  serverExternalPackages: ["playwright"],
+  serverExternalPackages: ["playwright", "better-sqlite3"],
   devIndicators: false,
 };
 
