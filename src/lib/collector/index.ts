@@ -8,14 +8,6 @@
 import cron, { type ScheduledTask } from "node-cron";
 import { CloudflareClient } from "@/lib/cf-client";
 import { discoverZones } from "@/lib/token";
-import { isDbAvailable } from "@/lib/db";
-import {
-  upsertSnapshot,
-  logCollection,
-  generateRunId,
-  cleanupOldData,
-  type ReportType,
-} from "@/lib/snapshots";
 import {
   fetchExecutiveDataServer,
   fetchSecurityDataServer,
@@ -24,6 +16,7 @@ import {
   fetchDnsDataServer,
 } from "@/lib/email/report-data";
 
+type ReportType = "executive" | "security" | "traffic" | "performance" | "dns";
 const REPORT_TYPES: ReportType[] = ["executive", "security", "traffic", "performance", "dns"];
 
 let _running = false;
@@ -31,6 +24,26 @@ let _lastRunAt: string | null = null;
 let _lastRunStatus: "success" | "partial" | "error" | null = null;
 let _nextRunAt: string | null = null;
 let _cronTask: ScheduledTask | null = null;
+let _dbAvailable: boolean | null = null;
+
+/** Try to initialize SQLite lazily – returns true if available. */
+function checkDb(): boolean {
+  if (_dbAvailable !== null) return _dbAvailable;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isDbAvailable } = require("@/lib/db") as { isDbAvailable: () => boolean };
+    _dbAvailable = isDbAvailable();
+  } catch {
+    _dbAvailable = false;
+  }
+  return _dbAvailable;
+}
+
+/** Lazy-load snapshot helpers. */
+function getSnapshots() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("@/lib/snapshots") as typeof import("@/lib/snapshots");
+}
 
 export function initCollector(): void {
   const token = process.env.CF_API_TOKEN;
@@ -39,7 +52,7 @@ export function initCollector(): void {
     return;
   }
 
-  if (!isDbAvailable()) {
+  if (!checkDb()) {
     console.log("[collector] SQLite unavailable – data collection disabled");
     return;
   }
@@ -68,8 +81,10 @@ export async function runCollection(): Promise<void> {
   const token = process.env.CF_API_TOKEN;
   if (!token) return;
 
+  const snap = getSnapshots();
+
   _running = true;
-  const runId = generateRunId();
+  const runId = snap.generateRunId();
   const startTime = Date.now();
   let errorCount = 0;
   let successCount = 0;
@@ -101,15 +116,15 @@ export async function runCollection(): Promise<void> {
         const fetchStart = Date.now();
         try {
           const data = await fetchReportData(token, zone.id, sinceStr, untilStr, reportType);
-          upsertSnapshot(zone.id, zone.name, reportType, sinceStr, untilStr, data);
+          snap.upsertSnapshot(zone.id, zone.name, reportType, sinceStr, untilStr, data);
           const duration = Date.now() - fetchStart;
-          logCollection(runId, zone.id, zone.name, reportType, "success", duration);
+          snap.logCollection(runId, zone.id, zone.name, reportType, "success", duration);
           successCount++;
           console.log(`[collector] ${zone.name} / ${reportType} – OK (${duration}ms)`);
         } catch (err) {
           const duration = Date.now() - fetchStart;
           const message = err instanceof Error ? err.message : "Unknown error";
-          logCollection(runId, zone.id, zone.name, reportType, "error", duration, message);
+          snap.logCollection(runId, zone.id, zone.name, reportType, "error", duration, message);
           errorCount++;
           console.error(`[collector] ${zone.name} / ${reportType} – ERROR: ${message}`);
         }
@@ -118,7 +133,7 @@ export async function runCollection(): Promise<void> {
 
     // Retention cleanup
     const retentionDays = parseInt(process.env.DATA_RETENTION_DAYS || "90", 10);
-    const cleaned = cleanupOldData(retentionDays);
+    const cleaned = snap.cleanupOldData(retentionDays);
     if (cleaned.deletedSnapshots > 0 || cleaned.deletedLogs > 0) {
       console.log(`[collector] Cleanup: removed ${cleaned.deletedSnapshots} snapshots, ${cleaned.deletedLogs} log entries`);
     }
@@ -158,7 +173,7 @@ async function fetchReportData(
 
 export function getCollectorStatus() {
   return {
-    enabled: !!process.env.CF_API_TOKEN && isDbAvailable(),
+    enabled: !!process.env.CF_API_TOKEN && checkDb(),
     running: _running,
     lastRunAt: _lastRunAt,
     lastRunStatus: _lastRunStatus,

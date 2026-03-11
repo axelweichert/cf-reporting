@@ -175,3 +175,18 @@ function updateRunStatus(id: string, status: "success" | "error", error?: string
   schedule.lastRunStatus = status;
   schedule.lastRunError = error;
 }
+
+/**
+ * Initialize the data collector.
+ * Re-exported here so instrumentation.ts can import it from a module
+ * that Turbopack already bundles (the collector module uses better-sqlite3
+ * which Turbopack drops during static analysis).
+ */
+export async function initCollector(): Promise<void> {
+  try {
+    const collector = await import("@/lib/collector/index");
+    collector.initCollector();
+  } catch (err) {
+    console.warn("[scheduler] Could not load data collector:", (err as Error).message);
+  }
+}

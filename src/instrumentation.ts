@@ -7,10 +7,8 @@
 export async function register() {
   // Only run in the Node.js runtime (not Edge)
   if (process.env.NEXT_RUNTIME === "nodejs") {
-    const { initScheduler } = await import("@/lib/scheduler");
+    const { initScheduler, initCollector } = await import("@/lib/scheduler");
     initScheduler();
-
-    const { initCollector } = await import("@/lib/collector");
-    initCollector();
+    await initCollector();
   }
 }

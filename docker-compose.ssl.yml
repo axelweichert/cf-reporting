@@ -29,6 +29,11 @@ services:
       - DATA_RETENTION_DAYS=${DATA_RETENTION_DAYS:-90}
     volumes:
       - cf_data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     restart: unless-stopped
 
   caddy:
