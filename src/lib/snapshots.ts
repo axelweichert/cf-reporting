@@ -6,7 +6,25 @@
 import { getDb } from "@/lib/db";
 import { randomUUID } from "crypto";
 
-export type ReportType = "executive" | "security" | "traffic" | "performance" | "dns";
+export type ReportType =
+  // Zone-scoped
+  | "executive"
+  | "security"
+  | "traffic"
+  | "performance"
+  | "dns"
+  | "origin-health"
+  | "ssl"
+  | "bots"
+  | "api-shield"
+  | "ddos"
+  // Account-scoped (Zero Trust)
+  | "gateway-dns"
+  | "gateway-network"
+  | "shadow-it"
+  | "devices-users"
+  | "zt-summary"
+  | "access-audit";
 
 export interface SnapshotRow {
   id: number;

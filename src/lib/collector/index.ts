@@ -1,23 +1,48 @@
 /**
- * Scheduled data collector – fetches all 5 report types for every zone
- * and stores snapshots in SQLite for persistence across restarts.
+ * Scheduled data collector – fetches all 16 report types for every zone
+ * and account, then stores snapshots in SQLite for persistence across restarts.
+ *
+ * Zone-scoped (10): executive, security, traffic, performance, dns,
+ *                   origin-health, ssl, bots, api-shield, ddos
+ * Account-scoped (6): gateway-dns, gateway-network, shadow-it,
+ *                     devices-users, zt-summary, access-audit
  *
  * Requires CF_API_TOKEN + writable SQLite database.
  */
 
 import cron, { type ScheduledTask } from "node-cron";
 import { CloudflareClient } from "@/lib/cf-client";
-import { discoverZones } from "@/lib/token";
-import {
-  fetchExecutiveDataServer,
-  fetchSecurityDataServer,
-  fetchTrafficDataServer,
-  fetchPerformanceDataServer,
-  fetchDnsDataServer,
-} from "@/lib/email/report-data";
+import { discoverZones, discoverAccounts } from "@/lib/token";
 
-type ReportType = "executive" | "security" | "traffic" | "performance" | "dns";
-const REPORT_TYPES: ReportType[] = ["executive", "security", "traffic", "performance", "dns"];
+type ZoneReportType =
+  | "executive"
+  | "security"
+  | "traffic"
+  | "performance"
+  | "dns"
+  | "origin-health"
+  | "ssl"
+  | "bots"
+  | "api-shield"
+  | "ddos";
+
+type AccountReportType =
+  | "gateway-dns"
+  | "gateway-network"
+  | "shadow-it"
+  | "devices-users"
+  | "zt-summary"
+  | "access-audit";
+
+const ZONE_REPORT_TYPES: ZoneReportType[] = [
+  "executive", "security", "traffic", "performance", "dns",
+  "origin-health", "ssl", "bots", "api-shield", "ddos",
+];
+
+const ACCOUNT_REPORT_TYPES: AccountReportType[] = [
+  "gateway-dns", "gateway-network", "shadow-it",
+  "devices-users", "zt-summary", "access-audit",
+];
 
 let _running = false;
 let _lastRunAt: string | null = null;
@@ -43,6 +68,24 @@ function checkDb(): boolean {
 function getSnapshots() {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require("@/lib/snapshots") as typeof import("@/lib/snapshots");
+}
+
+/** Lazy-load zone-scoped report data fetchers (original 5). */
+function getReportData() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("@/lib/email/report-data") as typeof import("@/lib/email/report-data");
+}
+
+/** Lazy-load zone-scoped report data fetchers (new 5). */
+function getReportDataZone() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("@/lib/email/report-data-zone") as typeof import("@/lib/email/report-data-zone");
+}
+
+/** Lazy-load account-scoped (Zero Trust) report data fetchers. */
+function getReportDataZt() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("@/lib/email/report-data-zt") as typeof import("@/lib/email/report-data-zt");
 }
 
 export function initCollector(): void {
@@ -93,16 +136,19 @@ export async function runCollection(): Promise<void> {
 
   try {
     const client = new CloudflareClient(token);
-    const zones = await discoverZones(client);
+    const [zones, accounts] = await Promise.all([
+      discoverZones(client),
+      discoverAccounts(client),
+    ]);
 
-    if (zones.length === 0) {
-      console.warn("[collector] No zones discovered – check token permissions");
+    if (zones.length === 0 && accounts.length === 0) {
+      console.warn("[collector] No zones or accounts discovered – check token permissions");
       _lastRunStatus = "error";
       _lastRunAt = new Date().toISOString();
       return;
     }
 
-    console.log(`[collector] Discovered ${zones.length} zone(s)`);
+    console.log(`[collector] Discovered ${zones.length} zone(s), ${accounts.length} account(s)`);
 
     // 7-day collection period
     const until = new Date();
@@ -111,11 +157,15 @@ export async function runCollection(): Promise<void> {
     const sinceStr = since.toISOString();
     const untilStr = until.toISOString();
 
+    // Zone-scoped collection (10 report types)
     for (const zone of zones) {
-      for (const reportType of REPORT_TYPES) {
+      for (const reportType of ZONE_REPORT_TYPES) {
         const fetchStart = Date.now();
         try {
-          const data = await fetchReportData(token, zone.id, sinceStr, untilStr, reportType);
+          const data = await fetchZoneReportData(
+            token, zone.id, sinceStr, untilStr, reportType,
+            accounts[0]?.id, // for DDoS L3/L4 data
+          );
           snap.upsertSnapshot(zone.id, zone.name, reportType, sinceStr, untilStr, data);
           const duration = Date.now() - fetchStart;
           snap.logCollection(runId, zone.id, zone.name, reportType, "success", duration);
@@ -127,6 +177,29 @@ export async function runCollection(): Promise<void> {
           snap.logCollection(runId, zone.id, zone.name, reportType, "error", duration, message);
           errorCount++;
           console.error(`[collector] ${zone.name} / ${reportType} – ERROR: ${message}`);
+        }
+      }
+    }
+
+    // Account-scoped collection (6 Zero Trust report types)
+    for (const account of accounts) {
+      for (const reportType of ACCOUNT_REPORT_TYPES) {
+        const fetchStart = Date.now();
+        try {
+          const data = await fetchAccountReportData(
+            token, account.id, sinceStr, untilStr, reportType,
+          );
+          snap.upsertSnapshot(account.id, account.name, reportType, sinceStr, untilStr, data);
+          const duration = Date.now() - fetchStart;
+          snap.logCollection(runId, account.id, account.name, reportType, "success", duration);
+          successCount++;
+          console.log(`[collector] ${account.name} / ${reportType} – OK (${duration}ms)`);
+        } catch (err) {
+          const duration = Date.now() - fetchStart;
+          const message = err instanceof Error ? err.message : "Unknown error";
+          snap.logCollection(runId, account.id, account.name, reportType, "error", duration, message);
+          errorCount++;
+          console.error(`[collector] ${account.name} / ${reportType} – ERROR: ${message}`);
         }
       }
     }
@@ -150,24 +223,79 @@ export async function runCollection(): Promise<void> {
   }
 }
 
-async function fetchReportData(
+async function fetchZoneReportData(
   token: string,
   zoneId: string,
   since: string,
   until: string,
-  reportType: ReportType,
+  reportType: ZoneReportType,
+  accountId?: string,
 ): Promise<unknown> {
   switch (reportType) {
-    case "executive":
-      return fetchExecutiveDataServer(token, zoneId, since, until);
-    case "security":
-      return fetchSecurityDataServer(token, zoneId, since, until);
-    case "traffic":
-      return fetchTrafficDataServer(token, zoneId, since, until);
-    case "performance":
-      return fetchPerformanceDataServer(token, zoneId, since, until);
-    case "dns":
-      return fetchDnsDataServer(token, zoneId, since, until);
+    case "executive": {
+      const m = getReportData();
+      return m.fetchExecutiveDataServer(token, zoneId, since, until);
+    }
+    case "security": {
+      const m = getReportData();
+      return m.fetchSecurityDataServer(token, zoneId, since, until);
+    }
+    case "traffic": {
+      const m = getReportData();
+      return m.fetchTrafficDataServer(token, zoneId, since, until);
+    }
+    case "performance": {
+      const m = getReportData();
+      return m.fetchPerformanceDataServer(token, zoneId, since, until);
+    }
+    case "dns": {
+      const m = getReportData();
+      return m.fetchDnsDataServer(token, zoneId, since, until);
+    }
+    case "origin-health": {
+      const m = getReportDataZone();
+      return m.fetchOriginHealthDataServer(token, zoneId, since, until);
+    }
+    case "ssl": {
+      const m = getReportDataZone();
+      return m.fetchSslDataServer(token, zoneId, since, until);
+    }
+    case "bots": {
+      const m = getReportDataZone();
+      return m.fetchBotDataServer(token, zoneId, since, until);
+    }
+    case "api-shield": {
+      const m = getReportDataZone();
+      return m.fetchApiShieldDataServer(token, zoneId, since, until);
+    }
+    case "ddos": {
+      const m = getReportDataZone();
+      return m.fetchDdosDataServer(token, zoneId, since, until, accountId);
+    }
+  }
+}
+
+async function fetchAccountReportData(
+  token: string,
+  accountId: string,
+  since: string,
+  until: string,
+  reportType: AccountReportType,
+): Promise<unknown> {
+  const m = getReportDataZt();
+  switch (reportType) {
+    case "gateway-dns":
+      return m.fetchGatewayDnsDataServer(token, accountId, since, until);
+    case "gateway-network":
+      return m.fetchGatewayNetworkDataServer(token, accountId, since, until);
+    case "shadow-it":
+      return m.fetchShadowItDataServer(token, accountId, since, until);
+    case "devices-users":
+      return m.fetchDevicesUsersDataServer(token, accountId);
+    case "zt-summary":
+      return m.fetchZtSummaryDataServer(token, accountId, since, until);
+    case "access-audit":
+      return m.fetchAccessAuditDataServer(token, accountId, since, until);
   }
 }
 
@@ -179,6 +307,9 @@ export function getCollectorStatus() {
     lastRunStatus: _lastRunStatus,
     nextRunAt: _nextRunAt,
     schedule: process.env.COLLECTION_SCHEDULE || "0 */6 * * *",
+    zoneReportTypes: ZONE_REPORT_TYPES,
+    accountReportTypes: ACCOUNT_REPORT_TYPES,
+    totalReportTypes: ZONE_REPORT_TYPES.length + ACCOUNT_REPORT_TYPES.length,
   };
 }
 
