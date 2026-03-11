@@ -6,6 +6,7 @@ import type { SmtpConfigResponse, ScheduleConfig, EmailStatus, ReportType, Sched
 import {
   Mail, Server, Clock, AlertTriangle, CheckCircle, Info,
   Trash2, ToggleLeft, ToggleRight, Plus, Send, RefreshCw,
+  Database, Play,
 } from "lucide-react";
 
 const REPORT_TYPES: Array<{ value: ReportType; label: string }> = [
@@ -59,13 +60,35 @@ export default function SettingsPage() {
 
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  // Collector
+  const [collector, setCollector] = useState<{
+    enabled: boolean;
+    running: boolean;
+    lastRunAt: string | null;
+    lastRunStatus: string | null;
+    schedule: string;
+    snapshotCount: number;
+    recentRuns: Array<{
+      run_id: string;
+      started_at: string;
+      total: number;
+      success: number;
+      errors: number;
+      skipped: number;
+      total_duration_ms: number;
+    }>;
+  } | null>(null);
+  const [triggering, setTriggering] = useState(false);
+  const [collectorMessage, setCollectorMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
   // Load data
   const loadData = useCallback(async () => {
     try {
-      const [statusRes, smtpRes, schedulesRes] = await Promise.all([
+      const [statusRes, smtpRes, schedulesRes, collectorRes] = await Promise.all([
         fetch("/api/email/status"),
         fetch("/api/email/smtp"),
         fetch("/api/email/schedules"),
+        fetch("/api/collector/status"),
       ]);
       if (statusRes.ok) setStatus(await statusRes.json());
       if (smtpRes.ok) {
@@ -87,10 +110,56 @@ export default function SettingsPage() {
         const data = await schedulesRes.json();
         setSchedules(data.schedules || []);
       }
+      if (collectorRes.ok) setCollector(await collectorRes.json());
     } catch { /* ignore */ }
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Auto-refresh collector status while running
+  useEffect(() => {
+    if (!collector?.running) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch("/api/collector/status");
+        if (res.ok) setCollector(await res.json());
+      } catch { /* ignore */ }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [collector?.running]);
+
+  // Trigger manual collection
+  const handleTriggerCollection = async () => {
+    setTriggering(true);
+    setCollectorMessage(null);
+    try {
+      const res = await fetch("/api/collector/trigger", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setCollectorMessage({ type: "success", text: "Collection started" });
+        // Start polling
+        setTimeout(async () => {
+          try {
+            const r = await fetch("/api/collector/status");
+            if (r.ok) setCollector(await r.json());
+          } catch { /* ignore */ }
+        }, 1000);
+      } else {
+        setCollectorMessage({ type: "error", text: data.error });
+      }
+    } catch {
+      setCollectorMessage({ type: "error", text: "Failed to trigger collection" });
+    }
+    setTriggering(false);
+  };
+
+  // Refresh collector status
+  const loadCollectorStatus = async () => {
+    try {
+      const res = await fetch("/api/collector/status");
+      if (res.ok) setCollector(await res.json());
+    } catch { /* ignore */ }
+  };
 
   // Save SMTP
   const handleSaveSmtp = async () => {
@@ -222,6 +291,98 @@ export default function SettingsPage() {
             SMTP settings are stored in your browser session and will be lost when the session expires.
             Set SMTP_* environment variables for persistent configuration.
           </p>
+        )}
+      </div>
+
+      {/* Data Collection */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+        <div className="flex items-center justify-between">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-white">
+            <Database size={18} className="text-cyan-400" />
+            Data Collection
+          </h2>
+          <div className="flex gap-2">
+            <button onClick={() => loadCollectorStatus()} className="rounded-lg border border-zinc-700 p-2 text-zinc-400 hover:bg-zinc-800 hover:text-white" title="Refresh">
+              <RefreshCw size={14} />
+            </button>
+            <button
+              onClick={handleTriggerCollection}
+              disabled={triggering || collector?.running || !collector?.enabled}
+              className="flex items-center gap-2 rounded-lg bg-cyan-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-cyan-700 disabled:opacity-50"
+            >
+              <Play size={14} />
+              {collector?.running ? "Collecting..." : triggering ? "Starting..." : "Collect Now"}
+            </button>
+          </div>
+        </div>
+
+        {/* Status badges row */}
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatusBadge label="Collector" value={collector?.enabled ? "Enabled" : "Disabled"} ok={collector?.enabled} />
+          <StatusBadge label="Status" value={collector?.running ? "Running" : "Idle"} ok={collector?.running ? true : undefined} />
+          <StatusBadge label="Schedule" value={collector?.schedule || "\u2013"} ok={!!collector?.schedule} />
+          <StatusBadge label="Snapshots" value={String(collector?.snapshotCount ?? 0)} ok={(collector?.snapshotCount ?? 0) > 0} />
+        </div>
+
+        {/* Last run info */}
+        {collector?.lastRunAt && (
+          <div className="mt-3 text-xs text-zinc-400">
+            Last run: {new Date(collector.lastRunAt).toLocaleString()} \u2013{" "}
+            <span className={collector.lastRunStatus === "success" ? "text-emerald-400" : collector.lastRunStatus === "error" ? "text-red-400" : "text-yellow-400"}>
+              {collector.lastRunStatus}
+            </span>
+          </div>
+        )}
+
+        {/* Running indicator */}
+        {collector?.running && (
+          <div className="mt-3 flex items-center gap-2 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-3 py-2">
+            <RefreshCw size={14} className="animate-spin text-cyan-400" />
+            <span className="text-xs text-cyan-300">Collection in progress... Auto-refreshing every 5s.</span>
+          </div>
+        )}
+
+        {collectorMessage && (
+          <div className={`mt-3 rounded-md px-3 py-2 text-xs ${collectorMessage.type === "success" ? "border border-emerald-500/20 bg-emerald-500/5 text-emerald-400" : "border border-red-500/20 bg-red-500/5 text-red-400"}`}>
+            {collectorMessage.text}
+          </div>
+        )}
+
+        {!collector?.enabled && (
+          <p className="mt-3 text-xs text-zinc-500">
+            Data collection requires CF_API_TOKEN and a writable data volume. Mount a Docker volume at /app/data to enable persistent storage.
+          </p>
+        )}
+
+        {/* Recent runs table */}
+        {collector?.recentRuns && collector.recentRuns.length > 0 && (
+          <div className="mt-4">
+            <h3 className="text-sm font-medium text-zinc-300">Recent Runs</h3>
+            <div className="mt-2 overflow-x-auto rounded-lg border border-zinc-800">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-zinc-800 text-left text-zinc-500">
+                    <th className="px-3 py-2">Run</th>
+                    <th className="px-3 py-2">Started</th>
+                    <th className="px-3 py-2">Success</th>
+                    <th className="px-3 py-2">Errors</th>
+                    <th className="px-3 py-2">Duration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {collector.recentRuns.map((run, i) => (
+                    <tr key={run.run_id} className={i % 2 === 0 ? "bg-zinc-900/30" : ""}>
+                      <td className="px-3 py-2 font-mono text-zinc-400">{run.run_id.slice(0, 8)}</td>
+                      <td className="px-3 py-2 text-zinc-400">{new Date(run.started_at).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-emerald-400">{run.success}</td>
+                      <td className="px-3 py-2 text-red-400">{run.errors > 0 ? run.errors : "\u2013"}</td>
+                      <td className="px-3 py-2 text-zinc-400">{(run.total_duration_ms / 1000).toFixed(1)}s</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </div>
 

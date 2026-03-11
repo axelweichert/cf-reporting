@@ -22,6 +22,7 @@ import {
   ShieldEllipsis,
   HeartPulse,
   Settings,
+  Database,
 } from "lucide-react";
 import { useState } from "react";
 import type { Permission } from "@/types/cloudflare";
@@ -84,6 +85,7 @@ const navGroups: NavGroup[] = [
   {
     label: "System",
     items: [
+      { label: "Data History", href: "/history", icon: <Database size={18} /> },
       { label: "Settings", href: "/settings", icon: <Settings size={18} /> },
     ],
   },
