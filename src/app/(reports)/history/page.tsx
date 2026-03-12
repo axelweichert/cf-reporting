@@ -15,7 +15,10 @@ import {
   Inbox,
 } from "lucide-react";
 
-type ReportType = "executive" | "security" | "traffic" | "performance" | "dns";
+type ReportType =
+  | "executive" | "security" | "traffic" | "performance" | "dns"
+  | "origin-health" | "ssl" | "bots" | "api-shield" | "ddos"
+  | "gateway-dns" | "gateway-network" | "shadow-it" | "devices-users" | "zt-summary" | "access-audit";
 
 interface SnapshotMeta {
   id: number;
@@ -37,6 +40,17 @@ const REPORT_TYPE_LABELS: Record<ReportType, string> = {
   traffic: "Traffic",
   performance: "Performance",
   dns: "DNS",
+  "origin-health": "Origin Health",
+  ssl: "SSL / TLS",
+  bots: "Bot Analysis",
+  "api-shield": "API Shield",
+  ddos: "DDoS",
+  "gateway-dns": "Gateway DNS",
+  "gateway-network": "Gateway Network",
+  "shadow-it": "Shadow IT",
+  "devices-users": "Devices & Users",
+  "zt-summary": "ZT Summary",
+  "access-audit": "Access Audit",
 };
 
 const REPORT_TYPE_COLORS: Record<ReportType, string> = {
@@ -45,6 +59,17 @@ const REPORT_TYPE_COLORS: Record<ReportType, string> = {
   traffic: "bg-blue-500/10 text-blue-400 border-blue-500/20",
   performance: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
   dns: "bg-purple-500/10 text-purple-400 border-purple-500/20",
+  "origin-health": "bg-pink-500/10 text-pink-400 border-pink-500/20",
+  ssl: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
+  bots: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+  "api-shield": "bg-indigo-500/10 text-indigo-400 border-indigo-500/20",
+  ddos: "bg-rose-500/10 text-rose-400 border-rose-500/20",
+  "gateway-dns": "bg-teal-500/10 text-teal-400 border-teal-500/20",
+  "gateway-network": "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
+  "shadow-it": "bg-violet-500/10 text-violet-400 border-violet-500/20",
+  "devices-users": "bg-sky-500/10 text-sky-400 border-sky-500/20",
+  "zt-summary": "bg-lime-500/10 text-lime-400 border-lime-500/20",
+  "access-audit": "bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20",
 };
 
 function formatRelativeTime(dateStr: string): string {

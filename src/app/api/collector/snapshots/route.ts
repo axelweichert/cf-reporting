@@ -7,7 +7,11 @@ import {
   type ReportType,
 } from "@/lib/snapshots";
 
-const VALID_REPORT_TYPES = new Set(["executive", "security", "traffic", "performance", "dns"]);
+const VALID_REPORT_TYPES = new Set([
+  "executive", "security", "traffic", "performance", "dns",
+  "origin-health", "ssl", "bots", "api-shield", "ddos",
+  "gateway-dns", "gateway-network", "shadow-it", "devices-users", "zt-summary", "access-audit",
+]);
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth();

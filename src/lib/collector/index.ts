@@ -36,7 +36,7 @@ type AccountReportType =
 
 const ZONE_REPORT_TYPES: ZoneReportType[] = [
   "executive", "security", "traffic", "performance", "dns",
-  "origin-health", "ssl", "bots", "api-shield", "ddos",
+  "origin-health", "ssl", "bots", "ddos", "api-shield",
 ];
 
 const ACCOUNT_REPORT_TYPES: AccountReportType[] = [

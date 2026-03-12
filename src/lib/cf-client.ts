@@ -144,12 +144,12 @@ export class CloudflareClient {
     return data;
   }
 
-  async restPaginated<T>(path: string): Promise<T[]> {
+  async restPaginated<T>(path: string, maxPages = 100): Promise<T[]> {
     const results: T[] = [];
     let page = 1;
     const perPage = 50;
 
-    while (true) {
+    while (page <= maxPages) {
       const separator = path.includes("?") ? "&" : "?";
       const response = await this.rest<T[]>(
         `${path}${separator}page=${page}&per_page=${perPage}`,

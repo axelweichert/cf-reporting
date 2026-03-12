@@ -1004,7 +1004,7 @@ async function fetchManagedOperations(
       host: string;
       endpoint: string;
       last_updated: string;
-    }>(`/zones/${zoneId}/api_gateway/operations`);
+    }>(`/zones/${zoneId}/api_gateway/operations`, 5);
 
     return ops.map((o) => ({
       operationId: o.operation_id,

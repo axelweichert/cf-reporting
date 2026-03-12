@@ -93,7 +93,7 @@ async function fetchAppNameMap(
 ): Promise<Map<string, string>> {
   try {
     const apps = await client.restPaginated<{ id: string; name: string }>(
-      `/accounts/${accountId}/access/apps`,
+      `/accounts/${accountId}/access/apps`, 10,
     );
     const map = new Map<string, string>();
     for (const app of apps) {
@@ -1337,7 +1337,7 @@ export async function fetchDevicesUsersDataServer(
 
 async function fetchDevicesRest(client: CloudflareClient, accountId: string): Promise<CfDevice[]> {
   try {
-    return await client.restPaginated<CfDevice>(`/accounts/${accountId}/devices`);
+    return await client.restPaginated<CfDevice>(`/accounts/${accountId}/devices`, 20);
   } catch {
     return [];
   }
@@ -1345,7 +1345,7 @@ async function fetchDevicesRest(client: CloudflareClient, accountId: string): Pr
 
 async function fetchUsersRest(client: CloudflareClient, accountId: string): Promise<CfAccessUser[]> {
   try {
-    return await client.restPaginated<CfAccessUser>(`/accounts/${accountId}/access/users`);
+    return await client.restPaginated<CfAccessUser>(`/accounts/${accountId}/access/users`, 20);
   } catch {
     return [];
   }
