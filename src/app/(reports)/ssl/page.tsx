@@ -1,10 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchSslData, type SslData } from "@/lib/queries/ssl";
-import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries } from "@/lib/compare-utils";
+import { pctChange, buildComparisonChart, formatTimeSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -14,7 +14,7 @@ import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber } from "@/components/charts/theme";
 import { ShieldCheck, CheckCircle, XCircle } from "lucide-react";
-import { format, formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
 
 function SettingBadge({ enabled, label }: { enabled: boolean; label: string }) {
   return (
@@ -50,22 +50,15 @@ export default function SslPage() {
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
-  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<SslData>({
+  const { data, loading, error, errorType, refetch, prevData, cmpLoading } = useReportData<SslData>({
     reportType: "ssl",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: (s, u) => {
       if (!zoneId) throw new Error("No zone available");
-      return fetchSslData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
-    },
-    prevSince: `${prev.start}T00:00:00Z`,
-    prevUntil: `${prev.end}T00:00:00Z`,
-    prevLiveFetcher: () => {
-      if (!zoneId) throw new Error("No zone available");
-      return fetchSslData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
+      return fetchSslData(zoneId, s, u);
     },
   });
 
@@ -77,27 +70,23 @@ export default function SslPage() {
     );
   }
 
-  const cmpLoading = compareEnabled && prevLoading;
+  const addEncRatio = <T extends { totalRequests: number; encryptedRequests: number }>(points: T[]) =>
+    points.map((p) => ({
+      ...p,
+      encryptedRatio: p.totalRequests > 0 ? (p.encryptedRequests / p.totalRequests) * 100 : 0,
+    }));
 
-  const encTsFormatted = (data?.encryptionTimeSeries || []).map((p) => ({
-    ...p,
-    encryptedRatio: p.totalRequests > 0 ? (p.encryptedRequests / p.totalRequests) * 100 : 0,
-    date: format(new Date(p.date), "MMM d HH:mm"),
-  }));
+  const encTsFormatted = formatTimeSeries(addEncRatio(data?.encryptionTimeSeries || []));
 
   // Chart overlay: Encryption ratio over time
   const encSeries = [{ key: "encryptedRatio", label: "Encrypted %", color: "#10b981" }];
-  let encData: Record<string, unknown>[] = encTsFormatted;
-  let encSeriesFull = encSeries;
-  if (compareEnabled && prevData) {
-    const prevEncFormatted = (prevData.encryptionTimeSeries || []).map((p) => ({
-      ...p,
-      encryptedRatio: p.totalRequests > 0 ? (p.encryptedRequests / p.totalRequests) * 100 : 0,
-      date: format(new Date(p.date), "MMM d HH:mm"),
-    }));
-    encData = mergeComparisonTimeSeries(encTsFormatted, prevEncFormatted, ["encryptedRatio"]);
-    encSeriesFull = [...encSeries, ...makeComparisonSeries(encSeries, ["encryptedRatio"])];
-  }
+  const { data: encData, series: encSeriesFull } = buildComparisonChart({
+    current: encTsFormatted,
+    previous: prevData ? formatTimeSeries(addEncRatio(prevData.encryptionTimeSeries || [])) : undefined,
+    series: encSeries,
+    valueKeys: ["encryptedRatio"],
+    compareEnabled,
+  });
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">

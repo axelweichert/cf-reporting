@@ -1,10 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchDnsData, type DnsData } from "@/lib/queries/dns";
-import { pctChange } from "@/lib/compare-utils";
+import { pctChange, formatTimeSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -14,7 +14,6 @@ import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber, SERIES_COLORS } from "@/components/charts/theme";
-import { format } from "date-fns";
 import { Zap, AlertCircle } from "lucide-react";
 
 export default function DnsPage() {
@@ -24,22 +23,15 @@ export default function DnsPage() {
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
-  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<DnsData>({
+  const { data, loading, error, errorType, refetch, prevData, cmpLoading } = useReportData<DnsData>({
     reportType: "dns",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: (s, u) => {
       if (!zoneId) throw new Error("No zone available");
-      return fetchDnsData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
-    },
-    prevSince: `${prev.start}T00:00:00Z`,
-    prevUntil: `${prev.end}T00:00:00Z`,
-    prevLiveFetcher: () => {
-      if (!zoneId) throw new Error("No zone available");
-      return fetchDnsData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
+      return fetchDnsData(zoneId, s, u);
     },
   });
 
@@ -51,10 +43,7 @@ export default function DnsPage() {
     );
   }
 
-  const timeSeriesFormatted = (data?.queryVolumeByType || []).map((p) => ({
-    ...p,
-    date: format(new Date(p.date as string), "MMM d HH:mm"),
-  }));
+  const timeSeriesFormatted = formatTimeSeries(data?.queryVolumeByType || []);
 
   const responseCodeColors: Record<string, string> = {
     NOERROR: "#10b981",
@@ -68,8 +57,6 @@ export default function DnsPage() {
   const prevNxdomainCount = prevData?.responseCodeBreakdown.find((r) => r.name === "NXDOMAIN")?.value;
   const activeRecords = data?.dnsRecords.filter((r) => r.status === "active").length || 0;
   const unqueriedRecords = data?.dnsRecords.filter((r) => r.status === "unqueried").length || 0;
-
-  const cmpLoading = compareEnabled && prevLoading;
 
   function fmtMs(ms: number): string {
     if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;

@@ -1,10 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchTrafficData, type TrafficData } from "@/lib/queries/traffic";
-import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries } from "@/lib/compare-utils";
+import { pctChange, buildComparisonChart, formatTimeSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -14,7 +14,6 @@ import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber, formatBytes, formatPercent, STATUS_COLORS } from "@/components/charts/theme";
-import { format } from "date-fns";
 
 export default function TrafficPage() {
   const { capabilities } = useAuth();
@@ -24,22 +23,15 @@ export default function TrafficPage() {
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
-  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<TrafficData>({
+  const { data, loading, error, errorType, refetch, prevData, cmpLoading } = useReportData<TrafficData>({
     reportType: "traffic",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: (s, u) => {
       if (!zoneId) throw new Error("No zone available");
-      return fetchTrafficData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
-    },
-    prevSince: `${prev.start}T00:00:00Z`,
-    prevUntil: `${prev.end}T00:00:00Z`,
-    prevLiveFetcher: () => {
-      if (!zoneId) throw new Error("No zone available");
-      return fetchTrafficData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
+      return fetchTrafficData(zoneId, s, u);
     },
   });
 
@@ -52,10 +44,7 @@ export default function TrafficPage() {
   }
 
   // Format time series for display
-  const timeSeriesFormatted = (data?.timeSeries || []).map((p) => ({
-    ...p,
-    date: format(new Date(p.date), "MMM d HH:mm"),
-  }));
+  const timeSeriesFormatted = formatTimeSeries(data?.timeSeries || []);
 
   const statusCodeData = (data?.statusCodes || []).map((s) => ({
     ...s,
@@ -63,45 +52,33 @@ export default function TrafficPage() {
   }));
 
   // Compute period-over-period changes
-  const cmpLoading = compareEnabled && prevLoading;
   const reqChange = compareEnabled && prevData ? pctChange(data?.totalRequests || 0, prevData.totalRequests) : undefined;
   const bwChange = compareEnabled && prevData ? pctChange(data?.totalBandwidth || 0, prevData.totalBandwidth) : undefined;
   const cacheChange = compareEnabled && prevData ? pctChange(data?.cache.ratio || 0, prevData.cache.ratio) : undefined;
 
   // Chart overlay: Requests Over Time
   const requestsSeries = [{ key: "requests", label: "Requests", color: "#f97316" }];
-  const requestsValueKeys = ["requests"];
-  let requestsData: Record<string, unknown>[] = timeSeriesFormatted;
-  let requestsSeriesFull = requestsSeries;
-  if (compareEnabled && prevData) {
-    const prevFormatted = (prevData.timeSeries || []).map((p) => ({
-      ...p,
-      date: format(new Date(p.date), "MMM d HH:mm"),
-    }));
-    requestsData = mergeComparisonTimeSeries(timeSeriesFormatted, prevFormatted, requestsValueKeys);
-    requestsSeriesFull = [...requestsSeries, ...makeComparisonSeries(requestsSeries, requestsValueKeys)];
-  }
+  const { data: requestsData, series: requestsSeriesFull } = buildComparisonChart({
+    current: timeSeriesFormatted,
+    previous: prevData ? formatTimeSeries(prevData.timeSeries || []) : undefined,
+    series: requestsSeries,
+    valueKeys: ["requests"],
+    compareEnabled,
+  });
 
   // Chart overlay: Error Rate
   const errorSeries = [
     { key: "4xx", label: "4xx Client Errors", color: "#eab308" },
     { key: "5xx", label: "5xx Server Errors", color: "#ef4444" },
   ];
-  const errorValueKeys = ["4xx", "5xx"];
-  const errorFormatted = (data?.errorTrend || []).map((p) => ({
-    ...p,
-    date: format(new Date(p.date), "MMM d HH:mm"),
-  }));
-  let errorData: Record<string, unknown>[] = errorFormatted;
-  let errorSeriesFull = errorSeries;
-  if (compareEnabled && prevData) {
-    const prevErrorFormatted = (prevData.errorTrend || []).map((p) => ({
-      ...p,
-      date: format(new Date(p.date), "MMM d HH:mm"),
-    }));
-    errorData = mergeComparisonTimeSeries(errorFormatted, prevErrorFormatted, errorValueKeys);
-    errorSeriesFull = [...errorSeries, ...makeComparisonSeries(errorSeries, errorValueKeys)];
-  }
+  const errorFormatted = formatTimeSeries(data?.errorTrend || []);
+  const { data: errorData, series: errorSeriesFull } = buildComparisonChart({
+    current: errorFormatted,
+    previous: prevData ? formatTimeSeries(prevData.errorTrend || []) : undefined,
+    series: errorSeries,
+    valueKeys: ["4xx", "5xx"],
+    compareEnabled,
+  });
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -148,10 +125,7 @@ export default function TrafficPage() {
       {/* Bandwidth: Cached vs Uncached */}
       <ChartWrapper title="Bandwidth Over Time" subtitle="Cached vs origin" loading={loading}>
         <TimeSeriesChart
-          data={(data?.bandwidthByCache || []).map((p) => ({
-            ...p,
-            date: format(new Date(p.date), "MMM d HH:mm"),
-          }))}
+          data={formatTimeSeries(data?.bandwidthByCache || [])}
           xKey="date"
           series={[
             { key: "cached", label: "Cached (CDN)", color: "#10b981" },

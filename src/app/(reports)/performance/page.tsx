@@ -1,10 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchPerformanceData, type PerformanceData } from "@/lib/queries/performance";
-import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries } from "@/lib/compare-utils";
+import { pctChange, buildComparisonChart, formatTimeSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -13,7 +13,6 @@ import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber, formatBytes } from "@/components/charts/theme";
-import { format } from "date-fns";
 
 export default function PerformancePage() {
   const { capabilities } = useAuth();
@@ -23,22 +22,15 @@ export default function PerformancePage() {
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
-  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<PerformanceData>({
+  const { data, loading, error, errorType, refetch, prevData, cmpLoading } = useReportData<PerformanceData>({
     reportType: "performance",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: (s, u) => {
       if (!zoneId) throw new Error("No zone available");
-      return fetchPerformanceData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
-    },
-    prevSince: `${prev.start}T00:00:00Z`,
-    prevUntil: `${prev.end}T00:00:00Z`,
-    prevLiveFetcher: () => {
-      if (!zoneId) throw new Error("No zone available");
-      return fetchPerformanceData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
+      return fetchPerformanceData(zoneId, s, u);
     },
   });
 
@@ -50,29 +42,20 @@ export default function PerformancePage() {
     );
   }
 
-  const tsFormatted = (data?.timeSeries || []).map((p) => ({
-    ...p,
-    date: format(new Date(p.date), "MMM d HH:mm"),
-  }));
-
-  const cmpLoading = compareEnabled && prevLoading;
+  const tsFormatted = formatTimeSeries(data?.timeSeries || []);
 
   // Chart overlay: TTFB + Origin Time
   const perfSeries = [
     { key: "avgTtfb", label: "Avg TTFB (ms)", color: "#3b82f6" },
     { key: "avgOriginTime", label: "Avg Origin Time (ms)", color: "#f59e0b" },
   ];
-  const perfValueKeys = ["avgTtfb", "avgOriginTime"];
-  let perfData: Record<string, unknown>[] = tsFormatted;
-  let perfSeriesFull = perfSeries;
-  if (compareEnabled && prevData) {
-    const prevFormatted = (prevData.timeSeries || []).map((p) => ({
-      ...p,
-      date: format(new Date(p.date), "MMM d HH:mm"),
-    }));
-    perfData = mergeComparisonTimeSeries(tsFormatted, prevFormatted, perfValueKeys);
-    perfSeriesFull = [...perfSeries, ...makeComparisonSeries(perfSeries, perfValueKeys)];
-  }
+  const { data: perfData, series: perfSeriesFull } = buildComparisonChart({
+    current: tsFormatted,
+    previous: prevData ? formatTimeSeries(prevData.timeSeries || []) : undefined,
+    series: perfSeries,
+    valueKeys: ["avgTtfb", "avgOriginTime"],
+    compareEnabled,
+  });
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">

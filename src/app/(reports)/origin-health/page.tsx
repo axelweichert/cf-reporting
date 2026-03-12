@@ -1,10 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchOriginHealthData, type OriginHealthData } from "@/lib/queries/origin-health";
-import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries, type ComparisonSeriesDef } from "@/lib/compare-utils";
+import { pctChange, buildComparisonChart, formatTimeSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -47,22 +47,15 @@ export default function OriginHealthPage() {
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
-  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<OriginHealthData>({
+  const { data, loading, error, errorType, refetch, prevData, cmpLoading } = useReportData<OriginHealthData>({
     reportType: "origin-health",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: (s, u) => {
       if (!zoneId) throw new Error("No zone available");
-      return fetchOriginHealthData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
-    },
-    prevSince: `${prev.start}T00:00:00Z`,
-    prevUntil: `${prev.end}T00:00:00Z`,
-    prevLiveFetcher: () => {
-      if (!zoneId) throw new Error("No zone available");
-      return fetchOriginHealthData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
+      return fetchOriginHealthData(zoneId, s, u);
     },
   });
 
@@ -74,29 +67,20 @@ export default function OriginHealthPage() {
     );
   }
 
-  const cmpLoading = compareEnabled && prevLoading;
-
-  const tsFormatted = (data?.timeSeries || []).map((p) => ({
-    ...p,
-    date: format(new Date(p.date), "MMM d HH:mm"),
-  }));
+  const tsFormatted = formatTimeSeries(data?.timeSeries || []);
 
   // Chart overlay: Origin Response Time
   const originSeries = [
     { key: "avgResponseTime", label: "Avg Response (ms)", color: "#3b82f6" },
     { key: "errorRate", label: "5xx Error Rate (%)", color: "#ef4444", yAxisId: "right" as const },
   ];
-  const originValueKeys = ["avgResponseTime"];
-  let originData: Record<string, unknown>[] = tsFormatted;
-  let originSeriesFull: ComparisonSeriesDef[] = originSeries;
-  if (compareEnabled && prevData) {
-    const prevFormatted = (prevData.timeSeries || []).map((p) => ({
-      ...p,
-      date: format(new Date(p.date), "MMM d HH:mm"),
-    }));
-    originData = mergeComparisonTimeSeries(tsFormatted, prevFormatted, originValueKeys);
-    originSeriesFull = [...originSeries, ...makeComparisonSeries(originSeries, originValueKeys)];
-  }
+  const { data: originData, series: originSeriesFull } = buildComparisonChart({
+    current: tsFormatted,
+    previous: prevData ? formatTimeSeries(prevData.timeSeries || []) : undefined,
+    series: originSeries,
+    valueKeys: ["avgResponseTime"],
+    compareEnabled,
+  });
 
   // Aggregate status groups for donut chart
   const statusGroups = new Map<string, number>();

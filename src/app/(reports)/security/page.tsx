@@ -1,10 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchSecurityData, type SecurityData } from "@/lib/queries/security";
-import { pctChange } from "@/lib/compare-utils";
+import { pctChange, formatTimeSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -14,7 +14,6 @@ import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber, ACTION_COLORS } from "@/components/charts/theme";
-import { format } from "date-fns";
 
 export default function SecurityPage() {
   const { capabilities } = useAuth();
@@ -23,22 +22,15 @@ export default function SecurityPage() {
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
-  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<SecurityData>({
+  const { data, loading, error, errorType, refetch, prevData, cmpLoading } = useReportData<SecurityData>({
     reportType: "security",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: (s, u) => {
       if (!zoneId) throw new Error("No zone available");
-      return fetchSecurityData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
-    },
-    prevSince: `${prev.start}T00:00:00Z`,
-    prevUntil: `${prev.end}T00:00:00Z`,
-    prevLiveFetcher: () => {
-      if (!zoneId) throw new Error("No zone available");
-      return fetchSecurityData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
+      return fetchSecurityData(zoneId, s, u);
     },
   });
 
@@ -55,11 +47,12 @@ export default function SecurityPage() {
   for (const t of data?.trafficTimeSeries || []) {
     trafficByHour.set(t.date, t.requests);
   }
-  const wafTimeSeriesFormatted = (data?.wafTimeSeries || []).map((p) => ({
-    ...p,
-    requests: trafficByHour.get(p.date) || 0,
-    date: format(new Date(p.date), "MMM d HH:mm"),
-  }));
+  const wafTimeSeriesFormatted = formatTimeSeries(
+    (data?.wafTimeSeries || []).map((p) => ({
+      ...p,
+      requests: trafficByHour.get(p.date) || 0,
+    })),
+  );
 
   const totalWAFEvents = (data?.wafTimeSeries || []).reduce(
     (sum, p) => sum + p.block + p.challenge + p.managed_challenge + p.js_challenge + p.challenge_solved + p.log,
@@ -76,8 +69,6 @@ export default function SecurityPage() {
     ? (data.challengeSolveRates.solved / data.challengeSolveRates.challenged) * 100 : 0;
   const prevChallengeSolveRate = prevData?.challengeSolveRates.challenged
     ? (prevData.challengeSolveRates.solved / prevData.challengeSolveRates.challenged) * 100 : undefined;
-
-  const cmpLoading = compareEnabled && prevLoading;
 
   const sourceData = (data?.sourceBreakdown || []).map((s, i) => ({
     ...s,

@@ -1,10 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchBotData, type BotData } from "@/lib/queries/bots";
-import { pctChange } from "@/lib/compare-utils";
+import { pctChange, formatTimeSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -14,7 +14,6 @@ import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber, formatPercent } from "@/components/charts/theme";
-import { format } from "date-fns";
 
 export default function BotsPage() {
   const { capabilities } = useAuth();
@@ -23,22 +22,15 @@ export default function BotsPage() {
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
-  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<BotData>({
+  const { data, loading, error, errorType, refetch, prevData, cmpLoading } = useReportData<BotData>({
     reportType: "bots",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: (s, u) => {
       if (!zoneId) throw new Error("No zone available");
-      return fetchBotData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
-    },
-    prevSince: `${prev.start}T00:00:00Z`,
-    prevUntil: `${prev.end}T00:00:00Z`,
-    prevLiveFetcher: () => {
-      if (!zoneId) throw new Error("No zone available");
-      return fetchBotData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
+      return fetchBotData(zoneId, s, u);
     },
   });
 
@@ -50,10 +42,7 @@ export default function BotsPage() {
     );
   }
 
-  const automatedTrafficFormatted = (data?.automatedTrafficOverTime || []).map((p) => ({
-    ...p,
-    date: format(new Date(p.date), "MMM d HH:mm"),
-  }));
+  const automatedTrafficFormatted = formatTimeSeries(data?.automatedTrafficOverTime || []);
 
   const totalAutomated = (data?.automatedTrafficOverTime || []).reduce((sum, p) => sum + p.automated, 0);
   const totalAll = (data?.automatedTrafficOverTime || []).reduce((sum, p) => sum + p.total, 0);
@@ -62,8 +51,6 @@ export default function BotsPage() {
   const prevTotalAutomated = prevData ? (prevData.automatedTrafficOverTime || []).reduce((sum, p) => sum + p.automated, 0) : undefined;
   const prevTotalAll = prevData ? (prevData.automatedTrafficOverTime || []).reduce((sum, p) => sum + p.total, 0) : 0;
   const prevAutomatedPct = prevTotalAll && prevTotalAll > 0 ? (prevTotalAutomated! / prevTotalAll) * 100 : undefined;
-
-  const cmpLoading = compareEnabled && prevLoading;
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -114,10 +101,7 @@ export default function BotsPage() {
       {/* B2: Bot Traffic Trend - Verified vs Unverified vs Human */}
       <ChartWrapper title="Bot Traffic Trend" subtitle="Verified bots, unverified bots, and human traffic over time" loading={loading}>
         <TimeSeriesChart
-          data={(data?.botTrend || []).map((p) => ({
-            ...p,
-            date: format(new Date(p.date), "MMM d HH:mm"),
-          }))}
+          data={formatTimeSeries(data?.botTrend || [])}
           xKey="date"
           series={[
             { key: "unverified", label: "Unverified Bots", color: "#ef4444" },
