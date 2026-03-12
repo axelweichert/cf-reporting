@@ -1,6 +1,6 @@
 "use client";
 
-import { useFilterStore } from "@/lib/store";
+import { useFilterStore, useAuth } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
 import { exportPDF, exportHTML } from "@/lib/export";
 import { PAGE_TITLES } from "@/lib/report-pages";
@@ -14,6 +14,7 @@ import {
   Loader2,
   Database,
   Radio,
+  LogOut,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import type { CloudflareAccount, CloudflareZone } from "@/types/cloudflare";
@@ -55,6 +56,7 @@ export default function FilterBar({
     dataSource,
     setDataSource,
   } = useFilterStore();
+  const { logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const pathname = usePathname();
 
@@ -357,6 +359,18 @@ export default function FilterBar({
           </div>
           <span className="text-sm text-zinc-400">Compare</span>
         </label>
+
+        {/* Divider */}
+        <div className="mx-1 h-6 w-px bg-zinc-700" />
+
+        {/* Logout */}
+        <button
+          onClick={logout}
+          className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-red-400"
+          aria-label="Logout"
+        >
+          <LogOut size={16} />
+        </button>
       </div>
     </div>
   );

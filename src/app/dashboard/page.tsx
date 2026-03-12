@@ -12,8 +12,6 @@ import {
   Network,
   KeyRound,
   Eye,
-  Settings,
-  LogOut,
 } from "lucide-react";
 import type { Permission } from "@/types/cloudflare";
 
@@ -110,7 +108,7 @@ const reportCards: ReportCard[] = [
 ];
 
 export default function DashboardPage() {
-  const { capabilities, logout } = useAuth();
+  const { capabilities } = useAuth();
   const permissions = capabilities?.permissions || [];
   const accounts = capabilities?.accounts || [];
   const zones = capabilities?.zones || [];
@@ -135,22 +133,6 @@ export default function DashboardPage() {
             {zones.length} zone{zones.length !== 1 ? "s" : ""},{" "}
             {permissions.length} permission{permissions.length !== 1 ? "s" : ""} detected
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/setup"
-            className="flex items-center gap-1.5 rounded-md px-3 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-white"
-          >
-            <Settings size={16} />
-            Settings
-          </Link>
-          <button
-            onClick={logout}
-            className="flex items-center gap-1.5 rounded-md px-3 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-red-400"
-          >
-            <LogOut size={16} />
-            Logout
-          </button>
         </div>
       </div>
 
