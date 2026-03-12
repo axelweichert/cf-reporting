@@ -2,7 +2,7 @@
 
 import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
-import { useCfData } from "@/lib/use-cf-data";
+import { useReportData } from "@/lib/use-report-data";
 import { fetchExecutiveData, type ExecutiveData } from "@/lib/queries/executive";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import DonutChart from "@/components/charts/donut-chart";
@@ -22,12 +22,15 @@ export default function ExecutivePage() {
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
-  const { data, loading, error, errorType, refetch } = useCfData<ExecutiveData>({
-    fetcher: () => {
+  const { data, loading, error, errorType, refetch } = useReportData<ExecutiveData>({
+    reportType: "executive",
+    scopeId: zoneId,
+    since: `${start}T00:00:00Z`,
+    until: `${end}T00:00:00Z`,
+    liveFetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchExecutiveData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
     },
-    deps: [zoneId, start, end],
   });
 
   if (!zoneId) {

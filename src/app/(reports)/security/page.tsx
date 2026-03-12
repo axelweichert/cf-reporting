@@ -2,7 +2,7 @@
 
 import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
-import { useCfData } from "@/lib/use-cf-data";
+import { useReportData } from "@/lib/use-report-data";
 import { fetchSecurityData, type SecurityData } from "@/lib/queries/security";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
@@ -23,12 +23,15 @@ export default function SecurityPage() {
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
-  const { data, loading, error, errorType, refetch } = useCfData<SecurityData>({
-    fetcher: () => {
+  const { data, loading, error, errorType, refetch } = useReportData<SecurityData>({
+    reportType: "security",
+    scopeId: zoneId,
+    since: `${start}T00:00:00Z`,
+    until: `${end}T00:00:00Z`,
+    liveFetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchSecurityData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
     },
-    deps: [zoneId, start, end],
   });
 
   if (!zoneId) {

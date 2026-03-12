@@ -12,6 +12,8 @@ import {
   Moon,
   Download,
   Loader2,
+  Database,
+  Radio,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import type { CloudflareAccount, CloudflareZone } from "@/types/cloudflare";
@@ -50,6 +52,8 @@ export default function FilterBar({
     customStart,
     customEnd,
     setCustomRange,
+    dataSource,
+    setDataSource,
   } = useFilterStore();
   const { theme, toggleTheme } = useTheme();
   const pathname = usePathname();
@@ -59,6 +63,7 @@ export default function FilterBar({
   const [showZoneDropdown, setShowZoneDropdown] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [historicAvailable, setHistoricAvailable] = useState(false);
   const zoneDropdownRef = useRef<HTMLDivElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
@@ -103,6 +108,16 @@ export default function FilterBar({
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Check if historic data is available (only once on mount)
+  useEffect(() => {
+    fetch("/api/data/status")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data?.available) setHistoricAvailable(true);
+      })
+      .catch(() => {});
   }, []);
 
   return (
@@ -297,6 +312,34 @@ export default function FilterBar({
 
         {/* Divider */}
         <div className="mx-1 h-6 w-px bg-zinc-700" />
+
+        {/* Data source toggle – only visible when historic data exists */}
+        {historicAvailable && (
+          <div className="flex items-center rounded-md border border-zinc-700 p-0.5">
+            <button
+              onClick={() => setDataSource("live")}
+              className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                dataSource === "live"
+                  ? "bg-zinc-700 text-white"
+                  : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              <Radio size={11} />
+              Live
+            </button>
+            <button
+              onClick={() => setDataSource("historic")}
+              className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                dataSource === "historic"
+                  ? "bg-cyan-600 text-white"
+                  : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              <Database size={11} />
+              Historic
+            </button>
+          </div>
+        )}
 
         {/* Compare toggle */}
         <label className="flex cursor-pointer items-center gap-2">

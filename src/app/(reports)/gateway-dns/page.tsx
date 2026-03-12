@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
-import { useCfData } from "@/lib/use-cf-data";
+import { useReportData } from "@/lib/use-report-data";
 import { fetchGatewayDnsData, type GatewayDnsData } from "@/lib/queries/gateway-dns";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
@@ -29,12 +29,15 @@ export default function GatewayDnsPage() {
 
   const [showAllBlocked, setShowAllBlocked] = useState(false);
 
-  const { data, loading, error, errorType, refetch } = useCfData<GatewayDnsData>({
-    fetcher: () => {
+  const { data, loading, error, errorType, refetch } = useReportData<GatewayDnsData>({
+    reportType: "gateway-dns",
+    scopeId: accountId,
+    since: `${start}T00:00:00Z`,
+    until: `${end}T00:00:00Z`,
+    liveFetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchGatewayDnsData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
     },
-    deps: [accountId, start, end],
   });
 
   if (!accountId) {

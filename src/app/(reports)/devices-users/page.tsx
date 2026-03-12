@@ -1,8 +1,8 @@
 "use client";
 
-import { useFilterStore } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
-import { useCfData } from "@/lib/use-cf-data";
+import { useReportData } from "@/lib/use-report-data";
 import { fetchDevicesUsersData, type DevicesUsersData } from "@/lib/queries/devices-users";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import DonutChart from "@/components/charts/donut-chart";
@@ -51,17 +51,21 @@ function SeatBadge({ active }: { active: boolean }) {
 
 export default function DevicesUsersPage() {
   const { capabilities } = useAuth();
-  const { selectedAccount } = useFilterStore();
+  const { selectedAccount, timeRange, customStart, customEnd } = useFilterStore();
   const accounts = capabilities?.accounts || [];
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
+  const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
-  const { data, loading, error, errorType, refetch } = useCfData<DevicesUsersData>({
-    fetcher: () => {
+  const { data, loading, error, errorType, refetch } = useReportData<DevicesUsersData>({
+    reportType: "devices-users",
+    scopeId: accountId,
+    since: `${start}T00:00:00Z`,
+    until: `${end}T00:00:00Z`,
+    liveFetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchDevicesUsersData(accountId);
     },
-    deps: [accountId],
   });
 
   if (!accountId) {

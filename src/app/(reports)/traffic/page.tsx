@@ -3,6 +3,7 @@
 import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useCfData } from "@/lib/use-cf-data";
+import { useReportData } from "@/lib/use-report-data";
 import { fetchTrafficData, fetchTrafficSummaryStats, type TrafficData, type TrafficSummaryStats } from "@/lib/queries/traffic";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
@@ -25,12 +26,15 @@ export default function TrafficPage() {
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
   const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch } = useCfData<TrafficData>({
-    fetcher: () => {
+  const { data, loading, error, errorType, refetch } = useReportData<TrafficData>({
+    reportType: "traffic",
+    scopeId: zoneId,
+    since: `${start}T00:00:00Z`,
+    until: `${end}T00:00:00Z`,
+    liveFetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchTrafficData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
     },
-    deps: [zoneId, start, end],
   });
 
   // Period-over-period comparison (E2, T8)

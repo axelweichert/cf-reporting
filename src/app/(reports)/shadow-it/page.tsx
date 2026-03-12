@@ -2,7 +2,7 @@
 
 import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
-import { useCfData } from "@/lib/use-cf-data";
+import { useReportData } from "@/lib/use-report-data";
 import { fetchShadowItData, computeRiskLevel, type ShadowItData, type AppTag, type RiskLevel } from "@/lib/queries/shadow-it";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
@@ -69,12 +69,15 @@ export default function ShadowItPage() {
     });
   }, []);
 
-  const { data, loading, error, errorType, refetch } = useCfData<ShadowItData>({
-    fetcher: () => {
+  const { data, loading, error, errorType, refetch } = useReportData<ShadowItData>({
+    reportType: "shadow-it",
+    scopeId: accountId,
+    since: `${start}T00:00:00Z`,
+    until: `${end}T00:00:00Z`,
+    liveFetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchShadowItData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
     },
-    deps: [accountId, start, end],
   });
 
   if (!accountId) {

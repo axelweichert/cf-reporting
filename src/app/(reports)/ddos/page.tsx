@@ -2,7 +2,7 @@
 
 import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
-import { useCfData } from "@/lib/use-cf-data";
+import { useReportData } from "@/lib/use-report-data";
 import { fetchDdosData, type DdosData } from "@/lib/queries/ddos";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
@@ -25,12 +25,15 @@ export default function DdosPage() {
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
-  const { data, loading, error, errorType, refetch } = useCfData<DdosData>({
-    fetcher: () => {
+  const { data, loading, error, errorType, refetch } = useReportData<DdosData>({
+    reportType: "ddos",
+    scopeId: zoneId,
+    since: `${start}T00:00:00Z`,
+    until: `${end}T00:00:00Z`,
+    liveFetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchDdosData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`, accountId || undefined);
     },
-    deps: [zoneId, start, end, accountId],
   });
 
   if (!zoneId) {

@@ -2,7 +2,7 @@
 
 import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
-import { useCfData } from "@/lib/use-cf-data";
+import { useReportData } from "@/lib/use-report-data";
 import { fetchAccessAuditData, type AccessAuditData } from "@/lib/queries/access-audit";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
@@ -23,12 +23,15 @@ export default function AccessAuditPage() {
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
 
-  const { data, loading, error, errorType, refetch } = useCfData<AccessAuditData>({
-    fetcher: () => {
+  const { data, loading, error, errorType, refetch } = useReportData<AccessAuditData>({
+    reportType: "access-audit",
+    scopeId: accountId,
+    since: `${start}T00:00:00Z`,
+    until: `${end}T00:00:00Z`,
+    liveFetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchAccessAuditData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
     },
-    deps: [accountId, start, end],
   });
 
   if (!accountId) {

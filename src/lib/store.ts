@@ -65,6 +65,8 @@ interface FilterState {
   customStart: string | null;
   customEnd: string | null;
   setCustomRange: (start: string, end: string) => void;
+  dataSource: "live" | "historic";
+  setDataSource: (source: "live" | "historic") => void;
 }
 
 const FilterContext = createContext<FilterState | null>(null);
@@ -83,6 +85,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   const [compareEnabled, setCompareEnabled] = useState(false);
   const [customStart, setCustomStart] = useState<string | null>(saved.customStart);
   const [customEnd, setCustomEnd] = useState<string | null>(saved.customEnd);
+  const [dataSource, setDataSource] = useState<"live" | "historic">("live");
 
   // Re-read URL params on client mount for PDF mode
   // (SSR renders with window=undefined → all filters null; hydration doesn't re-run useState)
@@ -136,6 +139,8 @@ export function FilterProvider({ children }: { children: ReactNode }) {
       customStart,
       customEnd,
       setCustomRange,
+      dataSource,
+      setDataSource,
     },
   }, children);
 }
