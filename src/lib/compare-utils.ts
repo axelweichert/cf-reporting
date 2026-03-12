@@ -1,6 +1,7 @@
 /**
  * Period-over-period comparison utilities.
  */
+import { format } from "date-fns";
 
 /** Returns percentage change, or undefined if previous is 0/undefined. */
 export function pctChange(current: number, previous: number | undefined): number | undefined {
@@ -55,4 +56,35 @@ export function makeComparisonSeries(
       isDashed: true,
       isComparison: true,
     }));
+}
+
+/** Format a time series array's date field for chart display. */
+export function formatTimeSeries<T extends { date: string }>(
+  points: T[],
+  dateFormat = "MMM d HH:mm",
+): (Omit<T, "date"> & { date: string })[] {
+  return points.map((p) => ({
+    ...p,
+    date: format(new Date(p.date), dateFormat),
+  }));
+}
+
+/**
+ * Build chart data + series with optional comparison overlay.
+ * Replaces the repeated if (compareEnabled && prevData) { merge; makeSeries } pattern.
+ */
+export function buildComparisonChart<T extends Record<string, unknown>>(opts: {
+  current: T[];
+  previous: T[] | undefined;
+  series: ComparisonSeriesDef[];
+  valueKeys: string[];
+  compareEnabled: boolean;
+}): { data: Record<string, unknown>[]; series: ComparisonSeriesDef[] } {
+  if (!opts.compareEnabled || !opts.previous) {
+    return { data: opts.current, series: opts.series };
+  }
+  return {
+    data: mergeComparisonTimeSeries(opts.current, opts.previous, opts.valueKeys),
+    series: [...opts.series, ...makeComparisonSeries(opts.series, opts.valueKeys)],
+  };
 }

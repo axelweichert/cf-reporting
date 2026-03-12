@@ -62,7 +62,7 @@ export default function DevicesUsersPage() {
     scopeId: accountId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchDevicesUsersData(accountId);
     },

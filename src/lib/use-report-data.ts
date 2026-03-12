@@ -1,6 +1,6 @@
 "use client";
 
-import { useFilterStore } from "@/lib/store";
+import { useFilterStore, getPreviousPeriod } from "@/lib/store";
 import { useCfData, type ErrorType } from "@/lib/use-cf-data";
 
 interface UseReportDataOptions<T> {
@@ -8,10 +8,8 @@ interface UseReportDataOptions<T> {
   scopeId: string | null;
   since: string;
   until: string;
-  liveFetcher: () => Promise<T>;
-  prevSince?: string;
-  prevUntil?: string;
-  prevLiveFetcher?: () => Promise<T>;
+  /** Fetcher called with (since, until) for both current and previous periods. */
+  fetcher: (since: string, until: string) => Promise<T>;
 }
 
 interface UseReportDataResult<T> {
@@ -23,6 +21,19 @@ interface UseReportDataResult<T> {
   isHistoric: boolean;
   prevData: T | null;
   prevLoading: boolean;
+  /** True when comparison is enabled and previous period data is still loading. */
+  cmpLoading: boolean;
+}
+
+/** Derive ISO prev-period timestamps from current since/until. */
+function derivePrevDates(since: string, until: string): { prevSince: string; prevUntil: string } {
+  const startDate = since.split("T")[0];
+  const endDate = until.split("T")[0];
+  const prev = getPreviousPeriod(startDate, endDate);
+  return {
+    prevSince: `${prev.start}T00:00:00Z`,
+    prevUntil: `${prev.end}T00:00:00Z`,
+  };
 }
 
 async function fetchHistoricData<T>(
@@ -50,23 +61,17 @@ export function useReportData<T>({
   scopeId,
   since,
   until,
-  liveFetcher,
-  prevSince,
-  prevUntil,
-  prevLiveFetcher,
+  fetcher,
 }: UseReportDataOptions<T>): UseReportDataResult<T> {
   const { dataSource, compareEnabled } = useFilterStore();
   const isHistoric = dataSource === "historic";
+  const { prevSince, prevUntil } = derivePrevDates(since, until);
 
   const result = useCfData<T>({
     fetcher: () => {
       if (!scopeId) throw new Error("No scope available");
-
-      if (isHistoric) {
-        return fetchHistoricData<T>(reportType, scopeId, since, until);
-      }
-
-      return liveFetcher();
+      if (isHistoric) return fetchHistoricData<T>(reportType, scopeId, since, until);
+      return fetcher(since, until);
     },
     deps: [scopeId, since, until, dataSource],
   });
@@ -74,21 +79,20 @@ export function useReportData<T>({
   const prevResult = useCfData<T>({
     fetcher: () => {
       if (!scopeId || !compareEnabled) throw new Error("skip");
-
-      if (isHistoric && prevSince && prevUntil) {
-        return fetchHistoricData<T>(reportType, scopeId, prevSince, prevUntil);
-      }
-
-      if (prevLiveFetcher) return prevLiveFetcher();
-      throw new Error("skip");
+      if (isHistoric) return fetchHistoricData<T>(reportType, scopeId, prevSince, prevUntil);
+      return fetcher(prevSince, prevUntil);
     },
     deps: [scopeId, prevSince, prevUntil, compareEnabled, dataSource],
   });
 
+  const prevData = compareEnabled ? prevResult.data : null;
+  const prevLoading = compareEnabled ? prevResult.loading : false;
+
   return {
     ...result,
     isHistoric,
-    prevData: compareEnabled ? prevResult.data : null,
-    prevLoading: compareEnabled ? prevResult.loading : false,
+    prevData,
+    prevLoading,
+    cmpLoading: !!(compareEnabled && prevLoading),
   };
 }
