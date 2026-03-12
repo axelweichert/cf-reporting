@@ -218,16 +218,26 @@ function readExecutiveData(
   const stats = getAggStats(db, scopeId, "executive", fromTs, toTs);
   if (stats.size === 0) return null;
 
+  // Derive accurate totals from time series when available
+  const tsSums = db.prepare(
+    `SELECT COALESCE(SUM(requests),0) as reqs, COALESCE(SUM(bandwidth),0) as bw, COALESCE(SUM(cached_requests),0) as cached FROM http_requests_ts WHERE zone_id = ? AND ts >= ? AND ts < ?`,
+  ).get(scopeId, fromTs, toTs) as { reqs: number; bw: number; cached: number };
+
   const statusCodes = getTopItems(db, scopeId, "executive", "status_codes", fromTs, toTs);
   const topCountries = getTopItems(db, scopeId, "executive", "top_countries", fromTs, toTs);
   const recs = getRecommendations(db, scopeId, "executive", fromTs, toTs);
 
+  const totalRequests = tsSums.reqs || (stats.get("total_requests") ?? 0);
+  const totalBandwidth = tsSums.bw || (stats.get("total_bandwidth") ?? 0);
+  const cachedRequests = tsSums.reqs > 0 ? tsSums.cached : (stats.get("cached_requests") ?? 0);
+  const cacheHitRatio = totalRequests > 0 ? cachedRequests / totalRequests : 0;
+
   return {
     traffic: {
-      totalRequests: stats.get("total_requests") ?? 0,
-      totalBandwidth: stats.get("total_bandwidth") ?? 0,
-      cachedRequests: stats.get("cached_requests") ?? 0,
-      cacheHitRatio: stats.get("cache_hit_ratio") ?? 0,
+      totalRequests,
+      totalBandwidth,
+      cachedRequests,
+      cacheHitRatio,
     },
     security: {
       totalThreatsBlocked: stats.get("total_threats_blocked") ?? 0,
@@ -343,8 +353,18 @@ function readTrafficData(
   const topCountries = getTopItems(db, scopeId, "traffic", "top_countries", fromTs, toTs);
   const contentTypes = getTopItems(db, scopeId, "traffic", "content_types", fromTs, toTs);
 
-  const totalRequests = stats.get("total_requests") ?? timeSeries.reduce((s, r) => s + r.requests, 0);
-  const totalBandwidth = stats.get("total_bandwidth") ?? timeSeries.reduce((s, r) => s + r.bandwidth, 0);
+  // Derive totals from time series when available (agg stats only cover the last collection run)
+  const tsTotalRequests = timeSeries.reduce((s, r) => s + r.requests, 0);
+  const tsTotalBandwidth = timeSeries.reduce((s, r) => s + r.bandwidth, 0);
+  const tsCachedRequests = timeSeries.reduce((s, r) => s + r.cachedRequests, 0);
+  const totalRequests = tsTotalRequests || (stats.get("total_requests") ?? 0);
+  const totalBandwidth = tsTotalBandwidth || (stats.get("total_bandwidth") ?? 0);
+
+  // Derive cache stats from ts when we have actual data points
+  const cacheHit = tsTotalRequests > 0 ? tsCachedRequests : (stats.get("cache_hit") ?? 0);
+  const cacheMiss = tsTotalRequests > 0 ? tsTotalRequests - tsCachedRequests : (stats.get("cache_miss") ?? 0);
+  const cacheTotal = tsTotalRequests > 0 ? tsTotalRequests : (stats.get("cache_total") ?? 0);
+  const cacheRatio = cacheTotal > 0 ? cacheHit / cacheTotal : 0;
 
   return {
     timeSeries,
@@ -352,10 +372,10 @@ function readTrafficData(
     topPaths: topPaths.map((r) => ({ name: r.name, value: r.value })),
     topCountries: topCountries.map((r) => ({ name: r.name, value: r.value })),
     cache: {
-      hit: stats.get("cache_hit") ?? 0,
-      miss: stats.get("cache_miss") ?? 0,
-      total: stats.get("cache_total") ?? 0,
-      ratio: stats.get("cache_ratio") ?? 0,
+      hit: cacheHit,
+      miss: cacheMiss,
+      total: cacheTotal,
+      ratio: cacheRatio,
     },
     totalRequests,
     totalBandwidth,
