@@ -20,6 +20,14 @@ BLOCKED_PATTERNS=(
   '\.csv$'
   '\.xlsx$'
   '\.env[^.]*$'
+  '\.db$'
+  '\.sqlite$'
+  '\.sqlite3$'
+  '\.key$'
+  '\.pem$'
+  '\.p12$'
+  '\.pfx$'
+  '\.next/standalone/\.env'
 )
 
 # Files that are allowed exceptions (e.g. favicon in public/)

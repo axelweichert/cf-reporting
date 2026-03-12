@@ -18,6 +18,10 @@ services:
       - SMTP_SECURE=${SMTP_SECURE:-true}
       # Optional: protect the site with a password (required when env tokens are set)
       - APP_PASSWORD=${APP_PASSWORD:-}
+      # Set to "true" when behind a trusted reverse proxy
+      - TRUSTED_PROXY=${TRUSTED_PROXY:-}
+      # Set to "true" for HTTPS deployments
+      - SECURE_COOKIES=${SECURE_COOKIES:-}
       # Data collection settings (optional)
       - COLLECTION_SCHEDULE=${COLLECTION_SCHEDULE:-0 */6 * * *}
       - DATA_RETENTION_DAYS=${DATA_RETENTION_DAYS:-90}

@@ -24,6 +24,7 @@ services:
       - SMTP_SECURE=${SMTP_SECURE:-true}
       - APP_PASSWORD=${APP_PASSWORD:-}
       - SECURE_COOKIES=true
+      - TRUSTED_PROXY=true
       # Data collection settings (optional)
       - COLLECTION_SCHEDULE=${COLLECTION_SCHEDULE:-0 */6 * * *}
       - DATA_RETENTION_DAYS=${DATA_RETENTION_DAYS:-90}

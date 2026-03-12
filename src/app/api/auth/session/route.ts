@@ -4,18 +4,8 @@ import { sessionOptions } from "@/lib/session";
 import type { SessionData, TokenType } from "@/types/cloudflare";
 import { verifyToken, detectCapabilities } from "@/lib/token";
 import { setCapabilitiesCache } from "@/lib/capabilities-cache";
+import { validateOrigin } from "@/lib/auth-helpers";
 import { NextRequest } from "next/server";
-
-function validateOrigin(request: NextRequest): Response | null {
-  const origin = request.headers.get("origin");
-  const host = request.headers.get("host");
-  if (!origin || !host) return null;
-  const originHost = new URL(origin).host;
-  if (originHost !== host) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
-  return null;
-}
 
 export async function GET() {
   const session = await getIronSession<SessionData>(
@@ -23,9 +13,11 @@ export async function GET() {
     sessionOptions
   );
 
-  // If APP_PASSWORD is set, require site authentication before proceeding
-  if (process.env.APP_PASSWORD && !session.siteAuthenticated) {
-    return Response.json({ authenticated: false });
+  // Require site authentication when APP_PASSWORD is set OR env tokens are present
+  const hasEnvToken = !!(process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN);
+  const requireSiteAuth = !!(process.env.APP_PASSWORD || hasEnvToken);
+  if (requireSiteAuth && !session.siteAuthenticated) {
+    return Response.json({ authenticated: false, passwordRequired: requireSiteAuth });
   }
 
   // Check env vars first (CF_API_TOKEN = user token, CF_ACCOUNT_TOKEN = account token)

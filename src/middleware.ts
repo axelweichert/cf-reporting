@@ -2,22 +2,21 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 /**
- * Middleware to enforce APP_PASSWORD gate on API routes.
+ * Middleware to enforce site authentication gate.
  *
- * When APP_PASSWORD is set, all API routes (except /api/auth/login)
- * require the user to have authenticated via the site password.
+ * Gate applies when APP_PASSWORD is set OR when env tokens
+ * (CF_API_TOKEN/CF_ACCOUNT_TOKEN) are present – deploying env tokens
+ * without APP_PASSWORD would otherwise expose the app to any visitor.
  *
  * We can't read iron-session here (middleware runs on the Edge runtime),
  * so we check for the existence of the session cookie as a lightweight gate.
  * The actual session validation happens in each API route handler.
- *
- * For a stronger gate, each API route also checks siteAuthenticated.
  */
 
 export function middleware(request: NextRequest) {
-  // Only apply when APP_PASSWORD is configured
   const appPassword = process.env.APP_PASSWORD;
-  if (!appPassword) return NextResponse.next();
+  const hasEnvToken = !!(process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN);
+  if (!appPassword && !hasEnvToken) return NextResponse.next();
 
   const { pathname } = request.nextUrl;
 

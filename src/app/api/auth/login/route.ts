@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { sessionOptions } from "@/lib/session";
 import type { SessionData } from "@/types/cloudflare";
+import { validateOrigin } from "@/lib/auth-helpers";
 import { NextRequest } from "next/server";
 import { timingSafeEqual, createHash } from "crypto";
 
@@ -52,10 +53,19 @@ function checkLoginRateLimit(ip: string): boolean {
   return true;
 }
 
+/**
+ * Extract client IP. Only trusts X-Forwarded-For / X-Real-IP when
+ * TRUSTED_PROXY=true is set (meaning the app sits behind a known reverse proxy).
+ * Without that flag, forwarded headers can be spoofed to evade rate limits.
+ */
 function getClientIp(request: NextRequest): string {
-  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-    || request.headers.get("x-real-ip")
-    || "unknown";
+  if (process.env.TRUSTED_PROXY === "true") {
+    const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+    if (forwarded) return forwarded;
+    const realIp = request.headers.get("x-real-ip");
+    if (realIp) return realIp;
+  }
+  return (request as NextRequest & { ip?: string }).ip || "unknown";
 }
 
 /**
@@ -68,23 +78,24 @@ function secureCompare(input: string, expected: string): boolean {
   return timingSafeEqual(inputHash, expectedHash);
 }
 
-function validateOrigin(request: NextRequest): Response | null {
-  const origin = request.headers.get("origin");
-  const host = request.headers.get("host");
-  if (!origin || !host) return null;
-  try {
-    if (new URL(origin).host !== host) return Response.json({ error: "Forbidden" }, { status: 403 });
-  } catch {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
-  return null;
-}
-
 /** GET: Check if APP_PASSWORD is required and if user is authenticated */
 export async function GET() {
   const appPassword = process.env.APP_PASSWORD;
-  if (!appPassword) {
+  const hasEnvToken = !!(process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN);
+
+  // Require site auth when APP_PASSWORD is set OR env tokens are present
+  if (!appPassword && !hasEnvToken) {
     return Response.json({ required: false, authenticated: true });
+  }
+
+  if (!appPassword && hasEnvToken) {
+    // Env token deployed without APP_PASSWORD – refuse to serve until configured
+    return Response.json({
+      required: true,
+      authenticated: false,
+      misconfigured: true,
+      error: "APP_PASSWORD must be set when using CF_API_TOKEN or CF_ACCOUNT_TOKEN environment variables.",
+    });
   }
 
   const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
@@ -101,7 +112,7 @@ export async function POST(request: NextRequest) {
 
   const appPassword = process.env.APP_PASSWORD;
   if (!appPassword) {
-    return Response.json({ error: "APP_PASSWORD not configured" }, { status: 400 });
+    return Response.json({ error: "APP_PASSWORD must be configured when using environment tokens" }, { status: 400 });
   }
 
   const ip = getClientIp(request);

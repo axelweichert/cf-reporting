@@ -24,10 +24,13 @@ Open `http://localhost:3000` and enter your Cloudflare API token.
 
 ### Pre-configured token
 
-Skip the browser setup by providing your token as an environment variable:
+Skip the browser setup by providing your token as an environment variable. **`APP_PASSWORD` is required** when using env tokens – without it, anyone who can reach the app has full access to your Cloudflare data:
 
 ```bash
-docker run -p 3000:3000 -e CF_API_TOKEN=your_token_here ghcr.io/your-org/cf-reporting:latest
+docker run -p 3000:3000 \
+  -e CF_API_TOKEN=your_token_here \
+  -e APP_PASSWORD=your_secret_password \
+  ghcr.io/your-org/cf-reporting:latest
 ```
 
 ### Docker Compose
@@ -130,7 +133,10 @@ Reports requiring permissions your token doesn't have will show a helpful messag
 | Variable | Description | Default |
 |---|---|---|
 | `CF_API_TOKEN` | Pre-configured Cloudflare API token (skips browser setup) | – |
+| `APP_PASSWORD` | Site password – **required** when `CF_API_TOKEN` or `CF_ACCOUNT_TOKEN` is set | – |
 | `SESSION_SECRET` | 32+ char secret for encrypting session cookies | Auto-generated dev secret |
+| `TRUSTED_PROXY` | Set to `true` when behind a reverse proxy to trust `X-Forwarded-For` | `false` |
+| `SECURE_COOKIES` | Set to `true` for HTTPS deployments (marks cookies as Secure) | `false` |
 | `PORT` | Server port | `3000` |
 
 ## Tech Stack

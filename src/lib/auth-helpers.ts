@@ -8,11 +8,23 @@ import { NextRequest } from "next/server";
  * Shared authentication helpers for API routes.
  */
 
-/** Validate request origin for CSRF protection. Rejects if origin doesn't match host. */
+/**
+ * Validate request origin for CSRF protection.
+ * Rejects if Origin header is missing or doesn't match Host.
+ * Origin is required on all mutating requests (POST/PUT/DELETE/PATCH).
+ */
 export function validateOrigin(request: NextRequest): Response | null {
   const origin = request.headers.get("origin");
   const host = request.headers.get("host");
-  if (!origin || !host) return null;
+
+  // Require Origin header on mutating requests – missing Origin is not safe to allow
+  if (!origin) {
+    return Response.json({ error: "Forbidden: missing Origin header" }, { status: 403 });
+  }
+  if (!host) {
+    return Response.json({ error: "Forbidden: missing Host header" }, { status: 403 });
+  }
+
   try {
     if (new URL(origin).host !== host) return Response.json({ error: "Forbidden" }, { status: 403 });
   } catch {
@@ -23,13 +35,17 @@ export function validateOrigin(request: NextRequest): Response | null {
 
 /**
  * Get the current session data.
- * If APP_PASSWORD is set and the user hasn't authenticated, returns null.
+ * If APP_PASSWORD is set (or env tokens require it), the user must have authenticated.
  */
 export async function getAuthenticatedSession(): Promise<SessionData | null> {
   const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
 
-  // If APP_PASSWORD is configured, require site authentication
-  if (process.env.APP_PASSWORD && !session.siteAuthenticated) {
+  // Require APP_PASSWORD authentication when:
+  // 1. APP_PASSWORD is explicitly configured, OR
+  // 2. Env tokens are set (env tokens without APP_PASSWORD = open to any visitor)
+  const hasEnvToken = !!(process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN);
+  const requireSiteAuth = !!(process.env.APP_PASSWORD || hasEnvToken);
+  if (requireSiteAuth && !session.siteAuthenticated) {
     return null;
   }
 

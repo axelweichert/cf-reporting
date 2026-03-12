@@ -3,6 +3,7 @@ import { getIronSession } from "iron-session";
 import { sessionOptions } from "@/lib/session";
 import type { SessionData } from "@/types/cloudflare";
 import { CloudflareClient } from "@/lib/cf-client";
+import { validateOrigin } from "@/lib/auth-helpers";
 import { NextRequest } from "next/server";
 
 async function getClient(): Promise<CloudflareClient | null> {
@@ -11,8 +12,9 @@ async function getClient(): Promise<CloudflareClient | null> {
     sessionOptions
   );
 
-  // Enforce APP_PASSWORD gate
-  if (process.env.APP_PASSWORD && !session.siteAuthenticated) return null;
+  // Enforce site auth gate (APP_PASSWORD or env tokens present)
+  const hasEnvToken = !!(process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN);
+  if ((process.env.APP_PASSWORD || hasEnvToken) && !session.siteAuthenticated) return null;
 
   const token = session.token || process.env.CF_API_TOKEN;
   if (!token) return null;
@@ -22,17 +24,6 @@ async function getClient(): Promise<CloudflareClient | null> {
 
 // Only allow POST to GraphQL – all other CF API operations are read-only GET
 const ALLOWED_POST_PATHS = new Set(["/graphql"]);
-
-function validateOrigin(request: NextRequest): Response | null {
-  const origin = request.headers.get("origin");
-  const host = request.headers.get("host");
-  if (!origin || !host) return null; // Same-origin requests may omit origin
-  const originHost = new URL(origin).host;
-  if (originHost !== host) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
-  return null;
-}
 
 export async function GET(
   request: NextRequest,
