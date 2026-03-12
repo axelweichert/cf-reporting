@@ -150,27 +150,43 @@ export async function runCollection(): Promise<void> {
 
     console.log(`[collector] Discovered ${zones.length} zone(s), ${accounts.length} account(s)`);
 
-    // 7-day collection period
-    const until = new Date();
-    const since = new Date(until);
-    since.setDate(since.getDate() - 7);
-    const sinceStr = since.toISOString();
-    const untilStr = until.toISOString();
+    const now = new Date();
+    const nowStr = now.toISOString();
+    // Default first-run period: 24h (safe for free-plan zones with 86400s limit)
+    const defaultSince = new Date(now);
+    defaultSince.setDate(defaultSince.getDate() - 1);
+    const defaultSinceStr = defaultSince.toISOString();
+    // Overlap buffer: 1 hour back from last period_end to avoid gaps
+    // if the scheduler was delayed or a run took longer than expected
+    const OVERLAP_MS = 60 * 60 * 1000;
 
     // Zone-scoped collection (10 report types)
     for (const zone of zones) {
       for (const reportType of ZONE_REPORT_TYPES) {
         const fetchStart = Date.now();
         try {
+          const lastEnd = snap.getLastCollectedEnd(zone.id, reportType);
+          let sinceStr: string;
+          let label: string;
+          if (lastEnd) {
+            // Start 1h before last period_end for safety overlap
+            const overlapped = new Date(new Date(lastEnd).getTime() - OVERLAP_MS);
+            sinceStr = overlapped.toISOString();
+            label = "incremental";
+          } else {
+            sinceStr = defaultSinceStr;
+            label = "initial 24h";
+          }
+
           const data = await fetchZoneReportData(
-            token, zone.id, sinceStr, untilStr, reportType,
+            token, zone.id, sinceStr, nowStr, reportType,
             accounts[0]?.id, // for DDoS L3/L4 data
           );
-          snap.upsertSnapshot(zone.id, zone.name, reportType, sinceStr, untilStr, data);
+          snap.upsertSnapshot(zone.id, zone.name, reportType, sinceStr, nowStr, data);
           const duration = Date.now() - fetchStart;
           snap.logCollection(runId, zone.id, zone.name, reportType, "success", duration);
           successCount++;
-          console.log(`[collector] ${zone.name} / ${reportType} – OK (${duration}ms)`);
+          console.log(`[collector] ${zone.name} / ${reportType} – OK (${duration}ms) [${label}]`);
         } catch (err) {
           const duration = Date.now() - fetchStart;
           const message = err instanceof Error ? err.message : "Unknown error";
@@ -186,14 +202,26 @@ export async function runCollection(): Promise<void> {
       for (const reportType of ACCOUNT_REPORT_TYPES) {
         const fetchStart = Date.now();
         try {
+          const lastEnd = snap.getLastCollectedEnd(account.id, reportType);
+          let sinceStr: string;
+          let label: string;
+          if (lastEnd) {
+            const overlapped = new Date(new Date(lastEnd).getTime() - OVERLAP_MS);
+            sinceStr = overlapped.toISOString();
+            label = "incremental";
+          } else {
+            sinceStr = defaultSinceStr;
+            label = "initial 24h";
+          }
+
           const data = await fetchAccountReportData(
-            token, account.id, sinceStr, untilStr, reportType,
+            token, account.id, sinceStr, nowStr, reportType,
           );
-          snap.upsertSnapshot(account.id, account.name, reportType, sinceStr, untilStr, data);
+          snap.upsertSnapshot(account.id, account.name, reportType, sinceStr, nowStr, data);
           const duration = Date.now() - fetchStart;
           snap.logCollection(runId, account.id, account.name, reportType, "success", duration);
           successCount++;
-          console.log(`[collector] ${account.name} / ${reportType} – OK (${duration}ms)`);
+          console.log(`[collector] ${account.name} / ${reportType} – OK (${duration}ms) [${label}]`);
         } catch (err) {
           const duration = Date.now() - fetchStart;
           const message = err instanceof Error ? err.message : "Unknown error";

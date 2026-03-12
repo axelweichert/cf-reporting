@@ -140,6 +140,23 @@ export function getSnapshotById(id: number): SnapshotRow | null {
   return db.prepare("SELECT * FROM report_snapshots WHERE id = ?").get(id) as SnapshotRow | undefined ?? null;
 }
 
+export function getLastCollectedEnd(
+  zoneId: string,
+  reportType: ReportType,
+): string | null {
+  const db = getDb();
+  if (!db) return null;
+
+  const row = db.prepare(`
+    SELECT period_end FROM report_snapshots
+    WHERE zone_id = ? AND report_type = ?
+    ORDER BY period_end DESC
+    LIMIT 1
+  `).get(zoneId, reportType) as { period_end: string } | undefined;
+
+  return row?.period_end ?? null;
+}
+
 // --- Collection Log ---
 
 export function generateRunId(): string {

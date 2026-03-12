@@ -12,7 +12,7 @@ let _db: Database.Database | null = null;
 let _initFailed = false;
 
 const DB_PATH = process.env.DB_PATH || "/app/data/cf-reporting.db";
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export function getDb(): Database.Database | null {
   if (_initFailed) return null;
@@ -80,6 +80,14 @@ function runMigrations(db: Database.Database): void {
       CREATE INDEX IF NOT EXISTS idx_collection_log_run
         ON collection_log(run_id);
     `);
+  }
+
+  if (currentVersion < 2) {
+    // v2: Clear old overlapping snapshots from the 7-day-window era.
+    // The collector now fetches incrementally (only new data since last run),
+    // so old overlapping snapshots are redundant and waste space.
+    db.exec(`DELETE FROM report_snapshots`);
+    console.log("[db] Migration v2: cleared old overlapping snapshots – collector will refill incrementally");
   }
 
   // Upsert schema version
