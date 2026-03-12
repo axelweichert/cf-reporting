@@ -6,11 +6,12 @@ interface StatCardProps {
   label: string;
   value: string | number;
   change?: number;
+  compareLoading?: boolean;
   icon?: React.ReactNode;
   href?: string;
 }
 
-export default function StatCard({ label, value, change, icon }: StatCardProps) {
+export default function StatCard({ label, value, change, compareLoading, icon }: StatCardProps) {
   const trend = change !== undefined ? (change > 0 ? "up" : change < 0 ? "down" : "flat") : null;
 
   return (
@@ -20,6 +21,9 @@ export default function StatCard({ label, value, change, icon }: StatCardProps) 
         {icon && <div className="text-zinc-500">{icon}</div>}
       </div>
       <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+      {compareLoading && !trend && (
+        <div className="mt-2 h-4 w-24 animate-pulse rounded bg-zinc-800" />
+      )}
       {trend && (
         <div className={`mt-2 flex items-center gap-1 text-xs ${
           trend === "up" ? "text-emerald-400" : trend === "down" ? "text-red-400" : "text-zinc-500"

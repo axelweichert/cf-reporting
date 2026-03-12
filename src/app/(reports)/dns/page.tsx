@@ -1,9 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange } from "@/lib/store";
+import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchDnsData, type DnsData } from "@/lib/queries/dns";
+import { pctChange } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -18,13 +19,14 @@ import { Zap, AlertCircle } from "lucide-react";
 
 export default function DnsPage() {
   const { capabilities } = useAuth();
-  const { selectedZone, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedZone, timeRange, customStart, customEnd, compareEnabled } = useFilterStore();
   const zones = capabilities?.zones || [];
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch } = useReportData<DnsData>({
+  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<DnsData>({
     reportType: "dns",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
@@ -32,6 +34,12 @@ export default function DnsPage() {
     liveFetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchDnsData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
+    },
+    prevSince: `${prev.start}T00:00:00Z`,
+    prevUntil: `${prev.end}T00:00:00Z`,
+    prevLiveFetcher: () => {
+      if (!zoneId) throw new Error("No zone available");
+      return fetchDnsData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
     },
   });
 
@@ -57,8 +65,11 @@ export default function DnsPage() {
   };
 
   const nxdomainCount = data?.responseCodeBreakdown.find((r) => r.name === "NXDOMAIN")?.value || 0;
+  const prevNxdomainCount = prevData?.responseCodeBreakdown.find((r) => r.name === "NXDOMAIN")?.value;
   const activeRecords = data?.dnsRecords.filter((r) => r.status === "active").length || 0;
   const unqueriedRecords = data?.dnsRecords.filter((r) => r.status === "unqueried").length || 0;
+
+  const cmpLoading = compareEnabled && prevLoading;
 
   function fmtMs(ms: number): string {
     if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
@@ -90,9 +101,9 @@ export default function DnsPage() {
           </>
         ) : (
           <>
-            <StatCard label="Total DNS Queries" value={formatNumber(data?.totalQueries || 0)} />
+            <StatCard label="Total DNS Queries" value={formatNumber(data?.totalQueries || 0)} change={compareEnabled ? pctChange(data?.totalQueries || 0, prevData?.totalQueries) : undefined} compareLoading={cmpLoading} />
             <StatCard label="DNS Records" value={`${data?.dnsRecords.length || 0} (${activeRecords} active)`} />
-            <StatCard label="NXDOMAIN Queries" value={formatNumber(nxdomainCount)} />
+            <StatCard label="NXDOMAIN Queries" value={formatNumber(nxdomainCount)} change={compareEnabled ? pctChange(nxdomainCount, prevNxdomainCount) : undefined} compareLoading={cmpLoading} />
             <StatCard label="Query Types" value={data?.queryTypes.length || 0} />
           </>
         )}

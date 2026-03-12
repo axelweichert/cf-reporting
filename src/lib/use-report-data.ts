@@ -9,6 +9,9 @@ interface UseReportDataOptions<T> {
   since: string;
   until: string;
   liveFetcher: () => Promise<T>;
+  prevSince?: string;
+  prevUntil?: string;
+  prevLiveFetcher?: () => Promise<T>;
 }
 
 interface UseReportDataResult<T> {
@@ -18,6 +21,8 @@ interface UseReportDataResult<T> {
   errorType: ErrorType;
   refetch: () => void;
   isHistoric: boolean;
+  prevData: T | null;
+  prevLoading: boolean;
 }
 
 async function fetchHistoricData<T>(
@@ -46,8 +51,11 @@ export function useReportData<T>({
   since,
   until,
   liveFetcher,
+  prevSince,
+  prevUntil,
+  prevLiveFetcher,
 }: UseReportDataOptions<T>): UseReportDataResult<T> {
-  const { dataSource } = useFilterStore();
+  const { dataSource, compareEnabled } = useFilterStore();
   const isHistoric = dataSource === "historic";
 
   const result = useCfData<T>({
@@ -63,5 +71,24 @@ export function useReportData<T>({
     deps: [scopeId, since, until, dataSource],
   });
 
-  return { ...result, isHistoric };
+  const prevResult = useCfData<T>({
+    fetcher: () => {
+      if (!scopeId || !compareEnabled) throw new Error("skip");
+
+      if (isHistoric && prevSince && prevUntil) {
+        return fetchHistoricData<T>(reportType, scopeId, prevSince, prevUntil);
+      }
+
+      if (prevLiveFetcher) return prevLiveFetcher();
+      throw new Error("skip");
+    },
+    deps: [scopeId, prevSince, prevUntil, compareEnabled, dataSource],
+  });
+
+  return {
+    ...result,
+    isHistoric,
+    prevData: compareEnabled ? prevResult.data : null,
+    prevLoading: compareEnabled ? prevResult.loading : false,
+  };
 }

@@ -1,9 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange } from "@/lib/store";
+import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchShadowItData, computeRiskLevel, type ShadowItData, type AppTag, type RiskLevel } from "@/lib/queries/shadow-it";
+import { pctChange } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -48,11 +49,12 @@ const TAG_CYCLE: AppTag[] = ["unclassified", "sanctioned", "unsanctioned"];
 
 export default function ShadowItPage() {
   const { capabilities } = useAuth();
-  const { selectedAccount, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedAccount, timeRange, customStart, customEnd, compareEnabled } = useFilterStore();
   const accounts = capabilities?.accounts || [];
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+  const prev = getPreviousPeriod(start, end);
 
   const [appTags, setAppTags] = useState<Record<string, AppTag>>({});
 
@@ -69,7 +71,7 @@ export default function ShadowItPage() {
     });
   }, []);
 
-  const { data, loading, error, errorType, refetch } = useReportData<ShadowItData>({
+  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<ShadowItData>({
     reportType: "shadow-it",
     scopeId: accountId,
     since: `${start}T00:00:00Z`,
@@ -77,6 +79,12 @@ export default function ShadowItPage() {
     liveFetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchShadowItData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
+    },
+    prevSince: `${prev.start}T00:00:00Z`,
+    prevUntil: `${prev.end}T00:00:00Z`,
+    prevLiveFetcher: () => {
+      if (!accountId) throw new Error("No account available");
+      return fetchShadowItData(accountId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
     },
   });
 
@@ -88,6 +96,8 @@ export default function ShadowItPage() {
     );
   }
 
+  const cmpLoading = compareEnabled && prevLoading;
+
   const trendFormatted = (data?.usageTrends || []).map((p) => ({
     ...p,
     date: format(new Date(p.date as string), "MMM d HH:mm"),
@@ -97,6 +107,9 @@ export default function ShadowItPage() {
   const totalDiscovered = apps.length;
   const totalRequests = apps.reduce((s, a) => s + a.count, 0);
   const maxCount = apps.length > 0 ? apps[0].count : 0;
+
+  const prevApps = prevData?.discoveredApplications || [];
+  const prevTotalDiscovered = prevApps.length;
 
   // Compute risk stats
   const unsanctionedCount = apps.filter((a) => appTags[a.name] === "unsanctioned").length;
@@ -120,7 +133,7 @@ export default function ShadowItPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {loading ? <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></> : (
           <>
-            <StatCard label="Discovered Apps" value={totalDiscovered} />
+            <StatCard label="Discovered Apps" value={totalDiscovered} change={compareEnabled ? pctChange(totalDiscovered, prevTotalDiscovered || undefined) : undefined} compareLoading={cmpLoading} />
             <StatCard label="App Requests" value={formatNumber(totalRequests)} />
             <StatCard
               label="Sanctioned"

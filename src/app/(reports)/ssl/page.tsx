@@ -1,9 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange } from "@/lib/store";
+import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchSslData, type SslData } from "@/lib/queries/ssl";
+import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -12,7 +13,7 @@ import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber } from "@/components/charts/theme";
-import { ShieldCheck, ShieldAlert, CheckCircle, XCircle } from "lucide-react";
+import { ShieldCheck, CheckCircle, XCircle } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 
 function SettingBadge({ enabled, label }: { enabled: boolean; label: string }) {
@@ -43,14 +44,15 @@ const TLS13_LABELS: Record<string, string> = {
 
 export default function SslPage() {
   const { capabilities } = useAuth();
-  const { selectedZone, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedZone, timeRange, customStart, customEnd, compareEnabled } = useFilterStore();
   const zones = capabilities?.zones || [];
 
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch } = useReportData<SslData>({
+  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<SslData>({
     reportType: "ssl",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
@@ -58,6 +60,12 @@ export default function SslPage() {
     liveFetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchSslData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
+    },
+    prevSince: `${prev.start}T00:00:00Z`,
+    prevUntil: `${prev.end}T00:00:00Z`,
+    prevLiveFetcher: () => {
+      if (!zoneId) throw new Error("No zone available");
+      return fetchSslData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
     },
   });
 
@@ -69,10 +77,27 @@ export default function SslPage() {
     );
   }
 
+  const cmpLoading = compareEnabled && prevLoading;
+
   const encTsFormatted = (data?.encryptionTimeSeries || []).map((p) => ({
     ...p,
+    encryptedRatio: p.totalRequests > 0 ? (p.encryptedRequests / p.totalRequests) * 100 : 0,
     date: format(new Date(p.date), "MMM d HH:mm"),
   }));
+
+  // Chart overlay: Encryption ratio over time
+  const encSeries = [{ key: "encryptedRatio", label: "Encrypted %", color: "#10b981" }];
+  let encData: Record<string, unknown>[] = encTsFormatted;
+  let encSeriesFull = encSeries;
+  if (compareEnabled && prevData) {
+    const prevEncFormatted = (prevData.encryptionTimeSeries || []).map((p) => ({
+      ...p,
+      encryptedRatio: p.totalRequests > 0 ? (p.encryptedRequests / p.totalRequests) * 100 : 0,
+      date: format(new Date(p.date), "MMM d HH:mm"),
+    }));
+    encData = mergeComparisonTimeSeries(encTsFormatted, prevEncFormatted, ["encryptedRatio"]);
+    encSeriesFull = [...encSeries, ...makeComparisonSeries(encSeries, ["encryptedRatio"])];
+  }
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -88,9 +113,9 @@ export default function SslPage() {
           <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></>
         ) : (
           <>
-            <StatCard label="Total Requests" value={formatNumber(data?.stats.totalRequests || 0)} />
-            <StatCard label="Encrypted" value={`${data?.stats.encryptedPercent || 0}%`} icon={<ShieldCheck size={18} />} />
-            <StatCard label="TLS 1.3" value={`${data?.stats.tlsv13Percent || 0}%`} />
+            <StatCard label="Total Requests" value={formatNumber(data?.stats.totalRequests || 0)} change={compareEnabled ? pctChange(data?.stats.totalRequests || 0, prevData?.stats.totalRequests) : undefined} compareLoading={cmpLoading} />
+            <StatCard label="Encrypted" value={`${data?.stats.encryptedPercent || 0}%`} icon={<ShieldCheck size={18} />} change={compareEnabled ? pctChange(data?.stats.encryptedPercent || 0, prevData?.stats.encryptedPercent) : undefined} compareLoading={cmpLoading} />
+            <StatCard label="TLS 1.3" value={`${data?.stats.tlsv13Percent || 0}%`} change={compareEnabled ? pctChange(data?.stats.tlsv13Percent || 0, prevData?.stats.tlsv13Percent) : undefined} compareLoading={cmpLoading} />
             <StatCard label="HTTP/3" value={`${data?.stats.http3Percent || 0}%`} />
             <StatCard label="SSL Mode" value={SSL_MODE_LABELS[data?.settings.mode || ""] || data?.settings.mode || "–"} />
             <StatCard label="Certificates" value={data?.stats.certCount || 0} />
@@ -173,15 +198,12 @@ export default function SslPage() {
       )}
 
       {/* Charts */}
-      <ChartWrapper title="Encryption Over Time" subtitle="Encrypted vs total requests" loading={loading}>
+      <ChartWrapper title="Encryption Over Time" subtitle="Encrypted % of total requests" loading={loading}>
         <TimeSeriesChart
-          data={encTsFormatted}
+          data={encData}
           xKey="date"
-          series={[
-            { key: "encryptedRequests", label: "Encrypted", color: "#10b981" },
-            { key: "totalRequests", label: "Total", color: "#6b7280" },
-          ]}
-          yFormatter={formatNumber}
+          series={encSeriesFull}
+          yFormatter={(v) => `${v.toFixed(1)}%`}
         />
       </ChartWrapper>
 

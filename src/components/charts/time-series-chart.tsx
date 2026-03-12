@@ -11,6 +11,7 @@ import {
   Legend,
 } from "recharts";
 import { CHART_COLORS, SERIES_COLORS, formatNumber } from "./theme";
+import { pctChange } from "@/lib/compare-utils";
 
 interface TimeSeriesChartProps {
   data: Record<string, unknown>[];
@@ -18,8 +19,10 @@ interface TimeSeriesChartProps {
   series: Array<{
     key: string;
     label: string;
-    color?: string;
+    color: string;
     yAxisId?: "left" | "right";
+    isDashed?: boolean;
+    isComparison?: boolean;
   }>;
   height?: number;
   yFormatter?: (value: number) => string;
@@ -31,13 +34,29 @@ function CustomTooltip({
   payload,
   label,
   yFormatter,
+  series,
 }: {
   active?: boolean;
-  payload?: Array<{ name: string; value: number; color: string }>;
+  payload?: Array<{ name: string; value: number; color: string; dataKey: string }>;
   label?: string;
   yFormatter: (value: number) => string;
+  series: TimeSeriesChartProps["series"];
 }) {
   if (!active || !payload?.length) return null;
+
+  // Build a map of comparison series key → current series key for % change
+  const compMap = new Map<string, string>();
+  for (const s of series) {
+    if (s.isComparison && s.key.startsWith("prev_")) {
+      compMap.set(s.key, s.key.slice(5));
+    }
+  }
+
+  // Index payload by dataKey for lookups
+  const payloadByKey = new Map<string, number>();
+  for (const p of payload) {
+    payloadByKey.set(p.dataKey, p.value);
+  }
 
   return (
     <div
@@ -50,15 +69,41 @@ function CustomTooltip({
       <p className="mb-1 text-xs" style={{ color: CHART_COLORS.tooltip.label }}>
         {label}
       </p>
-      {payload.map((p, i) => (
-        <div key={i} className="flex items-center gap-2 text-sm">
-          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: p.color }} />
-          <span style={{ color: CHART_COLORS.tooltip.label }}>{p.name}:</span>
-          <span className="font-medium" style={{ color: CHART_COLORS.tooltip.text }}>
-            {yFormatter(p.value)}
-          </span>
-        </div>
-      ))}
+      {payload.map((p, i) => {
+        const seriesDef = series.find((s) => s.key === p.dataKey);
+        const isComp = seriesDef?.isComparison;
+
+        // For comparison entries, compute % change
+        let changeText: string | null = null;
+        if (isComp) {
+          const currentKey = compMap.get(p.dataKey);
+          if (currentKey) {
+            const currentVal = payloadByKey.get(currentKey);
+            if (currentVal !== undefined) {
+              const change = pctChange(currentVal, p.value);
+              if (change !== undefined) {
+                const sign = change > 0 ? "+" : "";
+                changeText = `${sign}${change.toFixed(1)}%`;
+              }
+            }
+          }
+        }
+
+        return (
+          <div key={i} className="flex items-center gap-2 text-sm">
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: p.color }} />
+            <span style={{ color: isComp ? CHART_COLORS.tooltip.border : CHART_COLORS.tooltip.label, opacity: isComp ? 0.7 : 1 }}>
+              {p.name}:
+            </span>
+            <span className="font-medium" style={{ color: isComp ? CHART_COLORS.tooltip.border : CHART_COLORS.tooltip.text, opacity: isComp ? 0.7 : 1 }}>
+              {yFormatter(p.value)}
+            </span>
+            {changeText && (
+              <span className="text-xs text-zinc-500">{changeText}</span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -106,31 +151,41 @@ export default function TimeSeriesChart({
             width={60}
           />
         )}
-        <Tooltip content={<CustomTooltip yFormatter={yFormatter} />} />
-        {series.length > 1 && (
+        <Tooltip content={<CustomTooltip yFormatter={yFormatter} series={series} />} />
+        {series.filter((s) => !s.isComparison).length > 1 && (
           <Legend
             wrapperStyle={{ fontSize: 12, color: CHART_COLORS.axis }}
             iconType="circle"
             iconSize={8}
+            {...{ payload: series.filter((s) => !s.isComparison).map((s, i) => ({
+              value: s.label,
+              type: "circle" as const,
+              color: s.color || SERIES_COLORS[i % SERIES_COLORS.length],
+            })) }}
           />
         )}
-        {series.map((s, i) => (
-          <Area
-            key={s.key}
-            type="monotone"
-            dataKey={s.key}
-            name={s.label}
-            stroke={s.color || SERIES_COLORS[i % SERIES_COLORS.length]}
-            fill={s.color || SERIES_COLORS[i % SERIES_COLORS.length]}
-            fillOpacity={s.yAxisId === "right" ? 0.05 : 0.1}
-            strokeWidth={s.yAxisId === "right" ? 1.5 : 2}
-            strokeDasharray={s.yAxisId === "right" ? "4 2" : undefined}
-            stackId={stacked && !s.yAxisId ? "stack" : undefined}
-            yAxisId={s.yAxisId || "left"}
-            dot={false}
-            isAnimationActive={!isPdf}
-          />
-        ))}
+        {series.map((s, i) => {
+          const color = s.color || SERIES_COLORS[i % SERIES_COLORS.length];
+          const isComp = s.isComparison;
+          return (
+            <Area
+              key={s.key}
+              type="monotone"
+              dataKey={s.key}
+              name={s.label}
+              stroke={color}
+              fill={color}
+              fillOpacity={isComp ? 0.03 : s.yAxisId === "right" ? 0.05 : 0.1}
+              strokeWidth={isComp ? 1.5 : s.yAxisId === "right" ? 1.5 : 2}
+              strokeOpacity={isComp ? 0.5 : 1}
+              strokeDasharray={s.isDashed ? "6 3" : s.yAxisId === "right" ? "4 2" : undefined}
+              stackId={stacked && !s.yAxisId && !isComp ? "stack" : undefined}
+              yAxisId={s.yAxisId || "left"}
+              dot={false}
+              isAnimationActive={!isPdf}
+            />
+          );
+        })}
       </AreaChart>
     </ResponsiveContainer>
   );

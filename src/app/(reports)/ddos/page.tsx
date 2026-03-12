@@ -1,9 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange } from "@/lib/store";
+import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchDdosData, type DdosData } from "@/lib/queries/ddos";
+import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import { HorizontalBarChart } from "@/components/charts/bar-chart";
@@ -17,15 +18,16 @@ import { Info } from "lucide-react";
 
 export default function DdosPage() {
   const { capabilities } = useAuth();
-  const { selectedAccount, selectedZone, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedAccount, selectedZone, timeRange, customStart, customEnd, compareEnabled } = useFilterStore();
   const zones = capabilities?.zones || [];
   const accounts = capabilities?.accounts || [];
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch } = useReportData<DdosData>({
+  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<DdosData>({
     reportType: "ddos",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
@@ -33,6 +35,12 @@ export default function DdosPage() {
     liveFetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchDdosData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`, accountId || undefined);
+    },
+    prevSince: `${prev.start}T00:00:00Z`,
+    prevUntil: `${prev.end}T00:00:00Z`,
+    prevLiveFetcher: () => {
+      if (!zoneId) throw new Error("No zone available");
+      return fetchDdosData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`, accountId || undefined);
     },
   });
 
@@ -44,6 +52,8 @@ export default function DdosPage() {
     );
   }
 
+  const cmpLoading = compareEnabled && prevLoading;
+
   const formatTime = (points: Array<{ date: string; count: number }>) =>
     points.map((p) => ({
       ...p,
@@ -52,6 +62,16 @@ export default function DdosPage() {
 
   const ddosTime = formatTime(data?.ddosEventsOverTime || []);
   const rlTime = formatTime(data?.rateLimitEventsOverTime || []);
+
+  // Chart overlay: DDoS Events
+  const ddosSeries = [{ key: "count", label: "DDoS Events", color: "#ef4444" }];
+  let ddosData: Record<string, unknown>[] = ddosTime;
+  let ddosSeriesFull = ddosSeries;
+  if (compareEnabled && prevData) {
+    const prevDdosTime = formatTime(prevData.ddosEventsOverTime || []);
+    ddosData = mergeComparisonTimeSeries(ddosTime, prevDdosTime, ["count"]);
+    ddosSeriesFull = [...ddosSeries, ...makeComparisonSeries(ddosSeries, ["count"])];
+  }
 
   return (
     <div className="mx-auto max-w-7xl space-y-8">
@@ -66,7 +86,7 @@ export default function DdosPage() {
         <ErrorMessage type={errorType} message={error} onRetry={refetch} />
       )}
 
-      {/* ── L7 DDoS Section ── */}
+      {/* L7 DDoS Section */}
       <section className="space-y-4">
         <h2 className="text-lg font-semibold text-white">L7 DDoS Mitigation</h2>
 
@@ -78,7 +98,7 @@ export default function DdosPage() {
             </>
           ) : (
             <>
-              <StatCard label="L7 DDoS Blocked" value={formatNumber(data?.totalDdosEvents || 0)} />
+              <StatCard label="L7 DDoS Blocked" value={formatNumber(data?.totalDdosEvents || 0)} change={compareEnabled ? pctChange(data?.totalDdosEvents || 0, prevData?.totalDdosEvents) : undefined} compareLoading={cmpLoading} />
               <StatCard
                 label="Attack Methods"
                 value={formatNumber((data?.ddosAttackVectors || []).length)}
@@ -94,9 +114,9 @@ export default function DdosPage() {
         >
           {ddosTime.length > 0 ? (
             <TimeSeriesChart
-              data={ddosTime}
+              data={ddosData}
               xKey="date"
-              series={[{ key: "count", label: "DDoS Events", color: "#ef4444" }]}
+              series={ddosSeriesFull}
               yFormatter={formatNumber}
             />
           ) : (
@@ -137,7 +157,7 @@ export default function DdosPage() {
         </div>
       </section>
 
-      {/* ── Rate Limiting Section ── */}
+      {/* Rate Limiting Section */}
       <section className="space-y-4">
         <h2 className="text-lg font-semibold text-white">Rate Limiting</h2>
 
@@ -149,7 +169,7 @@ export default function DdosPage() {
             </>
           ) : (
             <>
-              <StatCard label="Rate Limit Events" value={formatNumber(data?.totalRateLimitEvents || 0)} />
+              <StatCard label="Rate Limit Events" value={formatNumber(data?.totalRateLimitEvents || 0)} change={compareEnabled ? pctChange(data?.totalRateLimitEvents || 0, prevData?.totalRateLimitEvents) : undefined} compareLoading={cmpLoading} />
               <StatCard
                 label="Targeted Paths"
                 value={formatNumber((data?.rateLimitTopPaths || []).length)}
@@ -204,7 +224,7 @@ export default function DdosPage() {
         </div>
       </section>
 
-      {/* ── L3/L4 DDoS Section ── */}
+      {/* L3/L4 DDoS Section */}
       {!loading && data?.l34 && data.l34.attacks.length > 0 && (
         <section className="space-y-4">
           <h2 className="text-lg font-semibold text-white">L3/L4 DDoS Attacks</h2>

@@ -1,9 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange } from "@/lib/store";
+import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchZtSummaryData, type ZtSummaryData } from "@/lib/queries/zt-summary";
+import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries, type ComparisonSeriesDef } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -17,13 +18,14 @@ import { format } from "date-fns";
 
 export default function ZtSummaryPage() {
   const { capabilities } = useAuth();
-  const { selectedAccount, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedAccount, timeRange, customStart, customEnd, compareEnabled } = useFilterStore();
   const accounts = capabilities?.accounts || [];
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch } = useReportData<ZtSummaryData>({
+  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<ZtSummaryData>({
     reportType: "zt-summary",
     scopeId: accountId,
     since: `${start}T00:00:00Z`,
@@ -31,6 +33,12 @@ export default function ZtSummaryPage() {
     liveFetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchZtSummaryData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
+    },
+    prevSince: `${prev.start}T00:00:00Z`,
+    prevUntil: `${prev.end}T00:00:00Z`,
+    prevLiveFetcher: () => {
+      if (!accountId) throw new Error("No account available");
+      return fetchZtSummaryData(accountId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
     },
   });
 
@@ -41,6 +49,8 @@ export default function ZtSummaryPage() {
       </div>
     );
   }
+
+  const cmpLoading = compareEnabled && prevLoading;
 
   const fleet = data?.fleet;
   const plan = data?.plan;
@@ -59,6 +69,26 @@ export default function ZtSummaryPage() {
   const seatUsage = (fleet?.accessSeats || 0) > (fleet?.gatewaySeats || 0)
     ? fleet?.accessSeats || 0
     : fleet?.gatewaySeats || 0;
+
+  // Chart overlay: Daily Active Users
+  const dauSeries = [
+    { key: "uniqueUsers", label: "Unique Users", color: "#3b82f6" },
+    { key: "logins", label: "Total Logins", color: "#6b7280", yAxisId: "right" as const },
+  ];
+  const dauFormatted = (data?.dailyActiveUsers || []).map((p) => ({
+    ...p,
+    date: format(new Date(p.date), "MMM d"),
+  }));
+  let dauData: Record<string, unknown>[] = dauFormatted;
+  let dauSeriesFull: ComparisonSeriesDef[] = dauSeries;
+  if (compareEnabled && prevData) {
+    const prevDauFormatted = (prevData.dailyActiveUsers || []).map((p) => ({
+      ...p,
+      date: format(new Date(p.date), "MMM d"),
+    }));
+    dauData = mergeComparisonTimeSeries(dauFormatted, prevDauFormatted, ["uniqueUsers"]);
+    dauSeriesFull = [...dauSeries, ...makeComparisonSeries(dauSeries, ["uniqueUsers"])];
+  }
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -150,10 +180,10 @@ export default function ZtSummaryPage() {
             <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></>
           ) : (
             <>
-              <StatCard label="Total DNS Queries" value={formatNumber(data?.totalDnsQueries || 0)} />
-              <StatCard label="Blocked Queries" value={formatNumber(data?.blockedDnsQueries || 0)} />
+              <StatCard label="Total DNS Queries" value={formatNumber(data?.totalDnsQueries || 0)} change={compareEnabled ? pctChange(data?.totalDnsQueries || 0, prevData?.totalDnsQueries) : undefined} compareLoading={cmpLoading} />
+              <StatCard label="Blocked Queries" value={formatNumber(data?.blockedDnsQueries || 0)} change={compareEnabled ? pctChange(data?.blockedDnsQueries || 0, prevData?.blockedDnsQueries) : undefined} compareLoading={cmpLoading} />
               <StatCard label="Block Rate" value={blockRate} />
-              <StatCard label="Access Logins" value={formatNumber(data?.accessLogins.total || 0)} />
+              <StatCard label="Access Logins" value={formatNumber(data?.accessLogins.total || 0)} change={compareEnabled ? pctChange(data?.accessLogins.total || 0, prevData?.accessLogins.total) : undefined} compareLoading={cmpLoading} />
             </>
           )}
         </div>
@@ -208,15 +238,9 @@ export default function ZtSummaryPage() {
       {(data?.dailyActiveUsers || []).length > 0 && (
         <ChartWrapper title="Daily Active Users" subtitle="Unique users with successful logins per day" loading={loading}>
           <TimeSeriesChart
-            data={(data?.dailyActiveUsers || []).map((p) => ({
-              ...p,
-              date: format(new Date(p.date), "MMM d"),
-            }))}
+            data={dauData}
             xKey="date"
-            series={[
-              { key: "uniqueUsers", label: "Unique Users", color: "#3b82f6" },
-              { key: "logins", label: "Total Logins", color: "#6b7280", yAxisId: "right" },
-            ]}
+            series={dauSeriesFull}
             yFormatter={formatNumber}
           />
         </ChartWrapper>

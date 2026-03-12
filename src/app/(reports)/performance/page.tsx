@@ -1,9 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange } from "@/lib/store";
+import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchPerformanceData, type PerformanceData } from "@/lib/queries/performance";
+import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -16,14 +17,15 @@ import { format } from "date-fns";
 
 export default function PerformancePage() {
   const { capabilities } = useAuth();
-  const { selectedZone, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedZone, timeRange, customStart, customEnd, compareEnabled } = useFilterStore();
   const zones = capabilities?.zones || [];
 
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch } = useReportData<PerformanceData>({
+  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<PerformanceData>({
     reportType: "performance",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
@@ -31,6 +33,12 @@ export default function PerformancePage() {
     liveFetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchPerformanceData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
+    },
+    prevSince: `${prev.start}T00:00:00Z`,
+    prevUntil: `${prev.end}T00:00:00Z`,
+    prevLiveFetcher: () => {
+      if (!zoneId) throw new Error("No zone available");
+      return fetchPerformanceData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
     },
   });
 
@@ -46,6 +54,25 @@ export default function PerformancePage() {
     ...p,
     date: format(new Date(p.date), "MMM d HH:mm"),
   }));
+
+  const cmpLoading = compareEnabled && prevLoading;
+
+  // Chart overlay: TTFB + Origin Time
+  const perfSeries = [
+    { key: "avgTtfb", label: "Avg TTFB (ms)", color: "#3b82f6" },
+    { key: "avgOriginTime", label: "Avg Origin Time (ms)", color: "#f59e0b" },
+  ];
+  const perfValueKeys = ["avgTtfb", "avgOriginTime"];
+  let perfData: Record<string, unknown>[] = tsFormatted;
+  let perfSeriesFull = perfSeries;
+  if (compareEnabled && prevData) {
+    const prevFormatted = (prevData.timeSeries || []).map((p) => ({
+      ...p,
+      date: format(new Date(p.date), "MMM d HH:mm"),
+    }));
+    perfData = mergeComparisonTimeSeries(tsFormatted, prevFormatted, perfValueKeys);
+    perfSeriesFull = [...perfSeries, ...makeComparisonSeries(perfSeries, perfValueKeys)];
+  }
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -68,10 +95,10 @@ export default function PerformancePage() {
           <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></>
         ) : (
           <>
-            <StatCard label="Total Requests" value={formatNumber(data?.stats.totalRequests || 0)} />
-            <StatCard label="Avg TTFB" value={`${data?.stats.avgTtfb || 0}ms`} />
-            <StatCard label="P95 TTFB" value={`${data?.stats.p95Ttfb || 0}ms`} />
-            <StatCard label="Avg Origin Time" value={`${data?.stats.avgOriginTime || 0}ms`} />
+            <StatCard label="Total Requests" value={formatNumber(data?.stats.totalRequests || 0)} change={compareEnabled ? pctChange(data?.stats.totalRequests || 0, prevData?.stats.totalRequests) : undefined} compareLoading={cmpLoading} />
+            <StatCard label="Avg TTFB" value={`${data?.stats.avgTtfb || 0}ms`} change={compareEnabled ? pctChange(data?.stats.avgTtfb || 0, prevData?.stats.avgTtfb) : undefined} compareLoading={cmpLoading} />
+            <StatCard label="P95 TTFB" value={`${data?.stats.p95Ttfb || 0}ms`} change={compareEnabled ? pctChange(data?.stats.p95Ttfb || 0, prevData?.stats.p95Ttfb) : undefined} compareLoading={cmpLoading} />
+            <StatCard label="Avg Origin Time" value={`${data?.stats.avgOriginTime || 0}ms`} change={compareEnabled ? pctChange(data?.stats.avgOriginTime || 0, prevData?.stats.avgOriginTime) : undefined} compareLoading={cmpLoading} />
             <StatCard label="P95 Origin Time" value={`${data?.stats.p95OriginTime || 0}ms`} />
             <StatCard label="Total Bandwidth" value={formatBytes(data?.stats.totalBytes || 0)} />
           </>
@@ -80,12 +107,9 @@ export default function PerformancePage() {
 
       <ChartWrapper title="Response Times Over Time" subtitle="Average TTFB and Origin Response Time (ms)" loading={loading}>
         <TimeSeriesChart
-          data={tsFormatted}
+          data={perfData}
           xKey="date"
-          series={[
-            { key: "avgTtfb", label: "Avg TTFB (ms)", color: "#3b82f6" },
-            { key: "avgOriginTime", label: "Avg Origin Time (ms)", color: "#f59e0b" },
-          ]}
+          series={perfSeriesFull}
           yFormatter={(v) => `${v}ms`}
         />
       </ChartWrapper>

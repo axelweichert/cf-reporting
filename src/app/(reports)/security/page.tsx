@@ -1,9 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange } from "@/lib/store";
+import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchSecurityData, type SecurityData } from "@/lib/queries/security";
+import { pctChange } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -17,13 +18,14 @@ import { format } from "date-fns";
 
 export default function SecurityPage() {
   const { capabilities } = useAuth();
-  const { selectedZone, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedZone, timeRange, customStart, customEnd, compareEnabled } = useFilterStore();
   const zones = capabilities?.zones || [];
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch } = useReportData<SecurityData>({
+  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<SecurityData>({
     reportType: "security",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
@@ -31,6 +33,12 @@ export default function SecurityPage() {
     liveFetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchSecurityData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
+    },
+    prevSince: `${prev.start}T00:00:00Z`,
+    prevUntil: `${prev.end}T00:00:00Z`,
+    prevLiveFetcher: () => {
+      if (!zoneId) throw new Error("No zone available");
+      return fetchSecurityData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
     },
   });
 
@@ -58,6 +66,18 @@ export default function SecurityPage() {
     0
   );
   const totalBlocks = (data?.wafTimeSeries || []).reduce((sum, p) => sum + p.block, 0);
+
+  const prevTotalWAF = prevData ? (prevData.wafTimeSeries || []).reduce(
+    (sum, p) => sum + p.block + p.challenge + p.managed_challenge + p.js_challenge + p.challenge_solved + p.log, 0
+  ) : undefined;
+  const prevTotalBlocks = prevData ? (prevData.wafTimeSeries || []).reduce((sum, p) => sum + p.block, 0) : undefined;
+
+  const challengeSolveRate = data?.challengeSolveRates.challenged
+    ? (data.challengeSolveRates.solved / data.challengeSolveRates.challenged) * 100 : 0;
+  const prevChallengeSolveRate = prevData?.challengeSolveRates.challenged
+    ? (prevData.challengeSolveRates.solved / prevData.challengeSolveRates.challenged) * 100 : undefined;
+
+  const cmpLoading = compareEnabled && prevLoading;
 
   const sourceData = (data?.sourceBreakdown || []).map((s, i) => ({
     ...s,
@@ -88,15 +108,17 @@ export default function SecurityPage() {
           </>
         ) : (
           <>
-            <StatCard label="Total WAF Events" value={formatNumber(totalWAFEvents)} />
-            <StatCard label="Blocked Requests" value={formatNumber(totalBlocks)} />
+            <StatCard label="Total WAF Events" value={formatNumber(totalWAFEvents)} change={compareEnabled ? pctChange(totalWAFEvents, prevTotalWAF) : undefined} compareLoading={cmpLoading} />
+            <StatCard label="Blocked Requests" value={formatNumber(totalBlocks)} change={compareEnabled ? pctChange(totalBlocks, prevTotalBlocks) : undefined} compareLoading={cmpLoading} />
             <StatCard
               label="Challenge Solve Rate"
               value={
                 data?.challengeSolveRates.challenged
-                  ? `${((data.challengeSolveRates.solved / data.challengeSolveRates.challenged) * 100).toFixed(1)}%`
+                  ? `${challengeSolveRate.toFixed(1)}%`
                   : "N/A"
               }
+              change={compareEnabled ? pctChange(challengeSolveRate, prevChallengeSolveRate) : undefined}
+              compareLoading={cmpLoading}
             />
             <StatCard
               label="Skip Rule Hits"

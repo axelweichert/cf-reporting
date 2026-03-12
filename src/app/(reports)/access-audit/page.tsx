@@ -1,9 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange } from "@/lib/store";
+import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchAccessAuditData, type AccessAuditData } from "@/lib/queries/access-audit";
+import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -17,13 +18,14 @@ import { AlertTriangle, AlertCircle, Info } from "lucide-react";
 
 export default function AccessAuditPage() {
   const { capabilities } = useAuth();
-  const { selectedAccount, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedAccount, timeRange, customStart, customEnd, compareEnabled } = useFilterStore();
   const accounts = capabilities?.accounts || [];
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch } = useReportData<AccessAuditData>({
+  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<AccessAuditData>({
     reportType: "access-audit",
     scopeId: accountId,
     since: `${start}T00:00:00Z`,
@@ -31,6 +33,12 @@ export default function AccessAuditPage() {
     liveFetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchAccessAuditData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
+    },
+    prevSince: `${prev.start}T00:00:00Z`,
+    prevUntil: `${prev.end}T00:00:00Z`,
+    prevLiveFetcher: () => {
+      if (!accountId) throw new Error("No account available");
+      return fetchAccessAuditData(accountId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
     },
   });
 
@@ -42,6 +50,8 @@ export default function AccessAuditPage() {
     );
   }
 
+  const cmpLoading = compareEnabled && prevLoading;
+
   const loginsFormatted = (data?.loginsOverTime || []).map((p) => ({
     ...p,
     date: format(new Date(p.date), "MMM d"),
@@ -49,6 +59,25 @@ export default function AccessAuditPage() {
 
   const totalLogins = (data?.loginsOverTime || []).reduce((s, p) => s + p.successful + p.failed, 0);
   const totalSuccessful = (data?.loginsOverTime || []).reduce((s, p) => s + p.successful, 0);
+
+  const prevTotalLogins = prevData ? (prevData.loginsOverTime || []).reduce((s, p) => s + p.successful + p.failed, 0) : undefined;
+  const prevFailedCount = prevData?.failedLoginCount;
+
+  // Chart overlay: Logins Over Time
+  const loginSeries = [
+    { key: "successful", label: "Successful", color: "#10b981" },
+    { key: "failed", label: "Failed", color: "#ef4444" },
+  ];
+  let loginData: Record<string, unknown>[] = loginsFormatted;
+  let loginSeriesFull = loginSeries;
+  if (compareEnabled && prevData) {
+    const prevFormatted = (prevData.loginsOverTime || []).map((p) => ({
+      ...p,
+      date: format(new Date(p.date), "MMM d"),
+    }));
+    loginData = mergeComparisonTimeSeries(loginsFormatted, prevFormatted, ["successful", "failed"]);
+    loginSeriesFull = [...loginSeries, ...makeComparisonSeries(loginSeries, ["successful", "failed"])];
+  }
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -71,9 +100,9 @@ export default function AccessAuditPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {loading ? <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></> : (
           <>
-            <StatCard label="Total Logins" value={formatNumber(totalLogins)} />
+            <StatCard label="Total Logins" value={formatNumber(totalLogins)} change={compareEnabled ? pctChange(totalLogins, prevTotalLogins) : undefined} compareLoading={cmpLoading} />
             <StatCard label="Successful" value={formatNumber(totalSuccessful)} />
-            <StatCard label="Failed" value={formatNumber(data?.failedLoginCount || 0)} />
+            <StatCard label="Failed" value={formatNumber(data?.failedLoginCount || 0)} change={compareEnabled ? pctChange(data?.failedLoginCount || 0, prevFailedCount) : undefined} compareLoading={cmpLoading} />
             <StatCard label="Success Rate" value={totalLogins ? `${((totalSuccessful / totalLogins) * 100).toFixed(1)}%` : "N/A"} />
           </>
         )}
@@ -81,12 +110,9 @@ export default function AccessAuditPage() {
 
       <ChartWrapper title="Login Events Over Time" subtitle="Successful vs Failed" loading={loading}>
         <TimeSeriesChart
-          data={loginsFormatted}
+          data={loginData}
           xKey="date"
-          series={[
-            { key: "successful", label: "Successful", color: "#10b981" },
-            { key: "failed", label: "Failed", color: "#ef4444" },
-          ]}
+          series={loginSeriesFull}
           yFormatter={formatNumber}
         />
       </ChartWrapper>

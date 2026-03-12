@@ -1,9 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange } from "@/lib/store";
+import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchExecutiveData, type ExecutiveData } from "@/lib/queries/executive";
+import { pctChange } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import DonutChart from "@/components/charts/donut-chart";
 import { HorizontalBarChart } from "@/components/charts/bar-chart";
@@ -16,13 +17,14 @@ import { AlertTriangle, Info, AlertCircle, Zap, Server } from "lucide-react";
 
 export default function ExecutivePage() {
   const { capabilities } = useAuth();
-  const { selectedZone, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedZone, timeRange, customStart, customEnd, compareEnabled } = useFilterStore();
   const zones = capabilities?.zones || [];
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch } = useReportData<ExecutiveData>({
+  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<ExecutiveData>({
     reportType: "executive",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
@@ -30,6 +32,12 @@ export default function ExecutivePage() {
     liveFetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchExecutiveData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
+    },
+    prevSince: `${prev.start}T00:00:00Z`,
+    prevUntil: `${prev.end}T00:00:00Z`,
+    prevLiveFetcher: () => {
+      if (!zoneId) throw new Error("No zone available");
+      return fetchExecutiveData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
     },
   });
 
@@ -40,6 +48,8 @@ export default function ExecutivePage() {
       </div>
     );
   }
+
+  const cmpLoading = compareEnabled && prevLoading;
 
   const severityIcons = {
     info: <Info size={16} className="text-blue-400" />,
@@ -91,10 +101,10 @@ export default function ExecutivePage() {
           </>
         ) : (
           <>
-            <StatCard label="Total Requests" value={formatNumber(data?.traffic.totalRequests || 0)} />
-            <StatCard label="Total Bandwidth" value={formatBytes(data?.traffic.totalBandwidth || 0)} />
+            <StatCard label="Total Requests" value={formatNumber(data?.traffic.totalRequests || 0)} change={compareEnabled ? pctChange(data?.traffic.totalRequests || 0, prevData?.traffic.totalRequests) : undefined} compareLoading={cmpLoading} />
+            <StatCard label="Total Bandwidth" value={formatBytes(data?.traffic.totalBandwidth || 0)} change={compareEnabled ? pctChange(data?.traffic.totalBandwidth || 0, prevData?.traffic.totalBandwidth) : undefined} compareLoading={cmpLoading} />
             <StatCard label="Cache Hit Ratio" value={formatPercent(data?.traffic.cacheHitRatio || 0)} />
-            <StatCard label="Threats Blocked" value={formatNumber(data?.security.totalThreatsBlocked || 0)} />
+            <StatCard label="Threats Blocked" value={formatNumber(data?.security.totalThreatsBlocked || 0)} change={compareEnabled ? pctChange(data?.security.totalThreatsBlocked || 0, prevData?.security.totalThreatsBlocked) : undefined} compareLoading={cmpLoading} />
           </>
         )}
       </div>

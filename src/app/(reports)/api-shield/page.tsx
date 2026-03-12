@@ -1,9 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange } from "@/lib/store";
+import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchApiShieldData, type ApiShieldData } from "@/lib/queries/api-shield";
+import { pctChange } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -45,14 +46,15 @@ function MethodBadge({ method }: { method: string }) {
 
 export default function ApiShieldPage() {
   const { capabilities } = useAuth();
-  const { selectedZone, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedZone, timeRange, customStart, customEnd, compareEnabled } = useFilterStore();
   const zones = capabilities?.zones || [];
 
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch } = useReportData<ApiShieldData>({
+  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<ApiShieldData>({
     reportType: "api-shield",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
@@ -60,6 +62,12 @@ export default function ApiShieldPage() {
     liveFetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchApiShieldData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
+    },
+    prevSince: `${prev.start}T00:00:00Z`,
+    prevUntil: `${prev.end}T00:00:00Z`,
+    prevLiveFetcher: () => {
+      if (!zoneId) throw new Error("No zone available");
+      return fetchApiShieldData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
     },
   });
 
@@ -70,6 +78,8 @@ export default function ApiShieldPage() {
       </div>
     );
   }
+
+  const cmpLoading = compareEnabled && prevLoading;
 
   const sessionTsFormatted = (data?.sessionTraffic || []).map((p) => ({
     ...p,
@@ -100,8 +110,8 @@ export default function ApiShieldPage() {
           <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></>
         ) : (
           <>
-            <StatCard label="Managed Endpoints" value={formatNumber(data?.stats.totalManaged || 0)} />
-            <StatCard label="Discovered Endpoints" value={formatNumber(data?.stats.totalDiscovered || 0)} />
+            <StatCard label="Managed Endpoints" value={formatNumber(data?.stats.totalManaged || 0)} change={compareEnabled ? pctChange(data?.stats.totalManaged || 0, prevData?.stats.totalManaged) : undefined} compareLoading={cmpLoading} />
+            <StatCard label="Discovered Endpoints" value={formatNumber(data?.stats.totalDiscovered || 0)} change={compareEnabled ? pctChange(data?.stats.totalDiscovered || 0, prevData?.stats.totalDiscovered) : undefined} compareLoading={cmpLoading} />
             <StatCard label="Awaiting Review" value={formatNumber(data?.stats.discoveredInReview || 0)} />
             <StatCard label="Avg Req/Hour" value={data?.stats.avgRequestsPerHour?.toFixed(1) || "0"} />
             <StatCard label="Session ID" value={data?.stats.sessionIdentifier || "–"} />

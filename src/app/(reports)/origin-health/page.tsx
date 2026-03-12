@@ -1,9 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange } from "@/lib/store";
+import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchOriginHealthData, type OriginHealthData } from "@/lib/queries/origin-health";
+import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries, type ComparisonSeriesDef } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -40,14 +41,15 @@ function StatusGroupBadge({ group }: { group: string }) {
 
 export default function OriginHealthPage() {
   const { capabilities } = useAuth();
-  const { selectedZone, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedZone, timeRange, customStart, customEnd, compareEnabled } = useFilterStore();
   const zones = capabilities?.zones || [];
 
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch } = useReportData<OriginHealthData>({
+  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<OriginHealthData>({
     reportType: "origin-health",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
@@ -55,6 +57,12 @@ export default function OriginHealthPage() {
     liveFetcher: () => {
       if (!zoneId) throw new Error("No zone available");
       return fetchOriginHealthData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
+    },
+    prevSince: `${prev.start}T00:00:00Z`,
+    prevUntil: `${prev.end}T00:00:00Z`,
+    prevLiveFetcher: () => {
+      if (!zoneId) throw new Error("No zone available");
+      return fetchOriginHealthData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
     },
   });
 
@@ -66,10 +74,29 @@ export default function OriginHealthPage() {
     );
   }
 
+  const cmpLoading = compareEnabled && prevLoading;
+
   const tsFormatted = (data?.timeSeries || []).map((p) => ({
     ...p,
     date: format(new Date(p.date), "MMM d HH:mm"),
   }));
+
+  // Chart overlay: Origin Response Time
+  const originSeries = [
+    { key: "avgResponseTime", label: "Avg Response (ms)", color: "#3b82f6" },
+    { key: "errorRate", label: "5xx Error Rate (%)", color: "#ef4444", yAxisId: "right" as const },
+  ];
+  const originValueKeys = ["avgResponseTime"];
+  let originData: Record<string, unknown>[] = tsFormatted;
+  let originSeriesFull: ComparisonSeriesDef[] = originSeries;
+  if (compareEnabled && prevData) {
+    const prevFormatted = (prevData.timeSeries || []).map((p) => ({
+      ...p,
+      date: format(new Date(p.date), "MMM d HH:mm"),
+    }));
+    originData = mergeComparisonTimeSeries(tsFormatted, prevFormatted, originValueKeys);
+    originSeriesFull = [...originSeries, ...makeComparisonSeries(originSeries, originValueKeys)];
+  }
 
   // Aggregate status groups for donut chart
   const statusGroups = new Map<string, number>();
@@ -94,10 +121,10 @@ export default function OriginHealthPage() {
           <><CardSkeleton /><CardSkeleton /><CardSkeleton /><CardSkeleton /></>
         ) : (
           <>
-            <StatCard label="Total Requests" value={formatNumber(data?.stats.totalRequests || 0)} />
-            <StatCard label="Avg Origin Response" value={`${data?.stats.avgResponseTime || 0}ms`} />
+            <StatCard label="Total Requests" value={formatNumber(data?.stats.totalRequests || 0)} change={compareEnabled ? pctChange(data?.stats.totalRequests || 0, prevData?.stats.totalRequests) : undefined} compareLoading={cmpLoading} />
+            <StatCard label="Avg Origin Response" value={`${data?.stats.avgResponseTime || 0}ms`} change={compareEnabled ? pctChange(data?.stats.avgResponseTime || 0, prevData?.stats.avgResponseTime) : undefined} compareLoading={cmpLoading} />
             <StatCard label="P95 Origin Response" value={`${data?.stats.p95ResponseTime || 0}ms`} />
-            <StatCard label="5xx Error Rate" value={`${data?.stats.errorRate5xx || 0}%`} />
+            <StatCard label="5xx Error Rate" value={`${data?.stats.errorRate5xx || 0}%`} change={compareEnabled ? pctChange(data?.stats.errorRate5xx || 0, prevData?.stats.errorRate5xx) : undefined} compareLoading={cmpLoading} />
           </>
         )}
       </div>
@@ -138,12 +165,9 @@ export default function OriginHealthPage() {
       {/* Origin response time over time */}
       <ChartWrapper title="Origin Response Time" subtitle="Average response time and 5xx error rate" loading={loading}>
         <TimeSeriesChart
-          data={tsFormatted}
+          data={originData}
           xKey="date"
-          series={[
-            { key: "avgResponseTime", label: "Avg Response (ms)", color: "#3b82f6" },
-            { key: "errorRate", label: "5xx Error Rate (%)", color: "#ef4444", yAxisId: "right" },
-          ]}
+          series={originSeriesFull}
           yFormatter={(v) => `${v}ms`}
         />
       </ChartWrapper>

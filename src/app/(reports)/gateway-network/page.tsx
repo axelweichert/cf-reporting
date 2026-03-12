@@ -1,9 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange } from "@/lib/store";
+import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchGatewayNetworkData, type GatewayNetworkData } from "@/lib/queries/gateway-network";
+import { pctChange } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -16,13 +17,14 @@ import { format } from "date-fns";
 
 export default function GatewayNetworkPage() {
   const { capabilities } = useAuth();
-  const { selectedAccount, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedAccount, timeRange, customStart, customEnd, compareEnabled } = useFilterStore();
   const accounts = capabilities?.accounts || [];
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch } = useReportData<GatewayNetworkData>({
+  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<GatewayNetworkData>({
     reportType: "gateway-network",
     scopeId: accountId,
     since: `${start}T00:00:00Z`,
@@ -30,6 +32,12 @@ export default function GatewayNetworkPage() {
     liveFetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchGatewayNetworkData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
+    },
+    prevSince: `${prev.start}T00:00:00Z`,
+    prevUntil: `${prev.end}T00:00:00Z`,
+    prevLiveFetcher: () => {
+      if (!accountId) throw new Error("No account available");
+      return fetchGatewayNetworkData(accountId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
     },
   });
 
@@ -41,6 +49,8 @@ export default function GatewayNetworkPage() {
     );
   }
 
+  const cmpLoading = compareEnabled && prevLoading;
+
   const sessionsFormatted = (data?.sessionsOverTime || []).map((p) => ({
     ...p,
     date: format(new Date(p.date), "MMM d HH:mm"),
@@ -48,6 +58,9 @@ export default function GatewayNetworkPage() {
 
   const totalAllowed = (data?.sessionsOverTime || []).reduce((sum, p) => sum + p.allowed, 0);
   const totalBlocked = (data?.sessionsOverTime || []).reduce((sum, p) => sum + p.blocked, 0);
+
+  const prevTotalAllowed = prevData ? (prevData.sessionsOverTime || []).reduce((sum, p) => sum + p.allowed, 0) : undefined;
+  const prevTotalBlocked = prevData ? (prevData.sessionsOverTime || []).reduce((sum, p) => sum + p.blocked, 0) : undefined;
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -70,8 +83,8 @@ export default function GatewayNetworkPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {loading ? <><CardSkeleton /><CardSkeleton /><CardSkeleton /></> : (
           <>
-            <StatCard label="Allowed Sessions" value={formatNumber(totalAllowed)} />
-            <StatCard label="Blocked Sessions" value={formatNumber(totalBlocked)} />
+            <StatCard label="Allowed Sessions" value={formatNumber(totalAllowed)} change={compareEnabled ? pctChange(totalAllowed, prevTotalAllowed) : undefined} compareLoading={cmpLoading} />
+            <StatCard label="Blocked Sessions" value={formatNumber(totalBlocked)} change={compareEnabled ? pctChange(totalBlocked, prevTotalBlocked) : undefined} compareLoading={cmpLoading} />
             <StatCard label="Blocked Destinations" value={data?.blockedDestinations.length || 0} />
           </>
         )}

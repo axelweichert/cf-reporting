@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useFilterStore, getDateRange } from "@/lib/store";
+import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchGatewayDnsData, type GatewayDnsData } from "@/lib/queries/gateway-dns";
+import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -21,15 +22,16 @@ const BLOCKED_DECISIONS = new Set(["Blocked by Policy", "Blocked (Already Resolv
 
 export default function GatewayDnsPage() {
   const { capabilities } = useAuth();
-  const { selectedAccount, timeRange, customStart, customEnd } = useFilterStore();
+  const { selectedAccount, timeRange, customStart, customEnd, compareEnabled } = useFilterStore();
   const accounts = capabilities?.accounts || [];
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
+  const prev = getPreviousPeriod(start, end);
 
   const [showAllBlocked, setShowAllBlocked] = useState(false);
 
-  const { data, loading, error, errorType, refetch } = useReportData<GatewayDnsData>({
+  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<GatewayDnsData>({
     reportType: "gateway-dns",
     scopeId: accountId,
     since: `${start}T00:00:00Z`,
@@ -37,6 +39,12 @@ export default function GatewayDnsPage() {
     liveFetcher: () => {
       if (!accountId) throw new Error("No account available");
       return fetchGatewayDnsData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
+    },
+    prevSince: `${prev.start}T00:00:00Z`,
+    prevUntil: `${prev.end}T00:00:00Z`,
+    prevLiveFetcher: () => {
+      if (!accountId) throw new Error("No account available");
+      return fetchGatewayDnsData(accountId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
     },
   });
 
@@ -48,6 +56,8 @@ export default function GatewayDnsPage() {
     );
   }
 
+  const cmpLoading = compareEnabled && prevLoading;
+
   const queryVolumeFormatted = (data?.queryVolume || []).map((p) => ({
     ...p,
     date: format(new Date(p.date), "MMM d HH:mm"),
@@ -58,10 +68,28 @@ export default function GatewayDnsPage() {
     .filter((d) => BLOCKED_DECISIONS.has(d.decision))
     .reduce((sum, d) => sum + d.count, 0);
 
+  const prevTotalQueries = prevData ? (prevData.queryVolume || []).reduce((sum, p) => sum + p.count, 0) : undefined;
+  const prevTotalBlocked = prevData ? (prevData.resolverDecisions || [])
+    .filter((d) => BLOCKED_DECISIONS.has(d.decision))
+    .reduce((sum, d) => sum + d.count, 0) : undefined;
+
   // Detect if only blocked queries are logged
   const onlyBlockedLogged = totalQueries > 0
     && totalBlocked === totalQueries
     && (data?.resolverDecisions || []).length === 1;
+
+  // Chart overlay: DNS Query Volume
+  const querySeries = [{ key: "count", label: "Queries", color: "#3b82f6" }];
+  let queryData: Record<string, unknown>[] = queryVolumeFormatted;
+  let querySeriesFull = querySeries;
+  if (compareEnabled && prevData) {
+    const prevFormatted = (prevData.queryVolume || []).map((p) => ({
+      ...p,
+      date: format(new Date(p.date), "MMM d HH:mm"),
+    }));
+    queryData = mergeComparisonTimeSeries(queryVolumeFormatted, prevFormatted, ["count"]);
+    querySeriesFull = [...querySeries, ...makeComparisonSeries(querySeries, ["count"])];
+  }
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -84,8 +112,8 @@ export default function GatewayDnsPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {loading ? <><CardSkeleton /><CardSkeleton /><CardSkeleton /></> : (
           <>
-            <StatCard label="Total DNS Queries" value={formatNumber(totalQueries)} />
-            <StatCard label="Blocked Queries" value={formatNumber(totalBlocked)} />
+            <StatCard label="Total DNS Queries" value={formatNumber(totalQueries)} change={compareEnabled ? pctChange(totalQueries, prevTotalQueries) : undefined} compareLoading={cmpLoading} />
+            <StatCard label="Blocked Queries" value={formatNumber(totalBlocked)} change={compareEnabled ? pctChange(totalBlocked, prevTotalBlocked) : undefined} compareLoading={cmpLoading} />
             <StatCard label="Blocked Domains" value={data?.topBlockedDomains.length || 0} />
           </>
         )}
@@ -104,9 +132,9 @@ export default function GatewayDnsPage() {
 
       <ChartWrapper title="DNS Query Volume Over Time" loading={loading}>
         <TimeSeriesChart
-          data={queryVolumeFormatted}
+          data={queryData}
           xKey="date"
-          series={[{ key: "count", label: "Queries", color: "#3b82f6" }]}
+          series={querySeriesFull}
           yFormatter={formatNumber}
         />
       </ChartWrapper>
