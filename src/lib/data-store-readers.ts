@@ -13,7 +13,7 @@ import { getDb } from "@/lib/db";
 import type Database from "better-sqlite3";
 
 import type { ExecutiveData } from "@/lib/queries/executive";
-import type { SecurityEmailData } from "@/lib/email/report-data";
+import type { SecurityData } from "@/lib/queries/security";
 import type { TrafficData } from "@/lib/queries/traffic";
 import type { PerformanceData } from "@/lib/queries/performance";
 import type { DnsData } from "@/lib/queries/dns";
@@ -279,22 +279,129 @@ function readSecurityData(
   scopeId: string,
   fromTs: number,
   toTs: number,
-): SecurityEmailData | null {
+): SecurityData | null {
+  // WAF time series from firewall_events_ts
+  const wafRows = db.prepare(
+    `SELECT ts, blocks, challenges, managed_challenges, js_challenges, challenges_solved, logs FROM firewall_events_ts WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
+  ).all(scopeId, fromTs, toTs) as Array<{
+    ts: number; blocks: number; challenges: number; managed_challenges: number;
+    js_challenges: number; challenges_solved: number; logs: number;
+  }>;
+
+  // Traffic time series from http_requests_ts
+  const trafficRows = db.prepare(
+    `SELECT ts, requests FROM http_requests_ts WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
+  ).all(scopeId, fromTs, toTs) as Array<{ ts: number; requests: number }>;
+
   const stats = getAggStats(db, scopeId, "security", fromTs, toTs);
-  if (stats.size === 0) return null;
+
+  if (wafRows.length === 0 && stats.size === 0) return null;
+
+  const wafTimeSeries = wafRows.map((r) => ({
+    date: epochToIso(r.ts),
+    block: r.blocks,
+    challenge: r.challenges,
+    managed_challenge: r.managed_challenges,
+    js_challenge: r.js_challenges,
+    challenge_solved: r.challenges_solved,
+    log: r.logs,
+  }));
+
+  const trafficTimeSeries = trafficRows.map((r) => ({
+    date: epochToIso(r.ts),
+    requests: r.requests,
+  }));
+
+  // Derive challenge solve rates from time series
+  const totalChallenged = wafRows.reduce((s, r) => s + r.challenges + r.managed_challenges + r.js_challenges, 0);
+  const totalSolved = wafRows.reduce((s, r) => s + r.challenges_solved, 0);
 
   const sourceBreakdown = getTopItems(db, scopeId, "security", "source_breakdown", fromTs, toTs);
   const topBlockRules = getTopItems(db, scopeId, "security", "top_block_rules", fromTs, toTs);
   const topAttackingIPs = getTopItems(db, scopeId, "security", "top_attacking_ips", fromTs, toTs);
   const topAttackingCountries = getTopItems(db, scopeId, "security", "top_attacking_countries", fromTs, toTs);
+  const topAttackingASNs = getTopItems(db, scopeId, "security", "top_attacking_asns", fromTs, toTs);
+  const attackCategories = getTopItems(db, scopeId, "security", "attack_categories", fromTs, toTs);
+  const httpMethods = getTopItems(db, scopeId, "security", "http_methods", fromTs, toTs);
+  const botScoreDist = getTopItems(db, scopeId, "security", "bot_score_distribution", fromTs, toTs);
+
+  // Firewall rules from firewall_rules table
+  const rulesCa = getLatestCollectedAt(db, "firewall_rules", "zone_id", scopeId, fromTs, toTs);
+  let topFirewallRules: SecurityData["topFirewallRules"] = [];
+  let topSkipRules: SecurityData["topSkipRules"] = [];
+  let ruleEffectiveness: SecurityData["ruleEffectiveness"] = [];
+
+  if (rulesCa) {
+    const ruleRows = db.prepare(
+      `SELECT rule_id, rule_name, description, action, total_hits, blocks, challenges, logs, block_rate FROM firewall_rules WHERE zone_id = ? AND collected_at = ? ORDER BY total_hits DESC`,
+    ).all(scopeId, rulesCa) as Array<{
+      rule_id: string; rule_name: string | null; description: string | null;
+      action: string; total_hits: number; blocks: number; challenges: number; logs: number; block_rate: number | null;
+    }>;
+
+    for (const r of ruleRows) {
+      const entry = {
+        ruleId: r.rule_id,
+        ruleName: r.rule_name,
+        description: r.description ?? "",
+        action: r.action,
+        count: r.total_hits,
+      };
+      if (r.action === "skip" || r.action === "log") {
+        topSkipRules.push(entry);
+      } else {
+        topFirewallRules.push(entry);
+      }
+      ruleEffectiveness.push({
+        ruleId: r.rule_id,
+        ruleName: r.rule_name,
+        description: r.description ?? "",
+        totalHits: r.total_hits,
+        blocks: r.blocks,
+        challenges: r.challenges,
+        logs: r.logs,
+        blockRate: r.block_rate ?? 0,
+      });
+    }
+  }
+
+  // Fall back to top_items for rules if table was empty
+  if (topFirewallRules.length === 0) {
+    topFirewallRules = topBlockRules.map((r) => ({
+      ruleId: "",
+      ruleName: r.name,
+      description: "",
+      action: "block",
+      count: r.value,
+    }));
+  }
 
   return {
-    totalThreatsBlocked: stats.get("total_threats_blocked") ?? 0,
-    challengeSolveRate: stats.get("challenge_solve_rate") ?? 0,
-    topSources: sourceBreakdown.map((r) => ({ name: r.name, value: r.value })),
-    topBlockRules: topBlockRules.map((r) => ({ name: r.name, count: r.value })),
+    wafTimeSeries,
+    trafficTimeSeries,
+    topFirewallRules,
+    topSkipRules,
+    sourceBreakdown: sourceBreakdown.map((r) => ({ name: r.name, value: r.value })),
+    botScoreDistribution: botScoreDist.map((r) => ({ range: r.name, count: r.value })),
+    challengeSolveRates: {
+      challenged: totalChallenged || (stats.get("total_threats_blocked") ?? 0),
+      solved: totalSolved,
+      failed: totalChallenged - totalSolved,
+    },
     topAttackingIPs: topAttackingIPs.map((r) => ({ ip: r.name, count: r.value })),
     topAttackingCountries: topAttackingCountries.map((r) => ({ country: r.name, count: r.value })),
+    topAttackingASNs: topAttackingASNs.map((r) => ({
+      asn: parseInt(r.name, 10) || 0,
+      description: r.detail ?? r.name,
+      count: r.value,
+    })),
+    attackCategories: attackCategories.map((r) => ({
+      category: r.name,
+      count: r.value,
+      sources: r.detail ? r.detail.split(",") : [],
+    })),
+    httpMethodBreakdown: httpMethods.map((r) => ({ method: r.name, count: r.value })),
+    ruleEffectiveness,
   };
 }
 
