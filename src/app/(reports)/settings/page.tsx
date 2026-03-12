@@ -64,7 +64,7 @@ export default function SettingsPage() {
   const [collector, setCollector] = useState<{
     enabled: boolean;
     running: boolean;
-    lastRunAt: string | null;
+    lastRunAt: number | null;
     lastRunStatus: string | null;
     schedule: string;
     totalCollectionRuns: number;
@@ -333,7 +333,7 @@ export default function SettingsPage() {
         {/* Last run info */}
         {collector?.lastRunAt && (
           <div className="mt-3 text-xs text-zinc-400">
-            Last run: {new Date(collector.lastRunAt).toLocaleString()} \u2013{" "}
+            Last run: {new Date(collector.lastRunAt * 1000).toLocaleString()} \u2013{" "}
             <span className={collector.lastRunStatus === "success" ? "text-emerald-400" : collector.lastRunStatus === "error" ? "text-red-400" : "text-yellow-400"}>
               {collector.lastRunStatus}
             </span>

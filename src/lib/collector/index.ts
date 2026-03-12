@@ -335,11 +335,26 @@ async function fetchAccountReportData(
 }
 
 export function getCollectorStatus() {
+  // Derive running state from DB to work across Next.js workers
+  let dbRunning = false;
+  let dbLastRunAt: number | null = null;
+  let dbLastRunStatus: string | null = null;
+  try {
+    const store = getStore();
+    const runs = store.getRecentCollectionRuns(1);
+    if (runs.length > 0) {
+      const latest = runs[0];
+      dbRunning = latest.status === "running" && latest.finished_at === null;
+      dbLastRunAt = latest.finished_at ?? latest.started_at;
+      dbLastRunStatus = latest.status;
+    }
+  } catch { /* db unavailable */ }
+
   return {
     enabled: !!process.env.CF_API_TOKEN && checkDb(),
-    running: _running,
-    lastRunAt: _lastRunAt,
-    lastRunStatus: _lastRunStatus,
+    running: _running || dbRunning,
+    lastRunAt: dbLastRunAt,
+    lastRunStatus: dbLastRunStatus ?? _lastRunStatus,
     nextRunAt: _nextRunAt,
     schedule: process.env.COLLECTION_SCHEDULE || "0 */6 * * *",
     zoneReportTypes: ZONE_REPORT_TYPES,

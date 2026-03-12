@@ -57,7 +57,7 @@ interface DataAvailability {
 interface CollectorStatus {
   enabled: boolean;
   running: boolean;
-  lastRunAt: string | null;
+  lastRunAt: number | null;
   lastRunStatus: string | null;
   schedule: string;
   totalReportTypes: number;
