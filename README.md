@@ -4,13 +4,13 @@ Open-source, self-hosted reporting dashboard for Cloudflare. Authenticate with y
 
 ## Features
 
-- **Web Security Reports** — Traffic overview, security posture, DDoS & rate limiting, bot analysis
-- **DNS Analytics** — Query volume, response codes, record inventory
-- **Zero Trust Reports** — Gateway DNS/HTTP, gateway network, Access audit log, Shadow IT / SaaS discovery
-- **Executive Report** — Auto-generated summary with PDF export
-- **Dark / Light Mode** — Toggle between themes
-- **Graceful Degradation** — Adapts to your token's permissions; shows what's available
-- **Privacy First** — API tokens stay server-side only, never exposed to the browser
+- **Web Security Reports** – Traffic overview, security posture, DDoS & rate limiting, bot analysis
+- **DNS Analytics** – Query volume, response codes, record inventory
+- **Zero Trust Reports** – Gateway DNS/HTTP, gateway network, Access audit log, Shadow IT / SaaS discovery
+- **Executive Report** – Auto-generated summary with PDF export
+- **Dark / Light Mode** – Toggle between themes
+- **Graceful Degradation** – Adapts to your token's permissions; shows what's available
+- **Privacy First** – API tokens stay server-side only, never exposed to the browser
 
 ## Quick Start
 
@@ -60,7 +60,7 @@ Best for servers with port 80 accessible from the internet.
 
 ```bash
 cp .env.ssl.example .env
-# Edit .env — set SSL_DOMAIN, ACME_EMAIL, SESSION_SECRET
+# Edit .env – set SSL_DOMAIN, ACME_EMAIL, SESSION_SECRET
 docker compose -f docker-compose.ssl.yml up -d
 ```
 
@@ -72,7 +72,7 @@ Your token needs **Zone > DNS > Edit** permission in addition to the reporting p
 
 ```bash
 cp .env.ssl.example .env
-# Edit .env — set ACME_CHALLENGE=dns, SSL_DOMAIN, ACME_EMAIL, CF_API_TOKEN
+# Edit .env – set ACME_CHALLENGE=dns, SSL_DOMAIN, ACME_EMAIL, CF_API_TOKEN
 docker compose -f docker-compose.ssl.yml up -d
 ```
 
@@ -80,10 +80,10 @@ docker compose -f docker-compose.ssl.yml up -d
 
 | Variable | Description | Default |
 |---|---|---|
-| `SSL_DOMAIN` | Domain(s) for the certificate — supports comma-separated multiple domains and wildcards (see below) | Required |
+| `SSL_DOMAIN` | Domain(s) for the certificate – supports comma-separated multiple domains and wildcards (see below) | Required |
 | `ACME_EMAIL` | Email for Let's Encrypt notifications | Required |
 | `ACME_CHALLENGE` | `http` for HTTP-01 or `dns` for DNS-01 via Cloudflare | `http` |
-| `CF_DNS_TOKEN` | Separate token for DNS-01 only (falls back to `CF_API_TOKEN`) | — |
+| `CF_DNS_TOKEN` | Separate token for DNS-01 only (falls back to `CF_API_TOKEN`) | – |
 
 ### Multiple Domains & Wildcards
 
@@ -100,7 +100,7 @@ SSL_DOMAIN=*.example.com
 ACME_CHALLENGE=dns
 ```
 
-A wildcard covers subdomains but not the bare domain — use both if needed:
+A wildcard covers subdomains but not the bare domain – use both if needed:
 
 ```bash
 SSL_DOMAIN=example.com, *.example.com
@@ -129,7 +129,7 @@ Reports requiring permissions your token doesn't have will show a helpful messag
 
 | Variable | Description | Default |
 |---|---|---|
-| `CF_API_TOKEN` | Pre-configured Cloudflare API token (skips browser setup) | — |
+| `CF_API_TOKEN` | Pre-configured Cloudflare API token (skips browser setup) | – |
 | `SESSION_SECRET` | 32+ char secret for encrypting session cookies | Auto-generated dev secret |
 | `PORT` | Server port | `3000` |
 
@@ -151,7 +151,7 @@ Browser → Next.js API Routes → Cloudflare API
             httpOnly cookie)
 ```
 
-All Cloudflare API calls are proxied through server-side routes. The token never reaches client-side JavaScript. No external database — the app runs as a single container with in-memory caching.
+All Cloudflare API calls are proxied through server-side routes. The token never reaches client-side JavaScript. No external database – the app runs as a single container with in-memory caching.
 
 ## License
 

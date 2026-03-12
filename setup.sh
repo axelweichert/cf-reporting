@@ -1,5 +1,5 @@
 #!/bin/bash
-# cf-reporting — Development Environment Setup
+# cf-reporting – Development Environment Setup
 # Run this on your headless Ubuntu 24.04 before starting Claude Code
 
 set -e

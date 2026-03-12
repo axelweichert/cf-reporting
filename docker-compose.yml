@@ -5,11 +5,11 @@ services:
       - "3000:3000"
     environment:
       - SESSION_SECRET=${SESSION_SECRET:-}
-      # Pre-configure User API token (optional — skip browser setup)
+      # Pre-configure User API token (optional – skip browser setup)
       - CF_API_TOKEN=${CF_API_TOKEN:-}
       # Pre-configure Account API token (alternative to CF_API_TOKEN)
       - CF_ACCOUNT_TOKEN=${CF_ACCOUNT_TOKEN:-}
-      # SMTP settings for email report delivery (optional — can also configure via Settings UI)
+      # SMTP settings for email report delivery (optional – can also configure via Settings UI)
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-}

@@ -1,4 +1,4 @@
-# HTTP-01 ACME challenge — requires port 80 accessible from the internet
+# HTTP-01 ACME challenge – requires port 80 accessible from the internet
 {
 	email {$ACME_EMAIL}
 	default_sni {$DEFAULT_SNI}
@@ -25,7 +25,7 @@
 	encode gzip
 }
 
-# Fallback for direct IP access — serves domain cert (browser will show name mismatch warning)
+# Fallback for direct IP access – serves domain cert (browser will show name mismatch warning)
 :443 {
 	reverse_proxy cf-reporting:3000
 	encode gzip

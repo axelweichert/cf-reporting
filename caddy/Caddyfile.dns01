@@ -1,4 +1,4 @@
-# DNS-01 ACME challenge via Cloudflare — works when port 80 is blocked
+# DNS-01 ACME challenge via Cloudflare – works when port 80 is blocked
 # Requires CF_DNS_TOKEN with Zone > DNS > Edit permission
 {
 	email {$ACME_EMAIL}
@@ -28,7 +28,7 @@
 	encode gzip
 }
 
-# Fallback for direct IP access — serves domain cert (browser will show name mismatch warning)
+# Fallback for direct IP access – serves domain cert (browser will show name mismatch warning)
 :443 {
 	reverse_proxy cf-reporting:3000
 	encode gzip
