@@ -51,6 +51,7 @@ next-env.d.ts
 
 # Playwright MCP artifacts
 .playwright-mcp/
+/test-results/
 
 # Screenshots and binary files (use /local/ for these)
 *.png
