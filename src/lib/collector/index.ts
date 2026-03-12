@@ -166,23 +166,26 @@ export async function runCollection(): Promise<void> {
         const fetchStart = Date.now();
         try {
           const lastEnd = snap.getLastCollectedEnd(zone.id, reportType);
-          let sinceStr: string;
+          let fetchSince: string;  // what we ask the API for (with overlap)
+          let storeSince: string;  // what we record in the DB (clean boundary)
           let label: string;
           if (lastEnd) {
-            // Start 1h before last period_end for safety overlap
+            // Fetch with 1h overlap for safety, but store from the clean boundary
             const overlapped = new Date(new Date(lastEnd).getTime() - OVERLAP_MS);
-            sinceStr = overlapped.toISOString();
+            fetchSince = overlapped.toISOString();
+            storeSince = lastEnd;
             label = "incremental";
           } else {
-            sinceStr = defaultSinceStr;
+            fetchSince = defaultSinceStr;
+            storeSince = defaultSinceStr;
             label = "initial 24h";
           }
 
           const data = await fetchZoneReportData(
-            token, zone.id, sinceStr, nowStr, reportType,
+            token, zone.id, fetchSince, nowStr, reportType,
             accounts[0]?.id, // for DDoS L3/L4 data
           );
-          snap.upsertSnapshot(zone.id, zone.name, reportType, sinceStr, nowStr, data);
+          snap.upsertSnapshot(zone.id, zone.name, reportType, storeSince, nowStr, data);
           const duration = Date.now() - fetchStart;
           snap.logCollection(runId, zone.id, zone.name, reportType, "success", duration);
           successCount++;
@@ -203,21 +206,24 @@ export async function runCollection(): Promise<void> {
         const fetchStart = Date.now();
         try {
           const lastEnd = snap.getLastCollectedEnd(account.id, reportType);
-          let sinceStr: string;
+          let fetchSince: string;
+          let storeSince: string;
           let label: string;
           if (lastEnd) {
             const overlapped = new Date(new Date(lastEnd).getTime() - OVERLAP_MS);
-            sinceStr = overlapped.toISOString();
+            fetchSince = overlapped.toISOString();
+            storeSince = lastEnd;
             label = "incremental";
           } else {
-            sinceStr = defaultSinceStr;
+            fetchSince = defaultSinceStr;
+            storeSince = defaultSinceStr;
             label = "initial 24h";
           }
 
           const data = await fetchAccountReportData(
-            token, account.id, sinceStr, nowStr, reportType,
+            token, account.id, fetchSince, nowStr, reportType,
           );
-          snap.upsertSnapshot(account.id, account.name, reportType, sinceStr, nowStr, data);
+          snap.upsertSnapshot(account.id, account.name, reportType, storeSince, nowStr, data);
           const duration = Date.now() - fetchStart;
           snap.logCollection(runId, account.id, account.name, reportType, "success", duration);
           successCount++;
