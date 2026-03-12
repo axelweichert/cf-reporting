@@ -1,10 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchZtSummaryData, type ZtSummaryData } from "@/lib/queries/zt-summary";
-import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries, type ComparisonSeriesDef } from "@/lib/compare-utils";
+import { pctChange, formatTimeSeries, buildComparisonChart } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -14,7 +14,6 @@ import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber } from "@/components/charts/theme";
 import { Monitor, Users, ShieldCheck, Laptop, AppWindow, Info } from "lucide-react";
-import { format } from "date-fns";
 
 export default function ZtSummaryPage() {
   const { capabilities } = useAuth();
@@ -23,22 +22,15 @@ export default function ZtSummaryPage() {
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
-  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<ZtSummaryData>({
+  const { data, loading, error, errorType, refetch, prevData, cmpLoading } = useReportData<ZtSummaryData>({
     reportType: "zt-summary",
     scopeId: accountId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: (s, u) => {
       if (!accountId) throw new Error("No account available");
-      return fetchZtSummaryData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
-    },
-    prevSince: `${prev.start}T00:00:00Z`,
-    prevUntil: `${prev.end}T00:00:00Z`,
-    prevLiveFetcher: () => {
-      if (!accountId) throw new Error("No account available");
-      return fetchZtSummaryData(accountId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
+      return fetchZtSummaryData(accountId, s, u);
     },
   });
 
@@ -49,8 +41,6 @@ export default function ZtSummaryPage() {
       </div>
     );
   }
-
-  const cmpLoading = compareEnabled && prevLoading;
 
   const fleet = data?.fleet;
   const plan = data?.plan;
@@ -75,20 +65,14 @@ export default function ZtSummaryPage() {
     { key: "uniqueUsers", label: "Unique Users", color: "#3b82f6" },
     { key: "logins", label: "Total Logins", color: "#6b7280", yAxisId: "right" as const },
   ];
-  const dauFormatted = (data?.dailyActiveUsers || []).map((p) => ({
-    ...p,
-    date: format(new Date(p.date), "MMM d"),
-  }));
-  let dauData: Record<string, unknown>[] = dauFormatted;
-  let dauSeriesFull: ComparisonSeriesDef[] = dauSeries;
-  if (compareEnabled && prevData) {
-    const prevDauFormatted = (prevData.dailyActiveUsers || []).map((p) => ({
-      ...p,
-      date: format(new Date(p.date), "MMM d"),
-    }));
-    dauData = mergeComparisonTimeSeries(dauFormatted, prevDauFormatted, ["uniqueUsers"]);
-    dauSeriesFull = [...dauSeries, ...makeComparisonSeries(dauSeries, ["uniqueUsers"])];
-  }
+  const dauFormatted = formatTimeSeries(data?.dailyActiveUsers || [], "MMM d");
+  const { data: dauData, series: dauSeriesFull } = buildComparisonChart({
+    current: dauFormatted,
+    previous: prevData ? formatTimeSeries(prevData.dailyActiveUsers || [], "MMM d") : undefined,
+    series: dauSeries,
+    valueKeys: ["uniqueUsers"],
+    compareEnabled,
+  });
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">

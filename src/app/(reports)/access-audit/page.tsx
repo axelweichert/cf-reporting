@@ -1,10 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchAccessAuditData, type AccessAuditData } from "@/lib/queries/access-audit";
-import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries } from "@/lib/compare-utils";
+import { pctChange, formatTimeSeries, buildComparisonChart } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -13,7 +13,6 @@ import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber, formatPercent } from "@/components/charts/theme";
-import { format } from "date-fns";
 import { AlertTriangle, AlertCircle, Info } from "lucide-react";
 
 export default function AccessAuditPage() {
@@ -23,22 +22,15 @@ export default function AccessAuditPage() {
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
-  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<AccessAuditData>({
+  const { data, loading, error, errorType, refetch, prevData, cmpLoading } = useReportData<AccessAuditData>({
     reportType: "access-audit",
     scopeId: accountId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: (s, u) => {
       if (!accountId) throw new Error("No account available");
-      return fetchAccessAuditData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
-    },
-    prevSince: `${prev.start}T00:00:00Z`,
-    prevUntil: `${prev.end}T00:00:00Z`,
-    prevLiveFetcher: () => {
-      if (!accountId) throw new Error("No account available");
-      return fetchAccessAuditData(accountId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
+      return fetchAccessAuditData(accountId, s, u);
     },
   });
 
@@ -50,12 +42,7 @@ export default function AccessAuditPage() {
     );
   }
 
-  const cmpLoading = compareEnabled && prevLoading;
-
-  const loginsFormatted = (data?.loginsOverTime || []).map((p) => ({
-    ...p,
-    date: format(new Date(p.date), "MMM d"),
-  }));
+  const loginsFormatted = formatTimeSeries(data?.loginsOverTime || [], "MMM d");
 
   const totalLogins = (data?.loginsOverTime || []).reduce((s, p) => s + p.successful + p.failed, 0);
   const totalSuccessful = (data?.loginsOverTime || []).reduce((s, p) => s + p.successful, 0);
@@ -68,16 +55,13 @@ export default function AccessAuditPage() {
     { key: "successful", label: "Successful", color: "#10b981" },
     { key: "failed", label: "Failed", color: "#ef4444" },
   ];
-  let loginData: Record<string, unknown>[] = loginsFormatted;
-  let loginSeriesFull = loginSeries;
-  if (compareEnabled && prevData) {
-    const prevFormatted = (prevData.loginsOverTime || []).map((p) => ({
-      ...p,
-      date: format(new Date(p.date), "MMM d"),
-    }));
-    loginData = mergeComparisonTimeSeries(loginsFormatted, prevFormatted, ["successful", "failed"]);
-    loginSeriesFull = [...loginSeries, ...makeComparisonSeries(loginSeries, ["successful", "failed"])];
-  }
+  const { data: loginData, series: loginSeriesFull } = buildComparisonChart({
+    current: loginsFormatted,
+    previous: prevData ? formatTimeSeries(prevData.loginsOverTime || [], "MMM d") : undefined,
+    series: loginSeries,
+    valueKeys: ["successful", "failed"],
+    compareEnabled,
+  });
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">

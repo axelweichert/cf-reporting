@@ -1,10 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchDdosData, type DdosData } from "@/lib/queries/ddos";
-import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries } from "@/lib/compare-utils";
+import { pctChange, formatTimeSeries, buildComparisonChart } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import { HorizontalBarChart } from "@/components/charts/bar-chart";
@@ -25,22 +25,15 @@ export default function DdosPage() {
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
-  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<DdosData>({
+  const { data, loading, error, errorType, refetch, prevData, cmpLoading } = useReportData<DdosData>({
     reportType: "ddos",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: (s, u) => {
       if (!zoneId) throw new Error("No zone available");
-      return fetchDdosData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`, accountId || undefined);
-    },
-    prevSince: `${prev.start}T00:00:00Z`,
-    prevUntil: `${prev.end}T00:00:00Z`,
-    prevLiveFetcher: () => {
-      if (!zoneId) throw new Error("No zone available");
-      return fetchDdosData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`, accountId || undefined);
+      return fetchDdosData(zoneId, s, u, accountId || undefined);
     },
   });
 
@@ -52,26 +45,18 @@ export default function DdosPage() {
     );
   }
 
-  const cmpLoading = compareEnabled && prevLoading;
-
-  const formatTime = (points: Array<{ date: string; count: number }>) =>
-    points.map((p) => ({
-      ...p,
-      date: format(new Date(p.date), "MMM d HH:mm"),
-    }));
-
-  const ddosTime = formatTime(data?.ddosEventsOverTime || []);
-  const rlTime = formatTime(data?.rateLimitEventsOverTime || []);
+  const ddosTime = formatTimeSeries(data?.ddosEventsOverTime || []);
+  const rlTime = formatTimeSeries(data?.rateLimitEventsOverTime || []);
 
   // Chart overlay: DDoS Events
   const ddosSeries = [{ key: "count", label: "DDoS Events", color: "#ef4444" }];
-  let ddosData: Record<string, unknown>[] = ddosTime;
-  let ddosSeriesFull = ddosSeries;
-  if (compareEnabled && prevData) {
-    const prevDdosTime = formatTime(prevData.ddosEventsOverTime || []);
-    ddosData = mergeComparisonTimeSeries(ddosTime, prevDdosTime, ["count"]);
-    ddosSeriesFull = [...ddosSeries, ...makeComparisonSeries(ddosSeries, ["count"])];
-  }
+  const { data: ddosData, series: ddosSeriesFull } = buildComparisonChart({
+    current: ddosTime,
+    previous: prevData ? formatTimeSeries(prevData.ddosEventsOverTime || []) : undefined,
+    series: ddosSeries,
+    valueKeys: ["count"],
+    compareEnabled,
+  });
 
   return (
     <div className="mx-auto max-w-7xl space-y-8">

@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchGatewayDnsData, type GatewayDnsData } from "@/lib/queries/gateway-dns";
-import { pctChange, mergeComparisonTimeSeries, makeComparisonSeries } from "@/lib/compare-utils";
+import { pctChange, formatTimeSeries, buildComparisonChart } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -16,7 +16,6 @@ import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber } from "@/components/charts/theme";
 import { Info } from "lucide-react";
-import { format } from "date-fns";
 
 const BLOCKED_DECISIONS = new Set(["Blocked by Policy", "Blocked (Already Resolved)"]);
 
@@ -27,24 +26,17 @@ export default function GatewayDnsPage() {
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
-  const prev = getPreviousPeriod(start, end);
 
   const [showAllBlocked, setShowAllBlocked] = useState(false);
 
-  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<GatewayDnsData>({
+  const { data, loading, error, errorType, refetch, prevData, cmpLoading } = useReportData<GatewayDnsData>({
     reportType: "gateway-dns",
     scopeId: accountId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: (s, u) => {
       if (!accountId) throw new Error("No account available");
-      return fetchGatewayDnsData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
-    },
-    prevSince: `${prev.start}T00:00:00Z`,
-    prevUntil: `${prev.end}T00:00:00Z`,
-    prevLiveFetcher: () => {
-      if (!accountId) throw new Error("No account available");
-      return fetchGatewayDnsData(accountId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
+      return fetchGatewayDnsData(accountId, s, u);
     },
   });
 
@@ -56,12 +48,7 @@ export default function GatewayDnsPage() {
     );
   }
 
-  const cmpLoading = compareEnabled && prevLoading;
-
-  const queryVolumeFormatted = (data?.queryVolume || []).map((p) => ({
-    ...p,
-    date: format(new Date(p.date), "MMM d HH:mm"),
-  }));
+  const queryVolumeFormatted = formatTimeSeries(data?.queryVolume || []);
 
   const totalQueries = (data?.queryVolume || []).reduce((sum, p) => sum + p.count, 0);
   const totalBlocked = (data?.resolverDecisions || [])
@@ -80,16 +67,13 @@ export default function GatewayDnsPage() {
 
   // Chart overlay: DNS Query Volume
   const querySeries = [{ key: "count", label: "Queries", color: "#3b82f6" }];
-  let queryData: Record<string, unknown>[] = queryVolumeFormatted;
-  let querySeriesFull = querySeries;
-  if (compareEnabled && prevData) {
-    const prevFormatted = (prevData.queryVolume || []).map((p) => ({
-      ...p,
-      date: format(new Date(p.date), "MMM d HH:mm"),
-    }));
-    queryData = mergeComparisonTimeSeries(queryVolumeFormatted, prevFormatted, ["count"]);
-    querySeriesFull = [...querySeries, ...makeComparisonSeries(querySeries, ["count"])];
-  }
+  const { data: queryData, series: querySeriesFull } = buildComparisonChart({
+    current: queryVolumeFormatted,
+    previous: prevData ? formatTimeSeries(prevData.queryVolume || []) : undefined,
+    series: querySeries,
+    valueKeys: ["count"],
+    compareEnabled,
+  });
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -244,10 +228,7 @@ export default function GatewayDnsPage() {
 
           <ChartWrapper title="HTTP Traffic Over Time" loading={loading}>
             <TimeSeriesChart
-              data={(data.httpInspection.timeSeries || []).map((p) => ({
-                ...p,
-                date: format(new Date(p.date), "MMM d HH:mm"),
-              }))}
+              data={formatTimeSeries(data.httpInspection.timeSeries || [])}
               xKey="date"
               series={[{ key: "count", label: "HTTP Requests", color: "#8b5cf6" }]}
               yFormatter={formatNumber}

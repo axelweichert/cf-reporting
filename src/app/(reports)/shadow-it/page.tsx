@@ -1,10 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchShadowItData, computeRiskLevel, type ShadowItData, type AppTag, type RiskLevel } from "@/lib/queries/shadow-it";
-import { pctChange } from "@/lib/compare-utils";
+import { pctChange, formatTimeSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -14,7 +14,6 @@ import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber, SERIES_COLORS } from "@/components/charts/theme";
 import { Info, Shield, ShieldAlert, ShieldCheck, Users } from "lucide-react";
-import { format } from "date-fns";
 import { useState, useEffect, useCallback } from "react";
 
 // --- App tag persistence (localStorage) ---
@@ -54,7 +53,6 @@ export default function ShadowItPage() {
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
-  const prev = getPreviousPeriod(start, end);
 
   const [appTags, setAppTags] = useState<Record<string, AppTag>>({});
 
@@ -71,20 +69,14 @@ export default function ShadowItPage() {
     });
   }, []);
 
-  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<ShadowItData>({
+  const { data, loading, error, errorType, refetch, prevData, cmpLoading } = useReportData<ShadowItData>({
     reportType: "shadow-it",
     scopeId: accountId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: (s, u) => {
       if (!accountId) throw new Error("No account available");
-      return fetchShadowItData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
-    },
-    prevSince: `${prev.start}T00:00:00Z`,
-    prevUntil: `${prev.end}T00:00:00Z`,
-    prevLiveFetcher: () => {
-      if (!accountId) throw new Error("No account available");
-      return fetchShadowItData(accountId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
+      return fetchShadowItData(accountId, s, u);
     },
   });
 
@@ -96,12 +88,7 @@ export default function ShadowItPage() {
     );
   }
 
-  const cmpLoading = compareEnabled && prevLoading;
-
-  const trendFormatted = (data?.usageTrends || []).map((p) => ({
-    ...p,
-    date: format(new Date(p.date as string), "MMM d HH:mm"),
-  }));
+  const trendFormatted = formatTimeSeries(data?.usageTrends || []);
 
   const apps = data?.discoveredApplications || [];
   const totalDiscovered = apps.length;

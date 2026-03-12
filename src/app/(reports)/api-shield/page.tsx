@@ -1,10 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchApiShieldData, type ApiShieldData } from "@/lib/queries/api-shield";
-import { pctChange } from "@/lib/compare-utils";
+import { pctChange, formatTimeSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -14,7 +14,6 @@ import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber } from "@/components/charts/theme";
 import { Info } from "lucide-react";
-import { format } from "date-fns";
 
 function StateBadge({ state }: { state: string }) {
   const styles = state === "saved"
@@ -52,22 +51,15 @@ export default function ApiShieldPage() {
   const zoneId = selectedZone;
   const zoneName = zones.find((z) => z.id === zoneId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
-  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<ApiShieldData>({
+  const { data, loading, error, errorType, refetch, prevData, cmpLoading } = useReportData<ApiShieldData>({
     reportType: "api-shield",
     scopeId: zoneId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: (s, u) => {
       if (!zoneId) throw new Error("No zone available");
-      return fetchApiShieldData(zoneId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
-    },
-    prevSince: `${prev.start}T00:00:00Z`,
-    prevUntil: `${prev.end}T00:00:00Z`,
-    prevLiveFetcher: () => {
-      if (!zoneId) throw new Error("No zone available");
-      return fetchApiShieldData(zoneId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
+      return fetchApiShieldData(zoneId, s, u);
     },
   });
 
@@ -79,12 +71,7 @@ export default function ApiShieldPage() {
     );
   }
 
-  const cmpLoading = compareEnabled && prevLoading;
-
-  const sessionTsFormatted = (data?.sessionTraffic || []).map((p) => ({
-    ...p,
-    date: format(new Date(p.date), "MMM d HH:mm"),
-  }));
+  const sessionTsFormatted = formatTimeSeries(data?.sessionTraffic || []);
 
   const hasNoData = !loading && !error && data
     && data.stats.totalManaged === 0 && data.stats.totalDiscovered === 0;

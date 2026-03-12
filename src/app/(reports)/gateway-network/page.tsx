@@ -1,10 +1,10 @@
 "use client";
 
-import { useFilterStore, getDateRange, getPreviousPeriod } from "@/lib/store";
+import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
 import { fetchGatewayNetworkData, type GatewayNetworkData } from "@/lib/queries/gateway-network";
-import { pctChange } from "@/lib/compare-utils";
+import { pctChange, formatTimeSeries } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
 import DonutChart from "@/components/charts/donut-chart";
@@ -13,7 +13,6 @@ import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import { formatNumber } from "@/components/charts/theme";
-import { format } from "date-fns";
 
 export default function GatewayNetworkPage() {
   const { capabilities } = useAuth();
@@ -22,22 +21,15 @@ export default function GatewayNetworkPage() {
   const accountId = accounts.length === 1 ? accounts[0].id : selectedAccount;
   const accountName = accounts.find((a) => a.id === accountId)?.name || "Unknown";
   const { start, end } = getDateRange(timeRange, customStart, customEnd);
-  const prev = getPreviousPeriod(start, end);
 
-  const { data, loading, error, errorType, refetch, prevData, prevLoading } = useReportData<GatewayNetworkData>({
+  const { data, loading, error, errorType, refetch, prevData, cmpLoading } = useReportData<GatewayNetworkData>({
     reportType: "gateway-network",
     scopeId: accountId,
     since: `${start}T00:00:00Z`,
     until: `${end}T00:00:00Z`,
-    liveFetcher: () => {
+    fetcher: (s, u) => {
       if (!accountId) throw new Error("No account available");
-      return fetchGatewayNetworkData(accountId, `${start}T00:00:00Z`, `${end}T00:00:00Z`);
-    },
-    prevSince: `${prev.start}T00:00:00Z`,
-    prevUntil: `${prev.end}T00:00:00Z`,
-    prevLiveFetcher: () => {
-      if (!accountId) throw new Error("No account available");
-      return fetchGatewayNetworkData(accountId, `${prev.start}T00:00:00Z`, `${prev.end}T00:00:00Z`);
+      return fetchGatewayNetworkData(accountId, s, u);
     },
   });
 
@@ -49,12 +41,7 @@ export default function GatewayNetworkPage() {
     );
   }
 
-  const cmpLoading = compareEnabled && prevLoading;
-
-  const sessionsFormatted = (data?.sessionsOverTime || []).map((p) => ({
-    ...p,
-    date: format(new Date(p.date), "MMM d HH:mm"),
-  }));
+  const sessionsFormatted = formatTimeSeries(data?.sessionsOverTime || []);
 
   const totalAllowed = (data?.sessionsOverTime || []).reduce((sum, p) => sum + p.allowed, 0);
   const totalBlocked = (data?.sessionsOverTime || []).reduce((sum, p) => sum + p.blocked, 0);
