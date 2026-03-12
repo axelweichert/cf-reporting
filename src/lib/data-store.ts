@@ -60,6 +60,7 @@ export interface CollectionRunRow {
   accounts_count: number;
   success_count: number;
   error_count: number;
+  skipped_count: number;
 }
 
 export interface CollectionLogRow {
@@ -1537,6 +1538,7 @@ export function finishCollectionRun(
   status: string,
   successCount: number,
   errorCount: number,
+  skippedCount = 0,
 ): void {
   const db = getDb();
   if (!db) return;
@@ -1544,9 +1546,9 @@ export function finishCollectionRun(
   const now = Math.floor(Date.now() / 1000);
   db.prepare(`
     UPDATE collection_runs
-    SET finished_at = ?, status = ?, success_count = ?, error_count = ?
+    SET finished_at = ?, status = ?, success_count = ?, error_count = ?, skipped_count = ?
     WHERE run_id = ?
-  `).run(now, status, successCount, errorCount, runId);
+  `).run(now, status, successCount, errorCount, skippedCount, runId);
 }
 
 /**
@@ -1751,15 +1753,17 @@ export function getOverallStats(): {
   totalCollectionRuns: number;
   totalSuccessItems: number;
   totalErrorItems: number;
+  totalSkippedItems: number;
   uniqueScopes: number;
   uniqueReportTypes: number;
 } {
   const db = getDb();
-  if (!db) return { totalCollectionRuns: 0, totalSuccessItems: 0, totalErrorItems: 0, uniqueScopes: 0, uniqueReportTypes: 0 };
+  if (!db) return { totalCollectionRuns: 0, totalSuccessItems: 0, totalErrorItems: 0, totalSkippedItems: 0, uniqueScopes: 0, uniqueReportTypes: 0 };
 
   const runs = db.prepare("SELECT COUNT(*) as c FROM collection_runs").get() as { c: number };
   const success = db.prepare("SELECT COUNT(*) as c FROM collection_log WHERE status = 'success'").get() as { c: number };
   const errors = db.prepare("SELECT COUNT(*) as c FROM collection_log WHERE status = 'error'").get() as { c: number };
+  const skipped = db.prepare("SELECT COUNT(*) as c FROM collection_log WHERE status = 'skipped'").get() as { c: number };
   const scopes = db.prepare("SELECT COUNT(DISTINCT scope_id) as c FROM collection_log").get() as { c: number };
   const types = db.prepare("SELECT COUNT(DISTINCT report_type) as c FROM collection_log WHERE status = 'success'").get() as { c: number };
 
@@ -1767,6 +1771,7 @@ export function getOverallStats(): {
     totalCollectionRuns: runs.c,
     totalSuccessItems: success.c,
     totalErrorItems: errors.c,
+    totalSkippedItems: skipped.c,
     uniqueScopes: scopes.c,
     uniqueReportTypes: types.c,
   };

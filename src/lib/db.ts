@@ -12,7 +12,7 @@ let _db: Database.Database | null = null;
 let _initFailed = false;
 
 const DB_PATH = process.env.DB_PATH || "/app/data/cf-reporting.db";
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 export function getDb(): Database.Database | null {
   if (_initFailed) return null;
@@ -584,6 +584,14 @@ function runMigrations(db: Database.Database): void {
       CREATE INDEX IF NOT EXISTS idx_recommendations_lookup  ON recommendations(scope_id, report_type, collected_at);
     `);
     console.log("[db] Migration v3: created normalized schema (33 tables)");
+  }
+
+  if (currentVersion < 4) {
+    // v4: Add skipped_count column to collection_runs for permission-error tracking.
+    db.exec(`
+      ALTER TABLE collection_runs ADD COLUMN skipped_count INTEGER DEFAULT 0;
+    `);
+    console.log("[db] Migration v4: added skipped_count to collection_runs");
   }
 
   // Upsert schema version

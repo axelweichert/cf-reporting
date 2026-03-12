@@ -70,6 +70,7 @@ export default function SettingsPage() {
     totalCollectionRuns: number;
     totalSuccessItems: number;
     totalErrorItems: number;
+    totalSkippedItems: number;
     uniqueScopes: number;
     uniqueReportTypes: number;
     recentRuns: Array<{
@@ -82,6 +83,7 @@ export default function SettingsPage() {
       accounts_count: number;
       success_count: number;
       error_count: number;
+      skipped_count: number;
     }>;
   } | null>(null);
   const [triggering, setTriggering] = useState(false);
@@ -333,7 +335,7 @@ export default function SettingsPage() {
         {/* Last run info */}
         {collector?.lastRunAt && (
           <div className="mt-3 text-xs text-zinc-400">
-            Last run: {new Date(collector.lastRunAt * 1000).toLocaleString()} \u2013{" "}
+            Last run: {new Date(collector.lastRunAt * 1000).toLocaleString()} –{" "}
             <span className={collector.lastRunStatus === "success" ? "text-emerald-400" : collector.lastRunStatus === "error" ? "text-red-400" : "text-yellow-400"}>
               {collector.lastRunStatus}
             </span>
@@ -371,6 +373,7 @@ export default function SettingsPage() {
                     <th className="px-3 py-2">Run</th>
                     <th className="px-3 py-2">Started</th>
                     <th className="px-3 py-2">Success</th>
+                    <th className="px-3 py-2">Skipped</th>
                     <th className="px-3 py-2">Errors</th>
                     <th className="px-3 py-2">Duration</th>
                   </tr>
@@ -381,7 +384,8 @@ export default function SettingsPage() {
                       <td className="px-3 py-2 font-mono text-zinc-400">{run.run_id.slice(0, 8)}</td>
                       <td className="px-3 py-2 text-zinc-400">{new Date(run.started_at * 1000).toLocaleString()}</td>
                       <td className="px-3 py-2 text-emerald-400">{run.success_count}</td>
-                      <td className="px-3 py-2 text-red-400">{run.error_count > 0 ? run.error_count : "\u2013"}</td>
+                      <td className="px-3 py-2 text-amber-400">{run.skipped_count > 0 ? run.skipped_count : "–"}</td>
+                      <td className="px-3 py-2 text-red-400">{run.error_count > 0 ? run.error_count : "–"}</td>
                       <td className="px-3 py-2 text-zinc-400">{run.finished_at ? `${run.finished_at - run.started_at}s` : "running"}</td>
                     </tr>
                   ))}

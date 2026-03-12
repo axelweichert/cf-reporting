@@ -43,6 +43,7 @@ interface CollectionRun {
   accounts_count: number;
   success_count: number;
   error_count: number;
+  skipped_count: number;
 }
 
 interface DataAvailability {
@@ -64,6 +65,7 @@ interface CollectorStatus {
   totalCollectionRuns: number;
   totalSuccessItems: number;
   totalErrorItems: number;
+  totalSkippedItems: number;
   uniqueScopes: number;
   uniqueReportTypes: number;
   recentRuns: CollectionRun[];
@@ -399,15 +401,16 @@ export default function HistoryPage() {
             color="text-emerald-400"
           />
           <StatCard
-            label="Error Items"
-            value={status.totalErrorItems.toString()}
-            icon={XCircle}
-            color="text-red-400"
+            label="Skipped (No Access)"
+            value={status.totalSkippedItems.toString()}
+            icon={AlertTriangle}
+            color="text-amber-400"
           />
           <StatCard
-            label="Active Scopes"
-            value={`${status.uniqueScopes} scopes / ${status.uniqueReportTypes} types`}
-            icon={Server}
+            label={status.totalErrorItems > 0 ? "Errors" : "Active Scopes"}
+            value={status.totalErrorItems > 0 ? status.totalErrorItems.toString() : `${status.uniqueScopes} × ${status.uniqueReportTypes}`}
+            icon={status.totalErrorItems > 0 ? XCircle : Server}
+            color={status.totalErrorItems > 0 ? "text-red-400" : "text-zinc-400"}
           />
         </div>
       )}
@@ -458,8 +461,11 @@ export default function HistoryPage() {
                     {/* Results */}
                     <span className="ml-auto flex items-center gap-3 text-xs">
                       <span className="text-emerald-400">{run.success_count} OK</span>
+                      {run.skipped_count > 0 && (
+                        <span className="text-amber-400">{run.skipped_count} skipped</span>
+                      )}
                       {run.error_count > 0 && (
-                        <span className="text-red-400">{run.error_count} errors</span>
+                        <span className="text-red-400">{run.error_count} error{run.error_count !== 1 ? "s" : ""}</span>
                       )}
                       <span className="text-zinc-500">{durationSec}s</span>
                     </span>
@@ -505,16 +511,17 @@ export default function HistoryPage() {
                                   <td className="py-1.5 pr-3">
                                     <span className={
                                       log.status === "success" ? "text-emerald-400" :
+                                      log.status === "skipped" ? "text-amber-400" :
                                       log.status === "error" ? "text-red-400" : "text-zinc-500"
                                     }>
                                       {log.status}
                                     </span>
                                   </td>
                                   <td className="py-1.5 pr-3 text-zinc-500">
-                                    {log.duration_ms != null ? formatDuration(log.duration_ms) : "\u2013"}
+                                    {log.duration_ms != null ? formatDuration(log.duration_ms) : "–"}
                                   </td>
-                                  <td className="max-w-[200px] truncate py-1.5 text-red-400/70" title={log.error_message || undefined}>
-                                    {log.error_message || "\u2013"}
+                                  <td className={`max-w-[200px] truncate py-1.5 ${log.status === "skipped" ? "text-amber-400/70" : "text-red-400/70"}`} title={log.error_message || undefined}>
+                                    {log.error_message || "–"}
                                   </td>
                                 </tr>
                               ))}
@@ -590,7 +597,7 @@ export default function HistoryPage() {
                       if (!item) {
                         return (
                           <td key={rt} className="px-2 py-2 text-center text-zinc-700">
-                            \u2013
+                            –
                           </td>
                         );
                       }
@@ -618,7 +625,7 @@ export default function HistoryPage() {
           </div>
 
           <div className="border-t border-zinc-800 px-5 py-3 text-xs text-zinc-500">
-            {scopes.length} scope{scopes.length !== 1 ? "s" : ""} \u00d7 {allReportTypes.length} report type{allReportTypes.length !== 1 ? "s" : ""} \u2013 {availability.length} active combination{availability.length !== 1 ? "s" : ""}
+            {scopes.length} scope{scopes.length !== 1 ? "s" : ""} × {allReportTypes.length} report type{allReportTypes.length !== 1 ? "s" : ""} – {availability.length} active combination{availability.length !== 1 ? "s" : ""}
           </div>
         </div>
       )}
@@ -640,7 +647,7 @@ export default function HistoryPage() {
                 <h2 className="flex items-center gap-2 text-base font-semibold text-white">
                   <Database size={18} className="text-orange-400" />
                   {cellDetail
-                    ? `${cellDetail.scopeName} \u2013 ${REPORT_TYPE_LABELS[cellDetail.reportType as ReportType] || cellDetail.reportType}`
+                    ? `${cellDetail.scopeName} – ${REPORT_TYPE_LABELS[cellDetail.reportType as ReportType] || cellDetail.reportType}`
                     : "Loading..."}
                 </h2>
               </div>
@@ -748,7 +755,7 @@ export default function HistoryPage() {
                                   <td key={key} className="whitespace-nowrap px-3 py-1.5 font-mono">
                                     {key === "ts" || key === "collected_at"
                                       ? formatTimestamp(val as number)
-                                      : String(val ?? "\u2013")}
+                                      : String(val ?? "–")}
                                   </td>
                                 ))}
                               </tr>

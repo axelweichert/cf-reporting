@@ -45,6 +45,24 @@ const ACCOUNT_REPORT_TYPES: AccountReportType[] = [
   "devices-users", "zt-summary", "access-audit",
 ];
 
+/** Detect Cloudflare permission / plan-gated errors that should be "skipped" not "error". */
+function isPermissionError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("does not have access") ||
+    lower.includes("not entitled") ||
+    lower.includes("not allowed") ||
+    lower.includes("permission denied") ||
+    lower.includes("insufficient permissions") ||
+    lower.includes("requires a higher plan") ||
+    lower.includes("upgrade your plan") ||
+    lower.includes("not available on your plan") ||
+    lower.includes("not available for free") ||
+    lower.includes("access denied") ||
+    /\b(403|10000)\b/.test(message)
+  );
+}
+
 let _running = false;
 let _lastRunAt: string | null = null;
 let _lastRunStatus: "success" | "partial" | "error" | null = null;
@@ -132,6 +150,7 @@ export async function runCollection(): Promise<void> {
   const startTime = Date.now();
   let errorCount = 0;
   let successCount = 0;
+  let skippedCount = 0;
 
   console.log(`[collector] Starting collection run ${runId}`);
 
@@ -196,9 +215,15 @@ export async function runCollection(): Promise<void> {
         } catch (err) {
           const duration = Date.now() - fetchStart;
           const message = err instanceof Error ? err.message : "Unknown error";
-          store.logCollectionItem(runId, zone.id, zone.name, reportType, "error", duration, message);
-          errorCount++;
-          console.error(`[collector] ${zone.name} / ${reportType} – ERROR: ${message}`);
+          if (isPermissionError(message)) {
+            store.logCollectionItem(runId, zone.id, zone.name, reportType, "skipped", duration, message);
+            skippedCount++;
+            console.log(`[collector] ${zone.name} / ${reportType} – SKIPPED (${duration}ms) [permission]`);
+          } else {
+            store.logCollectionItem(runId, zone.id, zone.name, reportType, "error", duration, message);
+            errorCount++;
+            console.error(`[collector] ${zone.name} / ${reportType} – ERROR: ${message}`);
+          }
         }
       }
     }
@@ -234,9 +259,15 @@ export async function runCollection(): Promise<void> {
         } catch (err) {
           const duration = Date.now() - fetchStart;
           const message = err instanceof Error ? err.message : "Unknown error";
-          store.logCollectionItem(runId, account.id, account.name, reportType, "error", duration, message);
-          errorCount++;
-          console.error(`[collector] ${account.name} / ${reportType} – ERROR: ${message}`);
+          if (isPermissionError(message)) {
+            store.logCollectionItem(runId, account.id, account.name, reportType, "skipped", duration, message);
+            skippedCount++;
+            console.log(`[collector] ${account.name} / ${reportType} – SKIPPED (${duration}ms) [permission]`);
+          } else {
+            store.logCollectionItem(runId, account.id, account.name, reportType, "error", duration, message);
+            errorCount++;
+            console.error(`[collector] ${account.name} / ${reportType} – ERROR: ${message}`);
+          }
         }
       }
     }
@@ -252,9 +283,9 @@ export async function runCollection(): Promise<void> {
 
     const store = getStore();
     const finalStatus = _lastRunStatus || "error";
-    store.finishCollectionRun(runId, finalStatus, successCount, errorCount);
+    store.finishCollectionRun(runId, finalStatus, successCount, errorCount, skippedCount);
 
-    console.log(`[collector] Run ${runId} complete: ${successCount} success, ${errorCount} errors (${totalDuration}ms)`);
+    console.log(`[collector] Run ${runId} complete: ${successCount} success, ${errorCount} errors, ${skippedCount} skipped (${totalDuration}ms)`);
   }
 }
 
