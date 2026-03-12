@@ -6,33 +6,101 @@ import {
   History as HistoryIcon,
   Database,
   RefreshCw,
-  Eye,
   X,
   Clock,
   Globe,
   Copy,
   Check,
   Inbox,
+  Activity,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  BarChart3,
+  Table2,
+  Loader2,
+  Server,
 } from "lucide-react";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 type ReportType =
   | "executive" | "security" | "traffic" | "performance" | "dns"
   | "origin-health" | "ssl" | "bots" | "api-shield" | "ddos"
   | "gateway-dns" | "gateway-network" | "shadow-it" | "devices-users" | "zt-summary" | "access-audit";
 
-interface SnapshotMeta {
+interface CollectionRun {
   id: number;
-  zone_id: string;
-  zone_name: string;
-  report_type: ReportType;
-  period_start: string;
-  period_end: string;
-  collected_at: string;
+  run_id: string;
+  started_at: number;
+  finished_at: number | null;
+  status: "running" | "success" | "partial" | "error";
+  zones_count: number;
+  accounts_count: number;
+  success_count: number;
+  error_count: number;
 }
 
-interface SnapshotDetail extends SnapshotMeta {
-  data: unknown;
+interface DataAvailability {
+  scope_id: string;
+  scope_name: string;
+  report_type: string;
+  last_collected_at: number;
+  data_point_count: number;
+  collection_count: number;
 }
+
+interface CollectorStatus {
+  enabled: boolean;
+  running: boolean;
+  lastRunAt: string | null;
+  lastRunStatus: string | null;
+  schedule: string;
+  totalReportTypes: number;
+  totalCollectionRuns: number;
+  totalSuccessItems: number;
+  totalErrorItems: number;
+  uniqueScopes: number;
+  uniqueReportTypes: number;
+  recentRuns: CollectionRun[];
+}
+
+interface CollectionLogEntry {
+  id: number;
+  run_id: string;
+  scope_id: string;
+  scope_name: string;
+  report_type: string;
+  status: "success" | "error" | "skipped";
+  error_message: string | null;
+  duration_ms: number | null;
+  collected_at: number;
+}
+
+interface AggregateStatRow {
+  scope_id: string;
+  collected_at: number;
+  report_type: string;
+  stat_key: string;
+  stat_value: number;
+}
+
+interface CellDetail {
+  scopeId: string;
+  scopeName: string;
+  reportType: string;
+  aggregateStats: AggregateStatRow[];
+  timeSeries: Record<string, unknown>[];
+  collectionHistory: CollectionLogEntry[];
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 const REPORT_TYPE_LABELS: Record<ReportType, string> = {
   executive: "Executive",
@@ -72,99 +140,178 @@ const REPORT_TYPE_COLORS: Record<ReportType, string> = {
   "access-audit": "bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20",
 };
 
-function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  if (diffMins < 1) return "just now";
+const STATUS_CONFIG: Record<string, { icon: typeof CheckCircle2; color: string; bg: string }> = {
+  running: { icon: Loader2, color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" },
+  success: { icon: CheckCircle2, color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20" },
+  partial: { icon: AlertTriangle, color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/20" },
+  error: { icon: XCircle, color: "text-red-400", bg: "bg-red-500/10 border-red-500/20" },
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatRelativeTime(epochSec: number): string {
+  const now = Math.floor(Date.now() / 1000);
+  const diffSec = now - epochSec;
+  if (diffSec < 60) return "just now";
+  const diffMins = Math.floor(diffSec / 60);
   if (diffMins < 60) return `${diffMins}m ago`;
   const diffHours = Math.floor(diffMins / 60);
   if (diffHours < 24) return `${diffHours}h ago`;
   const diffDays = Math.floor(diffHours / 24);
   if (diffDays < 30) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
+  return new Date(epochSec * 1000).toLocaleDateString();
 }
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString(undefined, {
+function formatTimestamp(epochSec: number): string {
+  return new Date(epochSec * 1000).toLocaleString(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 
-export default function HistoryPage() {
-  const { capabilities } = useAuth();
-  const zones = capabilities?.zones || [];
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
 
-  const [snapshots, setSnapshots] = useState<SnapshotMeta[]>([]);
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export default function HistoryPage() {
+  useAuth(); // ensure authentication context is available
+
+  const [status, setStatus] = useState<CollectorStatus | null>(null);
+  const [availability, setAvailability] = useState<DataAvailability[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [triggering, setTriggering] = useState(false);
 
-  // Filters
-  const [filterZone, setFilterZone] = useState<string>("");
-  const [filterReportType, setFilterReportType] = useState<string>("");
+  // Run detail expansion
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [runLogs, setRunLogs] = useState<CollectionLogEntry[]>([]);
+  const [runLogsLoading, setRunLogsLoading] = useState(false);
 
-  // Detail panel
-  const [selectedSnapshot, setSelectedSnapshot] = useState<SnapshotDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
+  // Cell detail panel
+  const [cellDetail, setCellDetail] = useState<CellDetail | null>(null);
+  const [cellDetailLoading, setCellDetailLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const fetchSnapshots = useCallback(async () => {
+  // Active tab in detail panel
+  const [detailTab, setDetailTab] = useState<"stats" | "timeseries" | "history">("stats");
+
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      if (filterZone) params.set("zoneId", filterZone);
-      if (filterReportType) params.set("reportType", filterReportType);
-      params.set("limit", "200");
+      const [statusRes, availRes] = await Promise.all([
+        fetch("/api/collector/status"),
+        fetch("/api/collector/snapshots"),
+      ]);
 
-      const res = await fetch(`/api/collector/snapshots?${params.toString()}`);
+      if (!statusRes.ok) throw new Error(`Status API: HTTP ${statusRes.status}`);
+      if (!availRes.ok) throw new Error(`Snapshots API: HTTP ${availRes.status}`);
+
+      const statusData = await statusRes.json();
+      const availData = await availRes.json();
+
+      setStatus(statusData);
+      setAvailability(availData.availability || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load data");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Auto-refresh while collector is running
+  useEffect(() => {
+    if (!status?.running) return;
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
+  }, [status?.running, fetchData]);
+
+  const triggerCollection = async () => {
+    setTriggering(true);
+    try {
+      const res = await fetch("/api/collector/trigger", { method: "POST" });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${res.status}`);
       }
-      const data = await res.json();
-      setSnapshots(data.snapshots || []);
+      // Refresh status after a short delay
+      setTimeout(fetchData, 1500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load snapshots");
-      setSnapshots([]);
+      setError(err instanceof Error ? err.message : "Failed to trigger collection");
     } finally {
-      setLoading(false);
+      setTriggering(false);
     }
-  }, [filterZone, filterReportType]);
+  };
 
-  useEffect(() => {
-    fetchSnapshots();
-  }, [fetchSnapshots]);
+  const toggleRunExpansion = async (runId: string) => {
+    if (expandedRunId === runId) {
+      setExpandedRunId(null);
+      setRunLogs([]);
+      return;
+    }
 
-  const openDetail = async (id: number) => {
-    setDetailLoading(true);
-    setSelectedSnapshot(null);
-    setCopied(false);
+    setExpandedRunId(runId);
+    setRunLogsLoading(true);
     try {
-      const res = await fetch(`/api/collector/snapshots?id=${id}`);
-      if (!res.ok) throw new Error("Failed to load snapshot");
-      const data: SnapshotDetail = await res.json();
-      setSelectedSnapshot(data);
+      const res = await fetch(`/api/collector/snapshots?runId=${runId}`);
+      if (!res.ok) throw new Error("Failed to load run logs");
+      const data = await res.json();
+      setRunLogs(data.logs || []);
     } catch {
-      setSelectedSnapshot(null);
+      setRunLogs([]);
     } finally {
-      setDetailLoading(false);
+      setRunLogsLoading(false);
     }
   };
 
-  const closeDetail = () => {
-    setSelectedSnapshot(null);
-    setDetailLoading(false);
+  const openCellDetail = async (scopeId: string, scopeName: string, reportType: string) => {
+    setCellDetailLoading(true);
+    setCellDetail(null);
+    setDetailTab("stats");
+    setCopied(false);
+    try {
+      const params = new URLSearchParams({ scopeId, reportType });
+      const res = await fetch(`/api/collector/snapshots?${params.toString()}`);
+      if (!res.ok) throw new Error("Failed to load detail");
+      const data = await res.json();
+      setCellDetail({
+        scopeId,
+        scopeName,
+        reportType,
+        aggregateStats: data.aggregateStats || [],
+        timeSeries: data.timeSeries || [],
+        collectionHistory: data.collectionHistory || [],
+      });
+    } catch {
+      setCellDetail(null);
+    } finally {
+      setCellDetailLoading(false);
+    }
+  };
+
+  const closeCellDetail = () => {
+    setCellDetail(null);
+    setCellDetailLoading(false);
     setCopied(false);
   };
 
-  const copyJson = async () => {
-    if (!selectedSnapshot?.data) return;
+  const copyJson = async (data: unknown) => {
     try {
-      await navigator.clipboard.writeText(JSON.stringify(selectedSnapshot.data, null, 2));
+      await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -172,65 +319,53 @@ export default function HistoryPage() {
     }
   };
 
+  // Build the availability grid: group by scope, columns = report types
+  const scopeMap = new Map<string, { name: string; items: Map<string, DataAvailability> }>();
+  for (const row of availability) {
+    if (!scopeMap.has(row.scope_id)) {
+      scopeMap.set(row.scope_id, { name: row.scope_name, items: new Map() });
+    }
+    scopeMap.get(row.scope_id)!.items.set(row.report_type, row);
+  }
+  const scopes = Array.from(scopeMap.entries());
+  const allReportTypes = Array.from(new Set(availability.map((a) => a.report_type))).sort();
+
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className="mx-auto max-w-7xl space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="flex items-center gap-2 text-2xl font-bold text-white">
-          <HistoryIcon size={24} className="text-orange-400" />
-          Data History
-        </h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Browse stored data snapshots collected by the background collector
-        </p>
-      </div>
-
-      {/* Filters */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
-        <div className="flex flex-wrap items-end gap-4">
-          {/* Zone filter */}
-          <div className="min-w-[200px] flex-1">
-            <label className="mb-1 block text-xs font-medium text-zinc-400">Zone</label>
-            <select
-              value={filterZone}
-              onChange={(e) => setFilterZone(e.target.value)}
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
-            >
-              <option value="">All Zones</option>
-              {zones.map((z) => (
-                <option key={z.id} value={z.id}>
-                  {z.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Report type filter */}
-          <div className="min-w-[180px] flex-1">
-            <label className="mb-1 block text-xs font-medium text-zinc-400">Report Type</label>
-            <select
-              value={filterReportType}
-              onChange={(e) => setFilterReportType(e.target.value)}
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
-            >
-              <option value="">All Types</option>
-              {(Object.keys(REPORT_TYPE_LABELS) as ReportType[]).map((rt) => (
-                <option key={rt} value={rt}>
-                  {REPORT_TYPE_LABELS[rt]}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Refresh button */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-white">
+            <HistoryIcon size={24} className="text-orange-400" />
+            Data History
+          </h1>
+          <p className="mt-1 text-sm text-zinc-400">
+            Normalized data collected by the background collector
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
           <button
-            onClick={fetchSnapshots}
+            onClick={fetchData}
             disabled={loading}
-            className="flex items-center gap-2 rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-white disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-white disabled:opacity-50"
           >
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
             Refresh
           </button>
+          {status?.enabled && (
+            <button
+              onClick={triggerCollection}
+              disabled={triggering || status?.running}
+              className="flex items-center gap-2 rounded-lg bg-orange-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-orange-500 disabled:opacity-50"
+            >
+              {triggering || status?.running ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Activity size={14} />
+              )}
+              {status?.running ? "Running..." : "Collect Now"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -242,170 +377,428 @@ export default function HistoryPage() {
       )}
 
       {/* Loading state */}
-      {loading && (
+      {loading && !status && (
         <div className="flex items-center justify-center py-16">
           <RefreshCw size={24} className="animate-spin text-zinc-500" />
-          <span className="ml-3 text-sm text-zinc-500">Loading snapshots...</span>
+          <span className="ml-3 text-sm text-zinc-500">Loading data history...</span>
         </div>
       )}
 
-      {/* Empty state */}
-      {!loading && !error && snapshots.length === 0 && (
+      {/* Stats overview */}
+      {status && (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <StatCard
+            label="Collection Runs"
+            value={status.totalCollectionRuns.toString()}
+            icon={Activity}
+          />
+          <StatCard
+            label="Successful Items"
+            value={status.totalSuccessItems.toString()}
+            icon={CheckCircle2}
+            color="text-emerald-400"
+          />
+          <StatCard
+            label="Error Items"
+            value={status.totalErrorItems.toString()}
+            icon={XCircle}
+            color="text-red-400"
+          />
+          <StatCard
+            label="Active Scopes"
+            value={`${status.uniqueScopes} scopes / ${status.uniqueReportTypes} types`}
+            icon={Server}
+          />
+        </div>
+      )}
+
+      {/* Recent collection runs */}
+      {status && status.recentRuns.length > 0 && (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50">
+          <div className="border-b border-zinc-800 px-5 py-3">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
+              <Clock size={16} className="text-zinc-400" />
+              Recent Collection Runs
+            </h2>
+          </div>
+          <div className="divide-y divide-zinc-800/50">
+            {status.recentRuns.map((run) => {
+              const cfg = STATUS_CONFIG[run.status] || STATUS_CONFIG.error;
+              const StatusIcon = cfg.icon;
+              const isExpanded = expandedRunId === run.run_id;
+              const durationSec = run.finished_at
+                ? run.finished_at - run.started_at
+                : Math.floor(Date.now() / 1000) - run.started_at;
+
+              return (
+                <div key={run.run_id}>
+                  <button
+                    onClick={() => toggleRunExpansion(run.run_id)}
+                    className="flex w-full items-center gap-4 px-5 py-3 text-sm transition-colors hover:bg-zinc-800/30"
+                  >
+                    {/* Expand/collapse chevron */}
+                    <span className="text-zinc-500">
+                      {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </span>
+
+                    {/* Status badge */}
+                    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${cfg.bg}`}>
+                      <StatusIcon size={12} className={run.status === "running" ? "animate-spin" : ""} />
+                      {run.status}
+                    </span>
+
+                    {/* Timestamp */}
+                    <span className="text-zinc-400">{formatTimestamp(run.started_at)}</span>
+
+                    {/* Scope counts */}
+                    <span className="text-zinc-500">
+                      {run.zones_count} zone{run.zones_count !== 1 ? "s" : ""}, {run.accounts_count} account{run.accounts_count !== 1 ? "s" : ""}
+                    </span>
+
+                    {/* Results */}
+                    <span className="ml-auto flex items-center gap-3 text-xs">
+                      <span className="text-emerald-400">{run.success_count} OK</span>
+                      {run.error_count > 0 && (
+                        <span className="text-red-400">{run.error_count} errors</span>
+                      )}
+                      <span className="text-zinc-500">{durationSec}s</span>
+                    </span>
+                  </button>
+
+                  {/* Expanded run log */}
+                  {isExpanded && (
+                    <div className="border-t border-zinc-800/30 bg-zinc-950/50 px-5 py-3">
+                      {runLogsLoading ? (
+                        <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
+                          <Loader2 size={14} className="animate-spin" />
+                          Loading log entries...
+                        </div>
+                      ) : runLogs.length === 0 ? (
+                        <p className="py-2 text-sm text-zinc-500">No log entries found for this run.</p>
+                      ) : (
+                        <div className="max-h-64 overflow-y-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b border-zinc-800 text-left text-zinc-500">
+                                <th className="pb-2 pr-3 font-medium">Scope</th>
+                                <th className="pb-2 pr-3 font-medium">Report</th>
+                                <th className="pb-2 pr-3 font-medium">Status</th>
+                                <th className="pb-2 pr-3 font-medium">Duration</th>
+                                <th className="pb-2 font-medium">Error</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-zinc-800/30">
+                              {runLogs.map((log) => (
+                                <tr key={log.id} className="text-zinc-300">
+                                  <td className="py-1.5 pr-3">
+                                    <span className="truncate">{log.scope_name}</span>
+                                  </td>
+                                  <td className="py-1.5 pr-3">
+                                    <span
+                                      className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                                        REPORT_TYPE_COLORS[log.report_type as ReportType] || "bg-zinc-800 text-zinc-400 border-zinc-700"
+                                      }`}
+                                    >
+                                      {REPORT_TYPE_LABELS[log.report_type as ReportType] || log.report_type}
+                                    </span>
+                                  </td>
+                                  <td className="py-1.5 pr-3">
+                                    <span className={
+                                      log.status === "success" ? "text-emerald-400" :
+                                      log.status === "error" ? "text-red-400" : "text-zinc-500"
+                                    }>
+                                      {log.status}
+                                    </span>
+                                  </td>
+                                  <td className="py-1.5 pr-3 text-zinc-500">
+                                    {log.duration_ms != null ? formatDuration(log.duration_ms) : "\u2013"}
+                                  </td>
+                                  <td className="max-w-[200px] truncate py-1.5 text-red-400/70" title={log.error_message || undefined}>
+                                    {log.error_message || "\u2013"}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Data availability grid */}
+      {!loading && availability.length === 0 && (
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 py-16 text-center">
           <Inbox size={40} className="mx-auto text-zinc-600" />
-          <p className="mt-3 text-sm font-medium text-zinc-400">No snapshots found</p>
+          <p className="mt-3 text-sm font-medium text-zinc-400">No collected data yet</p>
           <p className="mt-1 text-xs text-zinc-500">
-            The background collector has not stored any data yet, or no snapshots match the current filters.
+            The background collector has not stored any data yet. Trigger a collection run or wait for the scheduled run.
           </p>
         </div>
       )}
 
-      {/* Snapshot table */}
-      {!loading && snapshots.length > 0 && (
+      {!loading && scopes.length > 0 && (
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/50">
-          {/* Table header */}
-          <div className="grid grid-cols-[1fr_120px_180px_100px_60px] gap-4 border-b border-zinc-800 px-5 py-3 text-xs font-medium uppercase tracking-wider text-zinc-500">
-            <span>Zone</span>
-            <span>Report Type</span>
-            <span>Period</span>
-            <span>Collected</span>
-            <span className="text-right">Actions</span>
+          <div className="border-b border-zinc-800 px-5 py-3">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
+              <Database size={16} className="text-zinc-400" />
+              Data Availability
+            </h2>
+            <p className="mt-0.5 text-xs text-zinc-500">
+              Click a cell to view collected data for that scope and report type
+            </p>
           </div>
 
-          {/* Rows */}
-          <div className="divide-y divide-zinc-800/50">
-            {snapshots.map((s) => (
-              <div
-                key={s.id}
-                className="grid grid-cols-[1fr_120px_180px_100px_60px] items-center gap-4 px-5 py-3 text-sm transition-colors hover:bg-zinc-800/30"
-              >
-                {/* Zone */}
-                <div className="flex items-center gap-2 truncate">
-                  <Globe size={14} className="shrink-0 text-zinc-500" />
-                  <span className="truncate text-zinc-200">{s.zone_name}</span>
-                </div>
-
-                {/* Report type badge */}
-                <div>
-                  <span
-                    className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-                      REPORT_TYPE_COLORS[s.report_type] || "bg-zinc-800 text-zinc-400 border-zinc-700"
-                    }`}
-                  >
-                    {REPORT_TYPE_LABELS[s.report_type] || s.report_type}
-                  </span>
-                </div>
-
-                {/* Period */}
-                <div className="text-xs text-zinc-400">
-                  {formatDate(s.period_start)} – {formatDate(s.period_end)}
-                </div>
-
-                {/* Collected (relative) */}
-                <div className="flex items-center gap-1 text-xs text-zinc-500" title={new Date(s.collected_at).toLocaleString()}>
-                  <Clock size={12} className="shrink-0" />
-                  {formatRelativeTime(s.collected_at)}
-                </div>
-
-                {/* Actions */}
-                <div className="text-right">
-                  <button
-                    onClick={() => openDetail(s.id)}
-                    className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-white"
-                    title="View snapshot data"
-                  >
-                    <Eye size={16} />
-                  </button>
-                </div>
-              </div>
-            ))}
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-zinc-800">
+                  <th className="sticky left-0 z-10 bg-zinc-900 px-4 py-2.5 text-left font-medium text-zinc-400">
+                    Scope
+                  </th>
+                  {allReportTypes.map((rt) => (
+                    <th key={rt} className="px-2 py-2.5 text-center font-medium text-zinc-400">
+                      <span
+                        className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                          REPORT_TYPE_COLORS[rt as ReportType] || "bg-zinc-800 text-zinc-400 border-zinc-700"
+                        }`}
+                      >
+                        {REPORT_TYPE_LABELS[rt as ReportType] || rt}
+                      </span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800/50">
+                {scopes.map(([scopeId, scope]) => (
+                  <tr key={scopeId} className="hover:bg-zinc-800/20">
+                    <td className="sticky left-0 z-10 bg-zinc-900/95 px-4 py-2">
+                      <div className="flex items-center gap-2">
+                        <Globe size={12} className="shrink-0 text-zinc-500" />
+                        <span className="truncate text-zinc-200" title={scopeId}>
+                          {scope.name}
+                        </span>
+                      </div>
+                    </td>
+                    {allReportTypes.map((rt) => {
+                      const item = scope.items.get(rt);
+                      if (!item) {
+                        return (
+                          <td key={rt} className="px-2 py-2 text-center text-zinc-700">
+                            \u2013
+                          </td>
+                        );
+                      }
+                      return (
+                        <td key={rt} className="px-2 py-2 text-center">
+                          <button
+                            onClick={() => openCellDetail(scopeId, scope.name, rt)}
+                            className="group inline-flex flex-col items-center gap-0.5 rounded-md px-2 py-1 transition-colors hover:bg-zinc-700/50"
+                            title={`${scope.name} / ${REPORT_TYPE_LABELS[rt as ReportType] || rt}\nLast: ${formatTimestamp(item.last_collected_at)}\n${item.collection_count} collection(s)`}
+                          >
+                            <span className="text-[10px] text-zinc-400 group-hover:text-zinc-200">
+                              {formatRelativeTime(item.last_collected_at)}
+                            </span>
+                            <span className="text-[10px] text-zinc-600">
+                              {item.collection_count}x
+                            </span>
+                          </button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
 
-          {/* Footer */}
           <div className="border-t border-zinc-800 px-5 py-3 text-xs text-zinc-500">
-            {snapshots.length} snapshot{snapshots.length !== 1 ? "s" : ""}
+            {scopes.length} scope{scopes.length !== 1 ? "s" : ""} \u00d7 {allReportTypes.length} report type{allReportTypes.length !== 1 ? "s" : ""} \u2013 {availability.length} active combination{availability.length !== 1 ? "s" : ""}
           </div>
         </div>
       )}
 
-      {/* Detail slide-over panel */}
-      {(selectedSnapshot || detailLoading) && (
+      {/* Cell detail slide-over panel */}
+      {(cellDetail || cellDetailLoading) && (
         <div className="fixed inset-0 z-50 flex justify-end">
           {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/60"
-            onClick={closeDetail}
+            onClick={closeCellDetail}
           />
 
           {/* Panel */}
           <div className="relative w-full max-w-2xl border-l border-zinc-800 bg-zinc-950 shadow-xl">
             {/* Panel header */}
             <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-              <h2 className="flex items-center gap-2 text-base font-semibold text-white">
-                <Database size={18} className="text-orange-400" />
-                Snapshot Detail
-              </h2>
+              <div>
+                <h2 className="flex items-center gap-2 text-base font-semibold text-white">
+                  <Database size={18} className="text-orange-400" />
+                  {cellDetail
+                    ? `${cellDetail.scopeName} \u2013 ${REPORT_TYPE_LABELS[cellDetail.reportType as ReportType] || cellDetail.reportType}`
+                    : "Loading..."}
+                </h2>
+              </div>
               <button
-                onClick={closeDetail}
+                onClick={closeCellDetail}
                 className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white"
               >
                 <X size={18} />
               </button>
             </div>
 
+            {/* Tab bar */}
+            {cellDetail && (
+              <div className="flex border-b border-zinc-800">
+                <TabButton
+                  active={detailTab === "stats"}
+                  onClick={() => setDetailTab("stats")}
+                  icon={BarChart3}
+                  label={`Stats (${cellDetail.aggregateStats.length})`}
+                />
+                <TabButton
+                  active={detailTab === "timeseries"}
+                  onClick={() => setDetailTab("timeseries")}
+                  icon={Activity}
+                  label={`Time Series (${cellDetail.timeSeries.length})`}
+                />
+                <TabButton
+                  active={detailTab === "history"}
+                  onClick={() => setDetailTab("history")}
+                  icon={Table2}
+                  label={`History (${cellDetail.collectionHistory.length})`}
+                />
+              </div>
+            )}
+
             {/* Panel content */}
-            <div className="h-[calc(100vh-64px)] overflow-y-auto">
-              {detailLoading && (
+            <div className="h-[calc(100vh-120px)] overflow-y-auto">
+              {cellDetailLoading && (
                 <div className="flex items-center justify-center py-16">
-                  <RefreshCw size={20} className="animate-spin text-zinc-500" />
-                  <span className="ml-3 text-sm text-zinc-500">Loading snapshot data...</span>
+                  <Loader2 size={20} className="animate-spin text-zinc-500" />
+                  <span className="ml-3 text-sm text-zinc-500">Loading data...</span>
                 </div>
               )}
 
-              {selectedSnapshot && (
-                <div className="space-y-4 p-6">
-                  {/* Metadata */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <MetaField label="Zone" value={selectedSnapshot.zone_name} />
-                    <MetaField
-                      label="Report Type"
-                      value={REPORT_TYPE_LABELS[selectedSnapshot.report_type] || selectedSnapshot.report_type}
-                    />
-                    <MetaField
-                      label="Period"
-                      value={`${formatDate(selectedSnapshot.period_start)} – ${formatDate(selectedSnapshot.period_end)}`}
-                    />
-                    <MetaField
-                      label="Collected"
-                      value={new Date(selectedSnapshot.collected_at).toLocaleString()}
-                    />
-                  </div>
-
-                  {/* JSON data */}
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-medium text-zinc-400">Response Data</label>
-                      <button
-                        onClick={copyJson}
-                        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white"
-                      >
-                        {copied ? (
-                          <>
-                            <Check size={12} className="text-emerald-400" />
-                            <span className="text-emerald-400">Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy size={12} />
-                            Copy JSON
-                          </>
-                        )}
-                      </button>
+              {cellDetail && detailTab === "stats" && (
+                <div className="p-6">
+                  {cellDetail.aggregateStats.length === 0 ? (
+                    <EmptyTabState message="No aggregate stats stored yet. Data normalization transforms will populate this tab." />
+                  ) : (
+                    <div>
+                      <div className="mb-3 flex items-center justify-between">
+                        <span className="text-xs font-medium text-zinc-400">Aggregate Statistics</span>
+                        <CopyButton
+                          copied={copied}
+                          onClick={() => copyJson(cellDetail.aggregateStats)}
+                        />
+                      </div>
+                      <div className="divide-y divide-zinc-800/50 rounded-lg border border-zinc-800 bg-zinc-900">
+                        {cellDetail.aggregateStats.map((stat, i) => (
+                          <div key={i} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                            <span className="text-zinc-400">{stat.stat_key}</span>
+                            <span className="font-mono text-zinc-200">
+                              {Number.isInteger(stat.stat_value)
+                                ? stat.stat_value.toLocaleString()
+                                : stat.stat_value.toFixed(2)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <pre className="mt-2 max-h-[60vh] overflow-auto rounded-lg border border-zinc-800 bg-zinc-900 p-4 text-xs leading-relaxed text-zinc-300">
-                      {JSON.stringify(selectedSnapshot.data, null, 2)}
-                    </pre>
-                  </div>
+                  )}
+                </div>
+              )}
+
+              {cellDetail && detailTab === "timeseries" && (
+                <div className="p-6">
+                  {cellDetail.timeSeries.length === 0 ? (
+                    <EmptyTabState message="No time series data stored yet. Data will appear once normalization transforms are active." />
+                  ) : (
+                    <div>
+                      <div className="mb-3 flex items-center justify-between">
+                        <span className="text-xs font-medium text-zinc-400">
+                          Time Series Data ({cellDetail.timeSeries.length} rows)
+                        </span>
+                        <CopyButton
+                          copied={copied}
+                          onClick={() => copyJson(cellDetail.timeSeries)}
+                        />
+                      </div>
+                      <div className="overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-900">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-zinc-800 text-left text-zinc-500">
+                              {Object.keys(cellDetail.timeSeries[0]).map((key) => (
+                                <th key={key} className="px-3 py-2 font-medium">
+                                  {key}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-800/30">
+                            {cellDetail.timeSeries.slice(0, 100).map((row, i) => (
+                              <tr key={i} className="text-zinc-300">
+                                {Object.entries(row).map(([key, val]) => (
+                                  <td key={key} className="whitespace-nowrap px-3 py-1.5 font-mono">
+                                    {key === "ts" || key === "collected_at"
+                                      ? formatTimestamp(val as number)
+                                      : String(val ?? "\u2013")}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {cellDetail.timeSeries.length > 100 && (
+                          <div className="border-t border-zinc-800 px-3 py-2 text-xs text-zinc-500">
+                            Showing 100 of {cellDetail.timeSeries.length} rows
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {cellDetail && detailTab === "history" && (
+                <div className="p-6">
+                  {cellDetail.collectionHistory.length === 0 ? (
+                    <EmptyTabState message="No collection history for this scope and report type." />
+                  ) : (
+                    <div className="divide-y divide-zinc-800/50 rounded-lg border border-zinc-800 bg-zinc-900">
+                      {cellDetail.collectionHistory.map((log) => (
+                        <div key={log.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                          <span className={
+                            log.status === "success" ? "text-emerald-400" :
+                            log.status === "error" ? "text-red-400" : "text-zinc-500"
+                          }>
+                            {log.status === "success" ? (
+                              <CheckCircle2 size={14} />
+                            ) : log.status === "error" ? (
+                              <XCircle size={14} />
+                            ) : (
+                              <AlertTriangle size={14} />
+                            )}
+                          </span>
+                          <span className="text-zinc-400">{formatTimestamp(log.collected_at)}</span>
+                          <span className="text-zinc-500">
+                            {log.duration_ms != null ? formatDuration(log.duration_ms) : ""}
+                          </span>
+                          {log.error_message && (
+                            <span className="ml-auto max-w-[200px] truncate text-xs text-red-400/70" title={log.error_message}>
+                              {log.error_message}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -416,11 +809,84 @@ export default function HistoryPage() {
   );
 }
 
-function MetaField({ label, value }: { label: string; value: string }) {
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+function StatCard({
+  label,
+  value,
+  icon: Icon,
+  color = "text-zinc-400",
+}: {
+  label: string;
+  value: string;
+  icon: typeof Activity;
+  color?: string;
+}) {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
-      <div className="text-xs text-zinc-500">{label}</div>
-      <div className="mt-0.5 text-sm font-medium text-zinc-200">{value}</div>
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
+      <div className="flex items-center gap-2 text-xs text-zinc-500">
+        <Icon size={14} className={color} />
+        {label}
+      </div>
+      <div className="mt-1 text-lg font-semibold text-white">{value}</div>
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  icon: Icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: typeof Activity;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-xs font-medium transition-colors ${
+        active
+          ? "border-orange-500 text-orange-400"
+          : "border-transparent text-zinc-500 hover:text-zinc-300"
+      }`}
+    >
+      <Icon size={14} />
+      {label}
+    </button>
+  );
+}
+
+function EmptyTabState({ message }: { message: string }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900 py-12 text-center">
+      <Inbox size={32} className="mx-auto text-zinc-600" />
+      <p className="mt-3 text-sm text-zinc-500">{message}</p>
+    </div>
+  );
+}
+
+function CopyButton({ copied, onClick }: { copied: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white"
+    >
+      {copied ? (
+        <>
+          <Check size={12} className="text-emerald-400" />
+          <span className="text-emerald-400">Copied</span>
+        </>
+      ) : (
+        <>
+          <Copy size={12} />
+          Copy JSON
+        </>
+      )}
+    </button>
   );
 }

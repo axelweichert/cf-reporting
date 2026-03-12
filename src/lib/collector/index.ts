@@ -1,6 +1,6 @@
 /**
  * Scheduled data collector – fetches all 16 report types for every zone
- * and account, then stores snapshots in SQLite for persistence across restarts.
+ * and account, then stores data in normalized SQLite tables.
  *
  * Zone-scoped (10): executive, security, traffic, performance, dns,
  *                   origin-health, ssl, bots, api-shield, ddos
@@ -10,6 +10,7 @@
  * Requires CF_API_TOKEN + writable SQLite database.
  */
 
+import { randomUUID } from "crypto";
 import cron, { type ScheduledTask } from "node-cron";
 import { CloudflareClient } from "@/lib/cf-client";
 import { discoverZones, discoverAccounts } from "@/lib/token";
@@ -64,10 +65,10 @@ function checkDb(): boolean {
   return _dbAvailable;
 }
 
-/** Lazy-load snapshot helpers. */
-function getSnapshots() {
+/** Lazy-load normalized data store helpers. */
+function getStore() {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require("@/lib/snapshots") as typeof import("@/lib/snapshots");
+  return require("@/lib/data-store") as typeof import("@/lib/data-store");
 }
 
 /** Lazy-load zone-scoped report data fetchers (original 5). */
@@ -124,10 +125,10 @@ export async function runCollection(): Promise<void> {
   const token = process.env.CF_API_TOKEN;
   if (!token) return;
 
-  const snap = getSnapshots();
+  const store = getStore();
 
   _running = true;
-  const runId = snap.generateRunId();
+  const runId = randomUUID();
   const startTime = Date.now();
   let errorCount = 0;
   let successCount = 0;
@@ -150,6 +151,8 @@ export async function runCollection(): Promise<void> {
 
     console.log(`[collector] Discovered ${zones.length} zone(s), ${accounts.length} account(s)`);
 
+    store.startCollectionRun(runId, zones.length, accounts.length);
+
     const now = new Date();
     const nowStr = now.toISOString();
     // Default first-run period: 24h (safe for free-plan zones with 86400s limit)
@@ -165,19 +168,17 @@ export async function runCollection(): Promise<void> {
       for (const reportType of ZONE_REPORT_TYPES) {
         const fetchStart = Date.now();
         try {
-          const lastEnd = snap.getLastCollectedEnd(zone.id, reportType);
-          let fetchSince: string;  // what we ask the API for (with overlap)
-          let storeSince: string;  // what we record in the DB (clean boundary)
+          const lastTs = store.getLastTimestamp(zone.id, reportType);
+          const lastEnd = lastTs ? new Date(lastTs * 1000).toISOString() : null;
+          let fetchSince: string;
           let label: string;
           if (lastEnd) {
-            // Fetch with 1h overlap for safety, but store from the clean boundary
+            // Fetch with 1h overlap for safety
             const overlapped = new Date(new Date(lastEnd).getTime() - OVERLAP_MS);
             fetchSince = overlapped.toISOString();
-            storeSince = lastEnd;
             label = "incremental";
           } else {
             fetchSince = defaultSinceStr;
-            storeSince = defaultSinceStr;
             label = "initial 24h";
           }
 
@@ -185,15 +186,17 @@ export async function runCollection(): Promise<void> {
             token, zone.id, fetchSince, nowStr, reportType,
             accounts[0]?.id, // for DDoS L3/L4 data
           );
-          snap.upsertSnapshot(zone.id, zone.name, reportType, storeSince, nowStr, data);
+
+          const collectedAt = Math.floor(Date.now() / 1000);
+          store.storeReportData(zone.id, zone.name, reportType, collectedAt, data);
           const duration = Date.now() - fetchStart;
-          snap.logCollection(runId, zone.id, zone.name, reportType, "success", duration);
+          store.logCollectionItem(runId, zone.id, zone.name, reportType, "success", duration);
           successCount++;
           console.log(`[collector] ${zone.name} / ${reportType} – OK (${duration}ms) [${label}]`);
         } catch (err) {
           const duration = Date.now() - fetchStart;
           const message = err instanceof Error ? err.message : "Unknown error";
-          snap.logCollection(runId, zone.id, zone.name, reportType, "error", duration, message);
+          store.logCollectionItem(runId, zone.id, zone.name, reportType, "error", duration, message);
           errorCount++;
           console.error(`[collector] ${zone.name} / ${reportType} – ERROR: ${message}`);
         }
@@ -205,44 +208,37 @@ export async function runCollection(): Promise<void> {
       for (const reportType of ACCOUNT_REPORT_TYPES) {
         const fetchStart = Date.now();
         try {
-          const lastEnd = snap.getLastCollectedEnd(account.id, reportType);
+          const lastTs = store.getLastTimestamp(account.id, reportType);
+          const lastEnd = lastTs ? new Date(lastTs * 1000).toISOString() : null;
           let fetchSince: string;
-          let storeSince: string;
           let label: string;
           if (lastEnd) {
             const overlapped = new Date(new Date(lastEnd).getTime() - OVERLAP_MS);
             fetchSince = overlapped.toISOString();
-            storeSince = lastEnd;
             label = "incremental";
           } else {
             fetchSince = defaultSinceStr;
-            storeSince = defaultSinceStr;
             label = "initial 24h";
           }
 
           const data = await fetchAccountReportData(
             token, account.id, fetchSince, nowStr, reportType,
           );
-          snap.upsertSnapshot(account.id, account.name, reportType, storeSince, nowStr, data);
+
+          const collectedAt = Math.floor(Date.now() / 1000);
+          store.storeReportData(account.id, account.name, reportType, collectedAt, data);
           const duration = Date.now() - fetchStart;
-          snap.logCollection(runId, account.id, account.name, reportType, "success", duration);
+          store.logCollectionItem(runId, account.id, account.name, reportType, "success", duration);
           successCount++;
           console.log(`[collector] ${account.name} / ${reportType} – OK (${duration}ms) [${label}]`);
         } catch (err) {
           const duration = Date.now() - fetchStart;
           const message = err instanceof Error ? err.message : "Unknown error";
-          snap.logCollection(runId, account.id, account.name, reportType, "error", duration, message);
+          store.logCollectionItem(runId, account.id, account.name, reportType, "error", duration, message);
           errorCount++;
           console.error(`[collector] ${account.name} / ${reportType} – ERROR: ${message}`);
         }
       }
-    }
-
-    // Retention cleanup
-    const retentionDays = parseInt(process.env.DATA_RETENTION_DAYS || "90", 10);
-    const cleaned = snap.cleanupOldData(retentionDays);
-    if (cleaned.deletedSnapshots > 0 || cleaned.deletedLogs > 0) {
-      console.log(`[collector] Cleanup: removed ${cleaned.deletedSnapshots} snapshots, ${cleaned.deletedLogs} log entries`);
     }
 
     _lastRunStatus = errorCount === 0 ? "success" : "partial";
@@ -253,6 +249,11 @@ export async function runCollection(): Promise<void> {
     _running = false;
     _lastRunAt = new Date().toISOString();
     const totalDuration = Date.now() - startTime;
+
+    const store = getStore();
+    const finalStatus = _lastRunStatus || "error";
+    store.finishCollectionRun(runId, finalStatus, successCount, errorCount);
+
     console.log(`[collector] Run ${runId} complete: ${successCount} success, ${errorCount} errors (${totalDuration}ms)`);
   }
 }

@@ -67,15 +67,21 @@ export default function SettingsPage() {
     lastRunAt: string | null;
     lastRunStatus: string | null;
     schedule: string;
-    snapshotCount: number;
+    totalCollectionRuns: number;
+    totalSuccessItems: number;
+    totalErrorItems: number;
+    uniqueScopes: number;
+    uniqueReportTypes: number;
     recentRuns: Array<{
+      id: number;
       run_id: string;
-      started_at: string;
-      total: number;
-      success: number;
-      errors: number;
-      skipped: number;
-      total_duration_ms: number;
+      started_at: number;
+      finished_at: number | null;
+      status: string;
+      zones_count: number;
+      accounts_count: number;
+      success_count: number;
+      error_count: number;
     }>;
   } | null>(null);
   const [triggering, setTriggering] = useState(false);
@@ -321,7 +327,7 @@ export default function SettingsPage() {
           <StatusBadge label="Collector" value={collector?.enabled ? "Enabled" : "Disabled"} ok={collector?.enabled} />
           <StatusBadge label="Status" value={collector?.running ? "Running" : "Idle"} ok={collector?.running ? true : undefined} />
           <StatusBadge label="Schedule" value={collector?.schedule || "\u2013"} ok={!!collector?.schedule} />
-          <StatusBadge label="Snapshots" value={String(collector?.snapshotCount ?? 0)} ok={(collector?.snapshotCount ?? 0) > 0} />
+          <StatusBadge label="Collections" value={String(collector?.totalCollectionRuns ?? 0)} ok={(collector?.totalCollectionRuns ?? 0) > 0} />
         </div>
 
         {/* Last run info */}
@@ -373,10 +379,10 @@ export default function SettingsPage() {
                   {collector.recentRuns.map((run, i) => (
                     <tr key={run.run_id} className={i % 2 === 0 ? "bg-zinc-900/30" : ""}>
                       <td className="px-3 py-2 font-mono text-zinc-400">{run.run_id.slice(0, 8)}</td>
-                      <td className="px-3 py-2 text-zinc-400">{new Date(run.started_at).toLocaleString()}</td>
-                      <td className="px-3 py-2 text-emerald-400">{run.success}</td>
-                      <td className="px-3 py-2 text-red-400">{run.errors > 0 ? run.errors : "\u2013"}</td>
-                      <td className="px-3 py-2 text-zinc-400">{(run.total_duration_ms / 1000).toFixed(1)}s</td>
+                      <td className="px-3 py-2 text-zinc-400">{new Date(run.started_at * 1000).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-emerald-400">{run.success_count}</td>
+                      <td className="px-3 py-2 text-red-400">{run.error_count > 0 ? run.error_count : "\u2013"}</td>
+                      <td className="px-3 py-2 text-zinc-400">{run.finished_at ? `${run.finished_at - run.started_at}s` : "running"}</td>
                     </tr>
                   ))}
                 </tbody>

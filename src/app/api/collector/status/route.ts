@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-helpers";
 import { getCollectorStatus } from "@/lib/collector";
-import { getRecentCollectionRuns, getSnapshotCount } from "@/lib/snapshots";
+import {
+  getRecentCollectionRuns,
+  getOverallStats,
+} from "@/lib/data-store";
 
 export async function GET() {
   const auth = await requireAuth();
@@ -11,11 +14,11 @@ export async function GET() {
 
   const status = getCollectorStatus();
   const recentRuns = getRecentCollectionRuns(10);
-  const snapshotCount = getSnapshotCount();
+  const stats = getOverallStats();
 
   return NextResponse.json({
     ...status,
-    snapshotCount,
+    ...stats,
     recentRuns,
   });
 }
