@@ -58,7 +58,8 @@ function isPermissionError(message: string): boolean {
     lower.includes("not available on your plan") ||
     lower.includes("not available for free") ||
     lower.includes("access denied") ||
-    /\b(403|10000)\b/.test(message)
+    /\b(403|10000)\b/.test(message) ||
+    lower.includes("cannot request data older than")
   );
 }
 
@@ -121,6 +122,18 @@ function getRawFetchers() {
 function getRawStore() {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require("@/lib/collector/raw-store") as typeof import("@/lib/collector/raw-store");
+}
+
+/** Lazy-load extension dataset definitions. */
+function getExtDatasets() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("@/lib/collector/ext-datasets") as typeof import("@/lib/collector/ext-datasets");
+}
+
+/** Lazy-load extension dataset fetcher. */
+function getExtFetcher() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("@/lib/collector/ext-fetcher") as typeof import("@/lib/collector/ext-fetcher");
 }
 
 /** Lazy-load zone-scoped REST snapshot fetchers. */
@@ -415,6 +428,14 @@ async function collectZone(
     }
   }
 
+  // Fetch extension datasets (sequential, one GQL call each)
+  const extResult = await collectExtDatasets(
+    client, runId, work.id, work.name, "zone", work.fetchSince, until, store, label,
+  );
+  success += extResult.success;
+  error += extResult.error;
+  skipped += extResult.skipped;
+
   // Fetch REST snapshots (these remain unchanged)
   const restResult = await collectZoneRestSnapshots(token, runId, work, until, store);
   success += restResult.success;
@@ -487,11 +508,92 @@ async function collectAccount(
     }
   }
 
+  // Fetch extension datasets (sequential, one GQL call each)
+  const extResult = await collectExtDatasets(
+    client, runId, work.id, work.name, "account", work.fetchSince, until, store, label,
+  );
+  success += extResult.success;
+  error += extResult.error;
+  skipped += extResult.skipped;
+
   // Fetch REST snapshots (devices, users, posture, access apps)
   const restResult = await collectAccountRestSnapshots(token, runId, work, store);
   success += restResult.success;
   error += restResult.error;
   skipped += restResult.skipped;
+
+  return { success, error, skipped };
+}
+
+
+// =============================================================================
+// Extension dataset collection (generic EAV – 35 datasets)
+// =============================================================================
+
+async function collectExtDatasets(
+  client: CloudflareClient,
+  runId: string,
+  scopeId: string,
+  scopeName: string,
+  scopeType: "zone" | "account",
+  since: string,
+  until: string,
+  store: ReturnType<typeof getStore>,
+  label: string,
+): Promise<CollectResult> {
+  const { EXT_ZONE_DATASETS, EXT_ACCOUNT_DATASETS } = getExtDatasets();
+  const { fetchAndStoreExtDataset, getExtLastTimestamp } = getExtFetcher();
+  const datasets = scopeType === "zone" ? EXT_ZONE_DATASETS : EXT_ACCOUNT_DATASETS;
+
+  let success = 0;
+  let error = 0;
+  let skipped = 0;
+
+  const OVERLAP_MS = 60 * 60 * 1000; // 1-hour overlap for dedup safety
+
+  for (const def of datasets) {
+    const fetchStart = Date.now();
+    try {
+      // Each ext dataset has its own incremental cursor
+      let effectiveSince = since;
+      const lastTs = getExtLastTimestamp(scopeId, def.gqlNode);
+      if (lastTs) {
+        const overlapped = new Date(new Date(lastTs * 1000).getTime() - OVERLAP_MS);
+        const overlappedIso = overlapped.toISOString();
+        // Use whichever is more recent: the ext cursor or the scope-level since
+        if (overlappedIso > effectiveSince) {
+          effectiveSince = overlappedIso;
+        }
+      }
+
+      const result = await fetchAndStoreExtDataset(client, def, scopeId, effectiveSince, until);
+      const duration = Date.now() - fetchStart;
+
+      if (result.tsRows === 0 && result.dimRows === 0) {
+        store.logCollectionItem(runId, scopeId, scopeName, def.key, "skipped", duration, "No data returned");
+        skipped++;
+      } else {
+        store.logCollectionItem(runId, scopeId, scopeName, def.key, "success", duration);
+        success++;
+      }
+    } catch (err) {
+      const duration = Date.now() - fetchStart;
+      const message = err instanceof Error ? err.message : "Unknown error";
+
+      if (isPermissionError(message)) {
+        store.logCollectionItem(runId, scopeId, scopeName, def.key, "skipped", duration, message);
+        skipped++;
+      } else {
+        store.logCollectionItem(runId, scopeId, scopeName, def.key, "error", duration, message);
+        error++;
+        console.error(`[collector] ${scopeName} / ${def.key} – ERROR: ${message}`);
+      }
+    }
+  }
+
+  if (success > 0 || error > 0) {
+    console.log(`[collector] ${scopeName} / ext-datasets – ${success} ok, ${skipped} skipped, ${error} errors [${label}]`);
+  }
 
   return { success, error, skipped };
 }

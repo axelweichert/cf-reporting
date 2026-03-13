@@ -12,7 +12,7 @@ let _db: Database.Database | null = null;
 let _initFailed = false;
 
 const DB_PATH = process.env.DB_PATH || "/app/data/cf-reporting.db";
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 export function getDb(): Database.Database | null {
   if (_initFailed) return null;
@@ -881,6 +881,42 @@ function runMigrations(db: Database.Database): void {
       DROP INDEX IF EXISTS idx_shadow_users_lookup;
     `);
     console.log("[db] Migration v5: raw data lake schema (17 raw tables, dropped 25 old tables)");
+  }
+
+  if (currentVersion < 6) {
+    // v6: Extension dataset EAV tables – generic storage for 35+ additional GQL datasets.
+    db.exec(`
+      -- Time-bucketed numeric data (EAV pattern)
+      CREATE TABLE IF NOT EXISTS raw_ext_ts (
+        scope_id   TEXT    NOT NULL,
+        scope_type TEXT    NOT NULL,
+        dataset    TEXT    NOT NULL,
+        ts         INTEGER NOT NULL,
+        metric     TEXT    NOT NULL,
+        value      REAL    NOT NULL DEFAULT 0,
+        PRIMARY KEY (scope_id, dataset, ts, metric)
+      );
+
+      -- Dimension breakdowns (EAV pattern)
+      CREATE TABLE IF NOT EXISTS raw_ext_dim (
+        scope_id   TEXT    NOT NULL,
+        scope_type TEXT    NOT NULL,
+        dataset    TEXT    NOT NULL,
+        ts         INTEGER NOT NULL,
+        dim        TEXT    NOT NULL,
+        key        TEXT    NOT NULL,
+        metric     TEXT    NOT NULL DEFAULT 'count',
+        value      REAL    NOT NULL DEFAULT 0,
+        PRIMARY KEY (scope_id, dataset, ts, dim, key, metric)
+      );
+
+      -- Indexes for common query patterns
+      CREATE INDEX IF NOT EXISTS idx_raw_ext_ts_scope_ds    ON raw_ext_ts(scope_id, dataset, ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_ext_ts_ds_ts       ON raw_ext_ts(dataset, ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_ext_dim_scope_ds   ON raw_ext_dim(scope_id, dataset, ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_ext_dim_ds_dim     ON raw_ext_dim(dataset, dim, ts);
+    `);
+    console.log("[db] Migration v6: extension dataset EAV tables (raw_ext_ts, raw_ext_dim)");
   }
 
   // Upsert schema version
