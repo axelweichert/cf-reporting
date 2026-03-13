@@ -538,7 +538,7 @@ async function collectExtDatasets(
   label: string,
 ): Promise<CollectResult> {
   const { EXT_ZONE_DATASETS, EXT_ACCOUNT_DATASETS } = getExtDatasets();
-  const { fetchBatchExtDatasets, fetchAndStoreExtDataset, getExtLastTimestamp, BATCH_SIZE } = getExtFetcher();
+  const { fetchBatchExtDatasets, fetchAndStoreExtDataset, getExtLastTimestamp, discoverDatasetLimits, BATCH_SIZE } = getExtFetcher();
   const allDatasets = scopeType === "zone" ? EXT_ZONE_DATASETS : EXT_ACCOUNT_DATASETS;
 
   let success = 0;
@@ -546,9 +546,17 @@ async function collectExtDatasets(
   let skipped = 0;
 
   const OVERLAP_MS = 60 * 60 * 1000; // 1-hour overlap for dedup safety
+  const nowMs = Date.now();
 
-  // Resolve effective since per dataset (incremental cursor)
-  const datasetsWithSince = allDatasets.map((def) => {
+  // Discover per-dataset retention limits (1 GQL call for all datasets)
+  const limits = await discoverDatasetLimits(client, allDatasets, scopeId);
+
+  // Resolve effective since per dataset and skip datasets beyond retention
+  type DsItem = { def: typeof allDatasets[number]; since: string };
+  const viable: DsItem[] = [];
+
+  for (const def of allDatasets) {
+    // Check incremental cursor first
     let effectiveSince = since;
     const lastTs = getExtLastTimestamp(scopeId, def.gqlNode);
     if (lastTs) {
@@ -556,13 +564,34 @@ async function collectExtDatasets(
       const overlappedIso = overlapped.toISOString();
       if (overlappedIso > effectiveSince) effectiveSince = overlappedIso;
     }
-    return { def, since: effectiveSince };
-  });
 
-  // Group datasets that share the same effective since (can be batched together)
-  // Most datasets during backfill share the same since, so this groups efficiently
-  const byWindow = new Map<string, typeof datasetsWithSince>();
-  for (const item of datasetsWithSince) {
+    // Skip if the since date is beyond the dataset's retention limit
+    const dsLimits = limits.get(def.gqlNode);
+    if (dsLimits) {
+      if (dsLimits.notOlderThan === 0 && dsLimits.maxDuration === 0) {
+        // No access to this dataset on this scope
+        store.logCollectionItem(runId, scopeId, scopeName, def.key, "skipped", 0, "No access (settings: notOlderThan=0)");
+        skipped++;
+        continue;
+      }
+      const sinceMs = new Date(effectiveSince).getTime();
+      const ageMs = nowMs - sinceMs;
+      if (dsLimits.notOlderThan > 0 && ageMs > dsLimits.notOlderThan * 1000) {
+        // This time slice is beyond retention – skip without an API call
+        store.logCollectionItem(runId, scopeId, scopeName, def.key, "skipped", 0,
+          `Beyond retention (${Math.round(ageMs / 86400000)}d > ${Math.round(dsLimits.notOlderThan / 86400)}d)`);
+        skipped++;
+        continue;
+      }
+    }
+    // limits map may be empty if discovery failed – still try the dataset
+
+    viable.push({ def, since: effectiveSince });
+  }
+
+  // Group viable datasets by effective since for batching
+  const byWindow = new Map<string, DsItem[]>();
+  for (const item of viable) {
     const key = item.since;
     if (!byWindow.has(key)) byWindow.set(key, []);
     byWindow.get(key)!.push(item);
@@ -622,8 +651,9 @@ async function collectExtDatasets(
     }
   }
 
-  if (success > 0 || error > 0) {
-    console.log(`[collector] ${scopeName} / ext-datasets – ${success} ok, ${skipped} skipped, ${error} errors [${label}]`);
+  if (success > 0 || error > 0 || viable.length > 0) {
+    const skippedRetention = allDatasets.length - viable.length;
+    console.log(`[collector] ${scopeName} / ext-datasets – ${success} ok, ${skipped} skipped (${skippedRetention} beyond retention), ${error} errors [${label}]`);
   }
 
   return { success, error, skipped };

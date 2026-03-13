@@ -464,6 +464,75 @@ export async function fetchBatchExtDatasets(
 export { BATCH_SIZE };
 
 // =============================================================================
+// Settings discovery – notOlderThan / maxDuration per dataset
+// =============================================================================
+
+export interface DatasetLimits {
+  /** Max age in seconds (0 = no access / no data) */
+  notOlderThan: number;
+  /** Max query time span in seconds (0 = no access / no data) */
+  maxDuration: number;
+}
+
+/**
+ * Query the CF GraphQL settings node to discover per-dataset retention
+ * limits (notOlderThan) and max query durations. Returns a map keyed
+ * by gqlNode name. One GQL request per scope.
+ *
+ * Datasets not present in the response (no access) get { 0, 0 }.
+ */
+export async function discoverDatasetLimits(
+  client: CloudflareClient,
+  defs: ExtDatasetDef[],
+  scopeId: string,
+): Promise<Map<string, DatasetLimits>> {
+  const results = new Map<string, DatasetLimits>();
+  if (defs.length === 0) return results;
+
+  const first = defs[0];
+  // Build settings sub-selections for each dataset
+  const settingsFields = defs.map((d) =>
+    `${d.gqlNode} { notOlderThan maxDuration }`
+  ).join("\n        ");
+
+  const query = `{
+    viewer {
+      ${first.parentNode}(filter: { ${first.scopeFilter}: "${scopeId}" }) {
+        settings {
+          ${settingsFields}
+        }
+      }
+    }
+  }`;
+
+  try {
+    const res = await client.graphql<Record<string, unknown>>(query);
+    if (res.errors?.length) {
+      // If discovery fails, return empty map – caller will use defaults
+      return results;
+    }
+
+    const viewer = res.data.viewer as Record<string, unknown> | undefined;
+    if (!viewer) return results;
+    const scopeArr = viewer[first.parentNode] as Array<Record<string, unknown>> | undefined;
+    if (!scopeArr?.[0]) return results;
+    const settings = scopeArr[0].settings as Record<string, { notOlderThan: number; maxDuration: number }> | undefined;
+    if (!settings) return results;
+
+    for (const def of defs) {
+      const s = settings[def.gqlNode];
+      if (s && (s.notOlderThan > 0 || s.maxDuration > 0)) {
+        results.set(def.gqlNode, { notOlderThan: s.notOlderThan, maxDuration: s.maxDuration });
+      }
+    }
+  } catch {
+    // Discovery failed – not fatal, caller uses defaults
+  }
+
+  return results;
+}
+
+// =============================================================================
 // Store functions
 // =============================================================================
 
