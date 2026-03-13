@@ -83,6 +83,8 @@ Open `http://localhost:3000`.
 
 The built-in background collector periodically fetches data from the Cloudflare API and stores normalized snapshots in a local SQLite database. This enables historical trend analysis beyond Cloudflare's default retention.
 
+- **Initial backfill** – On the first run, fetches historical data day-by-day based on your Cloudflare plan: 3 days (Free), 30 days (Pro/Business), 90 days (Enterprise). Override with `INITIAL_LOOKBACK_DAYS`
+- **Throttled backfill** – 2-second pause between each day-slice to stay well within Cloudflare's rate limits
 - **Schedule** – Configurable via `COLLECTION_SCHEDULE` (default: every 6 hours)
 - **Retention** – Configurable via `DATA_RETENTION_DAYS` (default: 90 days)
 - **Storage** – Mount `/app/data` as a Docker volume for persistence
@@ -187,6 +189,7 @@ Both **User API tokens** and **Account API tokens** are supported. Reports requi
 |---|---|---|
 | `COLLECTION_SCHEDULE` | Cron expression for background collection | `0 */6 * * *` |
 | `DATA_RETENTION_DAYS` | Days to keep collected snapshots | `90` |
+| `INITIAL_LOOKBACK_DAYS` | Override auto-detected initial backfill depth (1–365) | Auto by plan |
 
 ### SMTP (Email)
 

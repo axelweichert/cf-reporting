@@ -28,6 +28,7 @@ services:
       # Data collection settings (optional)
       - COLLECTION_SCHEDULE=${COLLECTION_SCHEDULE:-0 */6 * * *}
       - DATA_RETENTION_DAYS=${DATA_RETENTION_DAYS:-90}
+      - INITIAL_LOOKBACK_DAYS=${INITIAL_LOOKBACK_DAYS:-}
     volumes:
       - cf_data:/app/data
     logging:
