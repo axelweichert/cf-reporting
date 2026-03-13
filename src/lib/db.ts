@@ -12,7 +12,7 @@ let _db: Database.Database | null = null;
 let _initFailed = false;
 
 const DB_PATH = process.env.DB_PATH || "/app/data/cf-reporting.db";
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 export function getDb(): Database.Database | null {
   if (_initFailed) return null;
@@ -592,6 +592,295 @@ function runMigrations(db: Database.Database): void {
       ALTER TABLE collection_runs ADD COLUMN skipped_count INTEGER DEFAULT 0;
     `);
     console.log("[db] Migration v4: added skipped_count to collection_runs");
+  }
+
+  if (currentVersion < 5) {
+    // v5: Raw data lake – replace report-oriented tables with dataset-oriented raw tables.
+    // Drop old redundant tables (data will be re-collected into raw schema).
+    db.exec(`
+      -- Drop v3 tables made redundant by raw tables
+      DROP TABLE IF EXISTS top_items;
+      DROP TABLE IF EXISTS aggregate_stats;
+      DROP TABLE IF EXISTS protocol_distribution;
+      DROP TABLE IF EXISTS bot_score_distribution;
+      DROP TABLE IF EXISTS http_requests_ts;
+      DROP TABLE IF EXISTS firewall_events_ts;
+      DROP TABLE IF EXISTS bot_traffic_ts;
+      DROP TABLE IF EXISTS ddos_events_ts;
+      DROP TABLE IF EXISTS origin_health_ts;
+      DROP TABLE IF EXISTS api_session_ts;
+      DROP TABLE IF EXISTS dns_queries_ts;
+      DROP TABLE IF EXISTS gateway_dns_ts;
+      DROP TABLE IF EXISTS gateway_network_ts;
+      DROP TABLE IF EXISTS gateway_http_ts;
+      DROP TABLE IF EXISTS shadow_it_usage_ts;
+      DROP TABLE IF EXISTS access_logins_ts;
+      DROP TABLE IF EXISTS daily_active_users_ts;
+      DROP TABLE IF EXISTS firewall_rules;
+      DROP TABLE IF EXISTS origin_status_breakdown;
+      DROP TABLE IF EXISTS performance_breakdown;
+      DROP TABLE IF EXISTS gateway_policies;
+      DROP TABLE IF EXISTS gateway_blocked_destinations;
+      DROP TABLE IF EXISTS shadow_it_apps;
+      DROP TABLE IF EXISTS shadow_it_user_apps;
+      DROP TABLE IF EXISTS recommendations;
+
+      -- ================================================================
+      -- RAW ZONE-SCOPED TABLES
+      -- ================================================================
+
+      -- Hourly HTTP totals with all scalar metrics
+      CREATE TABLE IF NOT EXISTS raw_http_hourly (
+        zone_id              TEXT    NOT NULL,
+        ts                   INTEGER NOT NULL,
+        requests             INTEGER NOT NULL DEFAULT 0,
+        bytes                INTEGER NOT NULL DEFAULT 0,
+        cached_requests      INTEGER NOT NULL DEFAULT 0,
+        cached_bytes         INTEGER NOT NULL DEFAULT 0,
+        encrypted_requests   INTEGER NOT NULL DEFAULT 0,
+        status_1xx           INTEGER NOT NULL DEFAULT 0,
+        status_2xx           INTEGER NOT NULL DEFAULT 0,
+        status_3xx           INTEGER NOT NULL DEFAULT 0,
+        status_4xx           INTEGER NOT NULL DEFAULT 0,
+        status_5xx           INTEGER NOT NULL DEFAULT 0,
+        ttfb_avg             REAL,
+        ttfb_p50             REAL,
+        ttfb_p95             REAL,
+        ttfb_p99             REAL,
+        origin_time_avg      REAL,
+        origin_time_p50      REAL,
+        origin_time_p95      REAL,
+        origin_time_p99      REAL,
+        PRIMARY KEY (zone_id, ts)
+      );
+
+      -- Flexible HTTP dimension breakdowns: one row per zone/hour/dim/key
+      CREATE TABLE IF NOT EXISTS raw_http_dim (
+        zone_id    TEXT    NOT NULL,
+        ts         INTEGER NOT NULL,
+        dim        TEXT    NOT NULL,
+        key        TEXT    NOT NULL,
+        requests   INTEGER NOT NULL DEFAULT 0,
+        bytes      INTEGER NOT NULL DEFAULT 0,
+        ttfb_avg   REAL,
+        origin_avg REAL,
+        PRIMARY KEY (zone_id, ts, dim, key)
+      );
+
+      -- Encryption ratio time series (httpRequestsOverviewAdaptiveGroups)
+      CREATE TABLE IF NOT EXISTS raw_http_overview_hourly (
+        zone_id            TEXT    NOT NULL,
+        ts                 INTEGER NOT NULL,
+        requests           INTEGER NOT NULL DEFAULT 0,
+        encrypted_requests INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (zone_id, ts)
+      );
+
+      -- Firewall hourly totals by action
+      CREATE TABLE IF NOT EXISTS raw_fw_hourly (
+        zone_id             TEXT    NOT NULL,
+        ts                  INTEGER NOT NULL,
+        total               INTEGER NOT NULL DEFAULT 0,
+        blocked             INTEGER NOT NULL DEFAULT 0,
+        challenged          INTEGER NOT NULL DEFAULT 0,
+        managed_challenged  INTEGER NOT NULL DEFAULT 0,
+        js_challenged       INTEGER NOT NULL DEFAULT 0,
+        challenge_solved    INTEGER NOT NULL DEFAULT 0,
+        logged              INTEGER NOT NULL DEFAULT 0,
+        skipped             INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (zone_id, ts)
+      );
+
+      -- Firewall dimension breakdowns
+      CREATE TABLE IF NOT EXISTS raw_fw_dim (
+        zone_id  TEXT    NOT NULL,
+        ts       INTEGER NOT NULL,
+        dim      TEXT    NOT NULL,
+        key      TEXT    NOT NULL,
+        events   INTEGER NOT NULL DEFAULT 0,
+        detail   TEXT,
+        PRIMARY KEY (zone_id, ts, dim, key)
+      );
+
+      -- DNS hourly
+      CREATE TABLE IF NOT EXISTS raw_dns_hourly (
+        zone_id  TEXT    NOT NULL,
+        ts       INTEGER NOT NULL,
+        queries  INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (zone_id, ts)
+      );
+
+      -- DNS dimensions
+      CREATE TABLE IF NOT EXISTS raw_dns_dim (
+        zone_id  TEXT    NOT NULL,
+        ts       INTEGER NOT NULL,
+        dim      TEXT    NOT NULL,
+        key      TEXT    NOT NULL,
+        queries  INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (zone_id, ts, dim, key)
+      );
+
+      -- Health check events
+      CREATE TABLE IF NOT EXISTS raw_health_events (
+        zone_id          TEXT    NOT NULL,
+        ts               INTEGER NOT NULL,
+        name             TEXT    NOT NULL,
+        origin_ip        TEXT    NOT NULL DEFAULT '',
+        status           TEXT,
+        response_status  INTEGER,
+        rtt_ms           INTEGER,
+        failure_reason   TEXT,
+        region           TEXT,
+        PRIMARY KEY (zone_id, ts, name, origin_ip)
+      );
+
+      -- ================================================================
+      -- RAW ACCOUNT-SCOPED TABLES
+      -- ================================================================
+
+      -- Gateway DNS hourly
+      CREATE TABLE IF NOT EXISTS raw_gw_dns_hourly (
+        account_id TEXT    NOT NULL,
+        ts         INTEGER NOT NULL,
+        total      INTEGER NOT NULL DEFAULT 0,
+        blocked    INTEGER NOT NULL DEFAULT 0,
+        allowed    INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account_id, ts)
+      );
+
+      -- Gateway DNS dimensions
+      CREATE TABLE IF NOT EXISTS raw_gw_dns_dim (
+        account_id TEXT    NOT NULL,
+        ts         INTEGER NOT NULL,
+        dim        TEXT    NOT NULL,
+        key        TEXT    NOT NULL,
+        queries    INTEGER NOT NULL DEFAULT 0,
+        detail     TEXT,
+        PRIMARY KEY (account_id, ts, dim, key)
+      );
+
+      -- Gateway Network hourly
+      CREATE TABLE IF NOT EXISTS raw_gw_net_hourly (
+        account_id TEXT    NOT NULL,
+        ts         INTEGER NOT NULL,
+        allowed    INTEGER NOT NULL DEFAULT 0,
+        blocked    INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account_id, ts)
+      );
+
+      -- Gateway Network dimensions
+      CREATE TABLE IF NOT EXISTS raw_gw_net_dim (
+        account_id TEXT    NOT NULL,
+        ts         INTEGER NOT NULL,
+        dim        TEXT    NOT NULL,
+        key        TEXT    NOT NULL,
+        sessions   INTEGER NOT NULL DEFAULT 0,
+        detail     TEXT,
+        PRIMARY KEY (account_id, ts, dim, key)
+      );
+
+      -- Gateway HTTP hourly
+      CREATE TABLE IF NOT EXISTS raw_gw_http_hourly (
+        account_id TEXT    NOT NULL,
+        ts         INTEGER NOT NULL,
+        total      INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account_id, ts)
+      );
+
+      -- Gateway HTTP dimensions
+      CREATE TABLE IF NOT EXISTS raw_gw_http_dim (
+        account_id TEXT    NOT NULL,
+        ts         INTEGER NOT NULL,
+        dim        TEXT    NOT NULL,
+        key        TEXT    NOT NULL,
+        requests   INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account_id, ts, dim, key)
+      );
+
+      -- Access login daily
+      CREATE TABLE IF NOT EXISTS raw_access_daily (
+        account_id TEXT    NOT NULL,
+        ts         INTEGER NOT NULL,
+        successful INTEGER NOT NULL DEFAULT 0,
+        failed     INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account_id, ts)
+      );
+
+      -- Access login dimensions
+      CREATE TABLE IF NOT EXISTS raw_access_dim (
+        account_id TEXT    NOT NULL,
+        ts         INTEGER NOT NULL,
+        dim        TEXT    NOT NULL,
+        key        TEXT    NOT NULL,
+        logins     INTEGER NOT NULL DEFAULT 0,
+        detail     TEXT,
+        PRIMARY KEY (account_id, ts, dim, key)
+      );
+
+      -- DDoS attack events (account-scoped, L3/L4)
+      CREATE TABLE IF NOT EXISTS raw_dosd_attacks (
+        account_id       TEXT    NOT NULL,
+        attack_id        TEXT    NOT NULL,
+        attack_type      TEXT,
+        attack_vector    TEXT,
+        ip_protocol      TEXT,
+        destination_port INTEGER,
+        mitigation_type  TEXT,
+        packets          INTEGER,
+        bits             INTEGER,
+        dropped_packets  INTEGER,
+        dropped_bits     INTEGER,
+        start_time       INTEGER,
+        end_time         INTEGER,
+        PRIMARY KEY (account_id, attack_id)
+      );
+
+      -- ================================================================
+      -- INDEXES for raw tables
+      -- ================================================================
+      CREATE INDEX IF NOT EXISTS idx_raw_http_hourly_ts      ON raw_http_hourly(ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_http_dim_lookup     ON raw_http_dim(zone_id, dim, ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_http_overview_ts    ON raw_http_overview_hourly(ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_fw_hourly_ts        ON raw_fw_hourly(ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_fw_dim_lookup       ON raw_fw_dim(zone_id, dim, ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_dns_hourly_ts       ON raw_dns_hourly(ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_dns_dim_lookup      ON raw_dns_dim(zone_id, dim, ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_health_events_ts    ON raw_health_events(ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_gw_dns_hourly_ts    ON raw_gw_dns_hourly(ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_gw_dns_dim_lookup   ON raw_gw_dns_dim(account_id, dim, ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_gw_net_hourly_ts    ON raw_gw_net_hourly(ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_gw_net_dim_lookup   ON raw_gw_net_dim(account_id, dim, ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_gw_http_hourly_ts   ON raw_gw_http_hourly(ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_gw_http_dim_lookup  ON raw_gw_http_dim(account_id, dim, ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_access_daily_ts     ON raw_access_daily(ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_access_dim_lookup   ON raw_access_dim(account_id, dim, ts);
+      CREATE INDEX IF NOT EXISTS idx_raw_dosd_attacks_acct   ON raw_dosd_attacks(account_id);
+
+      -- Drop old indexes that referenced dropped tables
+      DROP INDEX IF EXISTS idx_top_items_lookup;
+      DROP INDEX IF EXISTS idx_aggregate_stats_scope;
+      DROP INDEX IF EXISTS idx_protocol_dist_lookup;
+      DROP INDEX IF EXISTS idx_bot_score_lookup;
+      DROP INDEX IF EXISTS idx_http_ts_time;
+      DROP INDEX IF EXISTS idx_firewall_ts_time;
+      DROP INDEX IF EXISTS idx_bot_ts_time;
+      DROP INDEX IF EXISTS idx_ddos_ts_time;
+      DROP INDEX IF EXISTS idx_origin_health_ts_time;
+      DROP INDEX IF EXISTS idx_dns_queries_ts_time;
+      DROP INDEX IF EXISTS idx_gw_dns_ts_time;
+      DROP INDEX IF EXISTS idx_gw_net_ts_time;
+      DROP INDEX IF EXISTS idx_shadow_it_ts_time;
+      DROP INDEX IF EXISTS idx_access_logins_ts_time;
+      DROP INDEX IF EXISTS idx_dau_ts_time;
+      DROP INDEX IF EXISTS idx_fw_rules_lookup;
+      DROP INDEX IF EXISTS idx_origin_status_lookup;
+      DROP INDEX IF EXISTS idx_perf_breakdown_lookup;
+      DROP INDEX IF EXISTS idx_gw_policies_lookup;
+      DROP INDEX IF EXISTS idx_gw_blocked_lookup;
+      DROP INDEX IF EXISTS idx_shadow_apps_lookup;
+      DROP INDEX IF EXISTS idx_shadow_users_lookup;
+    `);
+    console.log("[db] Migration v5: raw data lake schema (17 raw tables, dropped 25 old tables)");
   }
 
   // Upsert schema version

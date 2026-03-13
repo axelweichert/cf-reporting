@@ -1,8 +1,8 @@
 /**
- * Data store reader functions.
+ * Data store reader functions – Phase 3: Raw Data Lake.
  *
- * Each function reads from the normalized SQLite tables and reconstructs
- * the exact typed shape that the browser query module returns.
+ * Each function derives its typed shape from raw_* tables via SQL.
+ * The readReportData dispatcher interface is unchanged.
  *
  * All reader functions take (scopeId, fromTs, toTs) where fromTs/toTs
  * are unix epoch seconds and return the typed data shape or null if no
@@ -39,102 +39,6 @@ function epochToIso(epoch: number): string {
   return new Date(epoch * 1000).toISOString();
 }
 
-/** Get top_items rows for a scope/report/category, using the latest collected_at within range */
-function getTopItems(
-  db: Database.Database,
-  scopeId: string,
-  reportType: string,
-  category: string,
-  fromTs?: number,
-  toTs?: number,
-): Array<{ name: string; value: number; value2: number | null; pct: number | null; detail: string | null }> {
-  let latestRow: { ca: number | null } | undefined;
-
-  if (fromTs && toTs) {
-    latestRow = db.prepare(
-      `SELECT MAX(collected_at) as ca FROM top_items WHERE scope_id = ? AND report_type = ? AND category = ? AND collected_at >= ? AND collected_at <= ?`,
-    ).get(scopeId, reportType, category, fromTs, toTs) as { ca: number | null } | undefined;
-  }
-
-  if (!latestRow?.ca) {
-    latestRow = db.prepare(
-      `SELECT MAX(collected_at) as ca FROM top_items WHERE scope_id = ? AND report_type = ? AND category = ?`,
-    ).get(scopeId, reportType, category) as { ca: number | null } | undefined;
-  }
-
-  if (!latestRow?.ca) return [];
-
-  return db.prepare(
-    `SELECT name, value, value2, value_pct as pct, detail FROM top_items WHERE scope_id = ? AND report_type = ? AND category = ? AND collected_at = ? ORDER BY value DESC`,
-  ).all(scopeId, reportType, category, latestRow.ca) as Array<{
-    name: string;
-    value: number;
-    value2: number | null;
-    pct: number | null;
-    detail: string | null;
-  }>;
-}
-
-/** Get aggregate_stats for a scope/report, latest collected_at in range */
-function getAggStats(
-  db: Database.Database,
-  scopeId: string,
-  reportType: string,
-  fromTs?: number,
-  toTs?: number,
-): Map<string, number> {
-  let latestRow: { ca: number | null } | undefined;
-
-  if (fromTs && toTs) {
-    latestRow = db.prepare(
-      `SELECT MAX(collected_at) as ca FROM aggregate_stats WHERE scope_id = ? AND report_type = ? AND collected_at >= ? AND collected_at <= ?`,
-    ).get(scopeId, reportType, fromTs, toTs) as { ca: number | null } | undefined;
-  }
-
-  if (!latestRow?.ca) {
-    latestRow = db.prepare(
-      `SELECT MAX(collected_at) as ca FROM aggregate_stats WHERE scope_id = ? AND report_type = ?`,
-    ).get(scopeId, reportType) as { ca: number | null } | undefined;
-  }
-
-  if (!latestRow?.ca) return new Map();
-
-  const rows = db.prepare(
-    `SELECT stat_key, stat_value FROM aggregate_stats WHERE scope_id = ? AND report_type = ? AND collected_at = ?`,
-  ).all(scopeId, reportType, latestRow.ca) as Array<{ stat_key: string; stat_value: number }>;
-
-  return new Map(rows.map((r) => [r.stat_key, r.stat_value]));
-}
-
-/** Get recommendations for a scope/report */
-function getRecommendations(
-  db: Database.Database,
-  scopeId: string,
-  reportType: string,
-  fromTs?: number,
-  toTs?: number,
-): Array<{ severity: string; title: string; description: string }> {
-  let latestRow: { ca: number | null } | undefined;
-
-  if (fromTs && toTs) {
-    latestRow = db.prepare(
-      `SELECT MAX(collected_at) as ca FROM recommendations WHERE scope_id = ? AND report_type = ? AND collected_at >= ? AND collected_at <= ?`,
-    ).get(scopeId, reportType, fromTs, toTs) as { ca: number | null } | undefined;
-  }
-
-  if (!latestRow?.ca) {
-    latestRow = db.prepare(
-      `SELECT MAX(collected_at) as ca FROM recommendations WHERE scope_id = ? AND report_type = ?`,
-    ).get(scopeId, reportType) as { ca: number | null } | undefined;
-  }
-
-  if (!latestRow?.ca) return [];
-
-  return db.prepare(
-    `SELECT severity, title, description FROM recommendations WHERE scope_id = ? AND report_type = ? AND collected_at = ?`,
-  ).all(scopeId, reportType, latestRow.ca) as Array<{ severity: string; title: string; description: string }>;
-}
-
 /** Get latest collected_at for a snapshot table within the given range, falling back to most recent overall */
 function getLatestCollectedAt(
   db: Database.Database,
@@ -161,49 +65,6 @@ function getLatestCollectedAt(
   return row?.ca ?? null;
 }
 
-/** Get latest collected_at for protocol_distribution */
-function getLatestProtocolAt(
-  db: Database.Database,
-  scopeId: string,
-  reportType: string,
-  category: string,
-  fromTs?: number,
-  toTs?: number,
-): number | null {
-  let row: { ca: number | null } | undefined;
-
-  if (fromTs && toTs) {
-    row = db.prepare(
-      `SELECT MAX(collected_at) as ca FROM protocol_distribution WHERE scope_id = ? AND report_type = ? AND category = ? AND collected_at >= ? AND collected_at <= ?`,
-    ).get(scopeId, reportType, category, fromTs, toTs) as { ca: number | null } | undefined;
-  }
-
-  if (!row?.ca) {
-    row = db.prepare(
-      `SELECT MAX(collected_at) as ca FROM protocol_distribution WHERE scope_id = ? AND report_type = ? AND category = ?`,
-    ).get(scopeId, reportType, category) as { ca: number | null } | undefined;
-  }
-
-  return row?.ca ?? null;
-}
-
-/** Get protocol_distribution rows for a scope/report/category, latest in range */
-function getProtocolDistribution(
-  db: Database.Database,
-  scopeId: string,
-  reportType: string,
-  category: string,
-  fromTs?: number,
-  toTs?: number,
-): Array<{ name: string; requests: number }> {
-  const ca = getLatestProtocolAt(db, scopeId, reportType, category, fromTs, toTs);
-  if (!ca) return [];
-
-  return db.prepare(
-    `SELECT name, requests FROM protocol_distribution WHERE scope_id = ? AND report_type = ? AND category = ? AND collected_at = ? ORDER BY requests DESC`,
-  ).all(scopeId, reportType, category, ca) as Array<{ name: string; requests: number }>;
-}
-
 
 // =============================================================================
 // 1. Executive
@@ -215,22 +76,60 @@ function readExecutiveData(
   fromTs: number,
   toTs: number,
 ): ExecutiveData | null {
-  const stats = getAggStats(db, scopeId, "executive", fromTs, toTs);
-  if (stats.size === 0) return null;
+  // Traffic totals from raw_http_hourly
+  const totals = db.prepare(`
+    SELECT COALESCE(SUM(requests),0) as reqs, COALESCE(SUM(bytes),0) as bw,
+           COALESCE(SUM(cached_requests),0) as cached,
+           COALESCE(SUM(status_4xx),0) + COALESCE(SUM(status_5xx),0) as errors
+    FROM raw_http_hourly WHERE zone_id = ? AND ts >= ? AND ts < ?
+  `).get(scopeId, fromTs, toTs) as { reqs: number; bw: number; cached: number; errors: number };
 
-  // Derive accurate totals from time series when available
-  const tsSums = db.prepare(
-    `SELECT COALESCE(SUM(requests),0) as reqs, COALESCE(SUM(bandwidth),0) as bw, COALESCE(SUM(cached_requests),0) as cached FROM http_requests_ts WHERE zone_id = ? AND ts >= ? AND ts < ?`,
-  ).get(scopeId, fromTs, toTs) as { reqs: number; bw: number; cached: number };
+  // Threats blocked from raw_fw_hourly
+  const fwTotals = db.prepare(`
+    SELECT COALESCE(SUM(blocked),0) as blocked,
+           COALESCE(SUM(challenged + managed_challenged + js_challenged),0) as challenged
+    FROM raw_fw_hourly WHERE zone_id = ? AND ts >= ? AND ts < ?
+  `).get(scopeId, fromTs, toTs) as { blocked: number; challenged: number };
 
-  const statusCodes = getTopItems(db, scopeId, "executive", "status_codes", fromTs, toTs);
-  const topCountries = getTopItems(db, scopeId, "executive", "top_countries", fromTs, toTs);
-  const recs = getRecommendations(db, scopeId, "executive", fromTs, toTs);
+  // DDoS mitigated from raw_fw_dim
+  const ddosRow = db.prepare(`
+    SELECT COALESCE(SUM(events),0) as cnt FROM raw_fw_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'l7ddos'
+  `).get(scopeId, fromTs, toTs) as { cnt: number };
 
-  const totalRequests = tsSums.reqs || (stats.get("total_requests") ?? 0);
-  const totalBandwidth = tsSums.bw || (stats.get("total_bandwidth") ?? 0);
-  const cachedRequests = tsSums.reqs > 0 ? tsSums.cached : (stats.get("cached_requests") ?? 0);
+  if (totals.reqs === 0 && fwTotals.blocked === 0 && fwTotals.challenged === 0) return null;
+
+  const totalRequests = totals.reqs;
+  const totalBandwidth = totals.bw;
+  const cachedRequests = totals.cached;
   const cacheHitRatio = totalRequests > 0 ? cachedRequests / totalRequests : 0;
+
+  // Performance – weighted average from raw_http_hourly
+  const perf = db.prepare(`
+    SELECT SUM(ttfb_avg * requests) / NULLIF(SUM(CASE WHEN ttfb_avg IS NOT NULL THEN requests END),0) as ttfb_avg,
+           SUM(ttfb_p50 * requests) / NULLIF(SUM(CASE WHEN ttfb_p50 IS NOT NULL THEN requests END),0) as ttfb_p50,
+           SUM(ttfb_p95 * requests) / NULLIF(SUM(CASE WHEN ttfb_p95 IS NOT NULL THEN requests END),0) as ttfb_p95,
+           SUM(ttfb_p99 * requests) / NULLIF(SUM(CASE WHEN ttfb_p99 IS NOT NULL THEN requests END),0) as ttfb_p99,
+           SUM(origin_time_avg * requests) / NULLIF(SUM(CASE WHEN origin_time_avg IS NOT NULL THEN requests END),0) as origin_avg,
+           SUM(origin_time_p50 * requests) / NULLIF(SUM(CASE WHEN origin_time_p50 IS NOT NULL THEN requests END),0) as origin_p50,
+           SUM(origin_time_p95 * requests) / NULLIF(SUM(CASE WHEN origin_time_p95 IS NOT NULL THEN requests END),0) as origin_p95,
+           SUM(origin_time_p99 * requests) / NULLIF(SUM(CASE WHEN origin_time_p99 IS NOT NULL THEN requests END),0) as origin_p99
+    FROM raw_http_hourly WHERE zone_id = ? AND ts >= ? AND ts < ?
+  `).get(scopeId, fromTs, toTs) as Record<string, number | null>;
+
+  // Status code breakdown
+  const statusCodes = db.prepare(`
+    SELECT key as name, SUM(requests) as value FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'status'
+    GROUP BY key ORDER BY value DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ name: string; value: number }>;
+
+  // Top countries
+  const topCountries = db.prepare(`
+    SELECT key as name, SUM(requests) as value FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'country'
+    GROUP BY key ORDER BY value DESC LIMIT 10
+  `).all(scopeId, fromTs, toTs) as Array<{ name: string; value: number }>;
 
   return {
     traffic: {
@@ -240,31 +139,27 @@ function readExecutiveData(
       cacheHitRatio,
     },
     security: {
-      totalThreatsBlocked: stats.get("total_threats_blocked") ?? 0,
-      ddosMitigated: stats.get("ddos_mitigated") ?? 0,
+      totalThreatsBlocked: fwTotals.blocked + fwTotals.challenged,
+      ddosMitigated: ddosRow.cnt,
       topThreatVectors: [],
     },
     performance: {
       ttfb: {
-        avg: stats.get("ttfb_avg") ?? 0,
-        p50: stats.get("ttfb_p50") ?? 0,
-        p95: stats.get("ttfb_p95") ?? 0,
-        p99: stats.get("ttfb_p99") ?? 0,
+        avg: perf.ttfb_avg ?? 0,
+        p50: perf.ttfb_p50 ?? 0,
+        p95: perf.ttfb_p95 ?? 0,
+        p99: perf.ttfb_p99 ?? 0,
       },
       originResponseTime: {
-        avg: stats.get("origin_avg") ?? 0,
-        p50: stats.get("origin_p50") ?? 0,
-        p95: stats.get("origin_p95") ?? 0,
-        p99: stats.get("origin_p99") ?? 0,
+        avg: perf.origin_avg ?? 0,
+        p50: perf.origin_p50 ?? 0,
+        p95: perf.origin_p95 ?? 0,
+        p99: perf.origin_p99 ?? 0,
       },
     },
-    recommendations: recs.map((r) => ({
-      severity: r.severity as "info" | "warning" | "critical",
-      title: r.title,
-      description: r.description,
-    })),
-    statusCodeBreakdown: statusCodes.map((r) => ({ name: r.name, value: r.value })),
-    topCountries: topCountries.map((r) => ({ name: r.name, value: r.value })),
+    recommendations: [],
+    statusCodeBreakdown: statusCodes,
+    topCountries,
     summary: "",
   };
 }
@@ -280,31 +175,30 @@ function readSecurityData(
   fromTs: number,
   toTs: number,
 ): SecurityData | null {
-  // WAF time series from firewall_events_ts
-  const wafRows = db.prepare(
-    `SELECT ts, blocks, challenges, managed_challenges, js_challenges, challenges_solved, logs FROM firewall_events_ts WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{
-    ts: number; blocks: number; challenges: number; managed_challenges: number;
-    js_challenges: number; challenges_solved: number; logs: number;
+  // WAF time series from raw_fw_hourly
+  const wafRows = db.prepare(`
+    SELECT ts, blocked, challenged, managed_challenged, js_challenged, challenge_solved, logged
+    FROM raw_fw_hourly WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{
+    ts: number; blocked: number; challenged: number; managed_challenged: number;
+    js_challenged: number; challenge_solved: number; logged: number;
   }>;
 
-  // Traffic time series from http_requests_ts
-  const trafficRows = db.prepare(
-    `SELECT ts, requests FROM http_requests_ts WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{ ts: number; requests: number }>;
+  // Traffic time series from raw_http_hourly
+  const trafficRows = db.prepare(`
+    SELECT ts, requests FROM raw_http_hourly WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{ ts: number; requests: number }>;
 
-  const stats = getAggStats(db, scopeId, "security", fromTs, toTs);
-
-  if (wafRows.length === 0 && stats.size === 0) return null;
+  if (wafRows.length === 0 && trafficRows.length === 0) return null;
 
   const wafTimeSeries = wafRows.map((r) => ({
     date: epochToIso(r.ts),
-    block: r.blocks,
-    challenge: r.challenges,
-    managed_challenge: r.managed_challenges,
-    js_challenge: r.js_challenges,
-    challenge_solved: r.challenges_solved,
-    log: r.logs,
+    block: r.blocked,
+    challenge: r.challenged,
+    managed_challenge: r.managed_challenged,
+    js_challenge: r.js_challenged,
+    challenge_solved: r.challenge_solved,
+    log: r.logged,
   }));
 
   const trafficTimeSeries = trafficRows.map((r) => ({
@@ -312,69 +206,98 @@ function readSecurityData(
     requests: r.requests,
   }));
 
-  // Derive challenge solve rates from time series
-  const totalChallenged = wafRows.reduce((s, r) => s + r.challenges + r.managed_challenges + r.js_challenges, 0);
-  const totalSolved = wafRows.reduce((s, r) => s + r.challenges_solved, 0);
+  // Challenge solve rates
+  const totalChallenged = wafRows.reduce((s, r) => s + r.challenged + r.managed_challenged + r.js_challenged, 0);
+  const totalSolved = wafRows.reduce((s, r) => s + r.challenge_solved, 0);
 
-  const sourceBreakdown = getTopItems(db, scopeId, "security", "source_breakdown", fromTs, toTs);
-  const topBlockRules = getTopItems(db, scopeId, "security", "top_block_rules", fromTs, toTs);
-  const topAttackingIPs = getTopItems(db, scopeId, "security", "top_attacking_ips", fromTs, toTs);
-  const topAttackingCountries = getTopItems(db, scopeId, "security", "top_attacking_countries", fromTs, toTs);
-  const topAttackingASNs = getTopItems(db, scopeId, "security", "top_attacking_asns", fromTs, toTs);
-  const attackCategories = getTopItems(db, scopeId, "security", "attack_categories", fromTs, toTs);
-  const httpMethods = getTopItems(db, scopeId, "security", "http_methods", fromTs, toTs);
-  const botScoreDist = getTopItems(db, scopeId, "security", "bot_score_distribution", fromTs, toTs);
+  // Source breakdown from raw_fw_dim
+  const sourceBreakdown = db.prepare(`
+    SELECT key as name, SUM(events) as value FROM raw_fw_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'source'
+    GROUP BY key ORDER BY value DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ name: string; value: number }>;
 
-  // Firewall rules from firewall_rules table
-  const rulesCa = getLatestCollectedAt(db, "firewall_rules", "zone_id", scopeId, fromTs, toTs);
-  let topFirewallRules: SecurityData["topFirewallRules"] = [];
-  let topSkipRules: SecurityData["topSkipRules"] = [];
-  let ruleEffectiveness: SecurityData["ruleEffectiveness"] = [];
+  // Firewall rules from raw_fw_dim dim='rule'
+  const ruleRows = db.prepare(`
+    SELECT key as rule_id, SUM(events) as total_hits, detail
+    FROM raw_fw_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'rule'
+    GROUP BY key, detail ORDER BY total_hits DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ rule_id: string; total_hits: number; detail: string | null }>;
 
-  if (rulesCa) {
-    const ruleRows = db.prepare(
-      `SELECT rule_id, rule_name, description, action, total_hits, blocks, challenges, logs, block_rate FROM firewall_rules WHERE zone_id = ? AND collected_at = ? ORDER BY total_hits DESC`,
-    ).all(scopeId, rulesCa) as Array<{
-      rule_id: string; rule_name: string | null; description: string | null;
-      action: string; total_hits: number; blocks: number; challenges: number; logs: number; block_rate: number | null;
-    }>;
+  const topFirewallRules: SecurityData["topFirewallRules"] = [];
+  const topSkipRules: SecurityData["topSkipRules"] = [];
+  const ruleEffectiveness: SecurityData["ruleEffectiveness"] = [];
 
-    for (const r of ruleRows) {
-      const entry = {
-        ruleId: r.rule_id,
-        ruleName: r.rule_name,
-        description: r.description ?? "",
-        action: r.action,
-        count: r.total_hits,
-      };
-      if (r.action === "skip" || r.action === "log") {
-        topSkipRules.push(entry);
-      } else {
-        topFirewallRules.push(entry);
-      }
-      ruleEffectiveness.push({
-        ruleId: r.rule_id,
-        ruleName: r.rule_name,
-        description: r.description ?? "",
-        totalHits: r.total_hits,
-        blocks: r.blocks,
-        challenges: r.challenges,
-        logs: r.logs,
-        blockRate: r.block_rate ?? 0,
-      });
+  for (const r of ruleRows) {
+    const parts = (r.detail ?? "").split("|");
+    const action = parts[0] || "block";
+    const description = parts[1] || "";
+    const entry = {
+      ruleId: r.rule_id,
+      ruleName: description || r.rule_id,
+      description,
+      action,
+      count: r.total_hits,
+    };
+    if (action === "skip" || action === "log") {
+      topSkipRules.push(entry);
+    } else {
+      topFirewallRules.push(entry);
     }
+    ruleEffectiveness.push({
+      ruleId: r.rule_id,
+      ruleName: description || r.rule_id,
+      description,
+      totalHits: r.total_hits,
+      blocks: action === "block" ? r.total_hits : 0,
+      challenges: action.includes("challenge") ? r.total_hits : 0,
+      logs: action === "log" ? r.total_hits : 0,
+      blockRate: action === "block" ? 100 : 0,
+    });
   }
 
-  // Fall back to top_items for rules if table was empty
-  if (topFirewallRules.length === 0) {
-    topFirewallRules = topBlockRules.map((r) => ({
-      ruleId: "",
-      ruleName: r.name,
-      description: "",
-      action: "block",
-      count: r.value,
-    }));
-  }
+  // Top attacking IPs
+  const topAttackingIPs = db.prepare(`
+    SELECT key as ip, SUM(events) as count FROM raw_fw_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'ip'
+    GROUP BY key ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ ip: string; count: number }>;
+
+  // Top attacking countries
+  const topAttackingCountries = db.prepare(`
+    SELECT key as country, SUM(events) as count FROM raw_fw_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'country'
+    GROUP BY key ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ country: string; count: number }>;
+
+  // Top attacking ASNs
+  const topAttackingASNs = db.prepare(`
+    SELECT key as asn, SUM(events) as count, detail as description FROM raw_fw_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'asn'
+    GROUP BY key, detail ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ asn: string; count: number; description: string | null }>;
+
+  // Attack categories (from source dim)
+  const attackCategories = sourceBreakdown.map((r) => ({
+    category: r.name,
+    count: r.value,
+    sources: [] as string[],
+  }));
+
+  // HTTP method breakdown
+  const httpMethods = db.prepare(`
+    SELECT key as method, SUM(events) as count FROM raw_fw_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'method'
+    GROUP BY key ORDER BY count DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ method: string; count: number }>;
+
+  // Bot score distribution from raw_http_dim
+  const botScoreDist = db.prepare(`
+    SELECT key as range, SUM(requests) as count FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'bot_score'
+    GROUP BY key ORDER BY key ASC
+  `).all(scopeId, fromTs, toTs) as Array<{ range: string; count: number }>;
 
   return {
     wafTimeSeries,
@@ -382,25 +305,21 @@ function readSecurityData(
     topFirewallRules,
     topSkipRules,
     sourceBreakdown: sourceBreakdown.map((r) => ({ name: r.name, value: r.value })),
-    botScoreDistribution: botScoreDist.map((r) => ({ range: r.name, count: r.value })),
+    botScoreDistribution: botScoreDist,
     challengeSolveRates: {
-      challenged: totalChallenged || (stats.get("total_threats_blocked") ?? 0),
+      challenged: totalChallenged || wafRows.reduce((s, r) => s + r.blocked, 0),
       solved: totalSolved,
       failed: totalChallenged - totalSolved,
     },
-    topAttackingIPs: topAttackingIPs.map((r) => ({ ip: r.name, count: r.value })),
-    topAttackingCountries: topAttackingCountries.map((r) => ({ country: r.name, count: r.value })),
+    topAttackingIPs,
+    topAttackingCountries,
     topAttackingASNs: topAttackingASNs.map((r) => ({
-      asn: parseInt(r.name, 10) || 0,
-      description: r.detail ?? r.name,
-      count: r.value,
+      asn: parseInt(r.asn, 10) || 0,
+      description: r.description ?? r.asn,
+      count: r.count,
     })),
-    attackCategories: attackCategories.map((r) => ({
-      category: r.name,
-      count: r.value,
-      sources: r.detail ? r.detail.split(",") : [],
-    })),
-    httpMethodBreakdown: httpMethods.map((r) => ({ method: r.name, count: r.value })),
+    attackCategories,
+    httpMethodBreakdown: httpMethods,
     ruleEffectiveness,
   };
 }
@@ -416,30 +335,22 @@ function readTrafficData(
   fromTs: number,
   toTs: number,
 ): TrafficData | null {
-  const tsRows = db.prepare(
-    `SELECT ts, requests, bandwidth, cached_requests, cached_bandwidth, status_4xx, status_5xx FROM http_requests_ts WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{
-    ts: number;
-    requests: number;
-    bandwidth: number;
-    cached_requests: number;
-    cached_bandwidth: number;
-    status_4xx: number;
-    status_5xx: number;
+  const tsRows = db.prepare(`
+    SELECT ts, requests, bytes, cached_requests, cached_bytes,
+           status_4xx, status_5xx
+    FROM raw_http_hourly WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{
+    ts: number; requests: number; bytes: number;
+    cached_requests: number; cached_bytes: number;
+    status_4xx: number; status_5xx: number;
   }>;
 
-  if (tsRows.length === 0) {
-    // No time series – check if any aggregate stats exist as fallback indicator
-    const stats = getAggStats(db, scopeId, "traffic", fromTs, toTs);
-    if (stats.size === 0) return null;
-  }
-
-  const stats = getAggStats(db, scopeId, "traffic", fromTs, toTs);
+  if (tsRows.length === 0) return null;
 
   const timeSeries = tsRows.map((r) => ({
     date: epochToIso(r.ts),
     requests: r.requests,
-    bandwidth: r.bandwidth,
+    bandwidth: r.bytes,
     cachedRequests: r.cached_requests,
   }));
 
@@ -451,42 +362,57 @@ function readTrafficData(
 
   const bandwidthByCache = tsRows.map((r) => ({
     date: epochToIso(r.ts),
-    cached: r.cached_bandwidth,
-    uncached: r.bandwidth - r.cached_bandwidth,
+    cached: r.cached_bytes,
+    uncached: r.bytes - r.cached_bytes,
   }));
 
-  const statusCodes = getTopItems(db, scopeId, "traffic", "status_codes", fromTs, toTs);
-  const topPaths = getTopItems(db, scopeId, "traffic", "top_paths", fromTs, toTs);
-  const topCountries = getTopItems(db, scopeId, "traffic", "top_countries", fromTs, toTs);
-  const contentTypes = getTopItems(db, scopeId, "traffic", "content_types", fromTs, toTs);
+  // Status codes from raw_http_dim
+  const statusCodes = db.prepare(`
+    SELECT key as name, SUM(requests) as value FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'status'
+    GROUP BY key ORDER BY value DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ name: string; value: number }>;
 
-  // Derive totals from time series when available (agg stats only cover the last collection run)
-  const tsTotalRequests = timeSeries.reduce((s, r) => s + r.requests, 0);
-  const tsTotalBandwidth = timeSeries.reduce((s, r) => s + r.bandwidth, 0);
-  const tsCachedRequests = timeSeries.reduce((s, r) => s + r.cachedRequests, 0);
-  const totalRequests = tsTotalRequests || (stats.get("total_requests") ?? 0);
-  const totalBandwidth = tsTotalBandwidth || (stats.get("total_bandwidth") ?? 0);
+  // Top paths
+  const topPaths = db.prepare(`
+    SELECT key as name, SUM(requests) as value FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'path'
+    GROUP BY key ORDER BY value DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ name: string; value: number }>;
 
-  // Derive cache stats from ts when we have actual data points
-  const cacheHit = tsTotalRequests > 0 ? tsCachedRequests : (stats.get("cache_hit") ?? 0);
-  const cacheMiss = tsTotalRequests > 0 ? tsTotalRequests - tsCachedRequests : (stats.get("cache_miss") ?? 0);
-  const cacheTotal = tsTotalRequests > 0 ? tsTotalRequests : (stats.get("cache_total") ?? 0);
-  const cacheRatio = cacheTotal > 0 ? cacheHit / cacheTotal : 0;
+  // Top countries
+  const topCountries = db.prepare(`
+    SELECT key as name, SUM(requests) as value FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'country'
+    GROUP BY key ORDER BY value DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ name: string; value: number }>;
+
+  // Content types
+  const contentTypes = db.prepare(`
+    SELECT key as name, SUM(requests) as value FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'content_type'
+    GROUP BY key ORDER BY value DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ name: string; value: number }>;
+
+  const totalRequests = tsRows.reduce((s, r) => s + r.requests, 0);
+  const totalBandwidth = tsRows.reduce((s, r) => s + r.bytes, 0);
+  const totalCached = tsRows.reduce((s, r) => s + r.cached_requests, 0);
+  const cacheRatio = totalRequests > 0 ? totalCached / totalRequests : 0;
 
   return {
     timeSeries,
-    statusCodes: statusCodes.map((r) => ({ name: r.name, value: r.value })),
-    topPaths: topPaths.map((r) => ({ name: r.name, value: r.value })),
-    topCountries: topCountries.map((r) => ({ name: r.name, value: r.value })),
+    statusCodes,
+    topPaths,
+    topCountries,
     cache: {
-      hit: cacheHit,
-      miss: cacheMiss,
-      total: cacheTotal,
+      hit: totalCached,
+      miss: totalRequests - totalCached,
+      total: totalRequests,
       ratio: cacheRatio,
     },
     totalRequests,
     totalBandwidth,
-    contentTypes: contentTypes.map((r) => ({ name: r.name, value: r.value })),
+    contentTypes,
     errorTrend,
     bandwidthByCache,
   };
@@ -503,91 +429,107 @@ function readPerformanceData(
   fromTs: number,
   toTs: number,
 ): PerformanceData | null {
-  const tsRows = db.prepare(
-    `SELECT ts, avg_ttfb_ms, avg_origin_time_ms, requests FROM http_requests_ts WHERE zone_id = ? AND ts >= ? AND ts < ? AND avg_ttfb_ms IS NOT NULL ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{
-    ts: number;
-    avg_ttfb_ms: number;
-    avg_origin_time_ms: number | null;
-    requests: number;
+  const tsRows = db.prepare(`
+    SELECT ts, requests, ttfb_avg, origin_time_avg
+    FROM raw_http_hourly
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND ttfb_avg IS NOT NULL
+    ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{
+    ts: number; requests: number; ttfb_avg: number; origin_time_avg: number | null;
   }>;
 
-  const stats = getAggStats(db, scopeId, "performance", fromTs, toTs);
-
-  if (tsRows.length === 0 && stats.size === 0) return null;
+  if (tsRows.length === 0) return null;
 
   const timeSeries = tsRows.map((r) => ({
     date: epochToIso(r.ts),
-    avgTtfb: r.avg_ttfb_ms,
-    avgOriginTime: r.avg_origin_time_ms ?? 0,
+    avgTtfb: r.ttfb_avg,
+    avgOriginTime: r.origin_time_avg ?? 0,
     requests: r.requests,
   }));
 
-  // performance_breakdown
-  const perfBreakdownCa = getLatestCollectedAt(db, "performance_breakdown", "zone_id", scopeId, fromTs, toTs);
-  let contentTypePerf: PerformanceData["contentTypePerf"] = [];
-  let countryPerf: PerformanceData["countryPerf"] = [];
-  let coloPerf: PerformanceData["coloPerf"] = [];
+  // Content type performance from raw_http_dim
+  const contentTypeRows = db.prepare(`
+    SELECT key as content_type, SUM(requests) as requests,
+           SUM(ttfb_avg * requests) / NULLIF(SUM(CASE WHEN ttfb_avg IS NOT NULL THEN requests END),0) as avg_ttfb,
+           SUM(origin_avg * requests) / NULLIF(SUM(CASE WHEN origin_avg IS NOT NULL THEN requests END),0) as avg_origin,
+           SUM(bytes) / NULLIF(SUM(CASE WHEN bytes > 0 THEN requests END),0) as avg_bytes
+    FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'content_type'
+    GROUP BY key ORDER BY requests DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{
+    content_type: string; requests: number; avg_ttfb: number | null;
+    avg_origin: number | null; avg_bytes: number | null;
+  }>;
 
-  if (perfBreakdownCa) {
-    const contentTypeRows = db.prepare(
-      `SELECT name, requests, avg_ttfb_ms, avg_origin_time_ms, avg_response_bytes FROM performance_breakdown WHERE zone_id = ? AND collected_at = ? AND dimension = 'content_type'`,
-    ).all(scopeId, perfBreakdownCa) as Array<{
-      name: string;
-      requests: number;
-      avg_ttfb_ms: number | null;
-      avg_origin_time_ms: number | null;
-      avg_response_bytes: number | null;
-    }>;
+  const contentTypePerf = contentTypeRows.map((r) => ({
+    contentType: r.content_type,
+    requests: r.requests,
+    avgTtfb: r.avg_ttfb ?? 0,
+    avgOriginTime: r.avg_origin ?? 0,
+    avgResponseBytes: r.avg_bytes ?? 0,
+  }));
 
-    contentTypePerf = contentTypeRows.map((r) => ({
-      contentType: r.name,
-      requests: r.requests,
-      avgTtfb: r.avg_ttfb_ms ?? 0,
-      avgOriginTime: r.avg_origin_time_ms ?? 0,
-      avgResponseBytes: r.avg_response_bytes ?? 0,
-    }));
+  // Country performance
+  const countryRows = db.prepare(`
+    SELECT key as country, SUM(requests) as requests,
+           SUM(ttfb_avg * requests) / NULLIF(SUM(CASE WHEN ttfb_avg IS NOT NULL THEN requests END),0) as avg_ttfb,
+           SUM(origin_avg * requests) / NULLIF(SUM(CASE WHEN origin_avg IS NOT NULL THEN requests END),0) as avg_origin
+    FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'country'
+    GROUP BY key ORDER BY requests DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{
+    country: string; requests: number; avg_ttfb: number | null; avg_origin: number | null;
+  }>;
 
-    const countryRows = db.prepare(
-      `SELECT name, requests, avg_ttfb_ms, avg_origin_time_ms FROM performance_breakdown WHERE zone_id = ? AND collected_at = ? AND dimension = 'country'`,
-    ).all(scopeId, perfBreakdownCa) as Array<{
-      name: string;
-      requests: number;
-      avg_ttfb_ms: number | null;
-      avg_origin_time_ms: number | null;
-    }>;
+  const countryPerf = countryRows.map((r) => ({
+    country: r.country,
+    requests: r.requests,
+    avgTtfb: r.avg_ttfb ?? 0,
+    avgOriginTime: r.avg_origin ?? 0,
+  }));
 
-    countryPerf = countryRows.map((r) => ({
-      country: r.name,
-      requests: r.requests,
-      avgTtfb: r.avg_ttfb_ms ?? 0,
-      avgOriginTime: r.avg_origin_time_ms ?? 0,
-    }));
+  // Colo performance
+  const coloRows = db.prepare(`
+    SELECT key as colo, SUM(requests) as requests,
+           SUM(ttfb_avg * requests) / NULLIF(SUM(CASE WHEN ttfb_avg IS NOT NULL THEN requests END),0) as avg_ttfb
+    FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'colo'
+    GROUP BY key ORDER BY requests DESC LIMIT 30
+  `).all(scopeId, fromTs, toTs) as Array<{ colo: string; requests: number; avg_ttfb: number | null }>;
 
-    const coloRows = db.prepare(
-      `SELECT name, city, country, requests, avg_ttfb_ms FROM performance_breakdown WHERE zone_id = ? AND collected_at = ? AND dimension = 'colo'`,
-    ).all(scopeId, perfBreakdownCa) as Array<{
-      name: string;
-      city: string | null;
-      country: string | null;
-      requests: number;
-      avg_ttfb_ms: number | null;
-    }>;
+  const coloPerf = coloRows.map((r) => ({
+    colo: r.colo,
+    city: "",
+    country: "",
+    requests: r.requests,
+    avgTtfb: r.avg_ttfb ?? 0,
+  }));
 
-    coloPerf = coloRows.map((r) => ({
-      colo: r.name,
-      city: r.city ?? "",
-      country: r.country ?? "",
-      requests: r.requests,
-      avgTtfb: r.avg_ttfb_ms ?? 0,
-    }));
-  }
+  // Protocol distribution from raw_http_dim dim='http_proto'
+  const protoRows = db.prepare(`
+    SELECT key as protocol, SUM(requests) as requests FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'http_proto'
+    GROUP BY key ORDER BY requests DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ protocol: string; requests: number }>;
 
-  const protocolRows = getProtocolDistribution(db, scopeId, "performance", "http_protocol", fromTs, toTs);
-  const protocolDistribution = protocolRows.map((r) => ({
-    protocol: r.name,
+  const protocolDistribution = protoRows.map((r) => ({
+    protocol: r.protocol,
     requests: r.requests,
   }));
+
+  // Aggregate stats
+  const totalRequests = tsRows.reduce((s, r) => s + r.requests, 0);
+  const totalBytes = db.prepare(`
+    SELECT COALESCE(SUM(bytes),0) as b FROM raw_http_hourly WHERE zone_id = ? AND ts >= ? AND ts < ?
+  `).get(scopeId, fromTs, toTs) as { b: number };
+
+  const aggPerf = db.prepare(`
+    SELECT SUM(ttfb_avg * requests) / NULLIF(SUM(CASE WHEN ttfb_avg IS NOT NULL THEN requests END),0) as avg_ttfb,
+           SUM(ttfb_p95 * requests) / NULLIF(SUM(CASE WHEN ttfb_p95 IS NOT NULL THEN requests END),0) as p95_ttfb,
+           SUM(origin_time_avg * requests) / NULLIF(SUM(CASE WHEN origin_time_avg IS NOT NULL THEN requests END),0) as avg_origin,
+           SUM(origin_time_p95 * requests) / NULLIF(SUM(CASE WHEN origin_time_p95 IS NOT NULL THEN requests END),0) as p95_origin
+    FROM raw_http_hourly WHERE zone_id = ? AND ts >= ? AND ts < ?
+  `).get(scopeId, fromTs, toTs) as Record<string, number | null>;
 
   return {
     timeSeries,
@@ -596,12 +538,12 @@ function readPerformanceData(
     protocolDistribution,
     coloPerf,
     stats: {
-      totalRequests: stats.get("total_requests") ?? 0,
-      avgTtfb: stats.get("avg_ttfb") ?? 0,
-      p95Ttfb: stats.get("p95_ttfb") ?? 0,
-      avgOriginTime: stats.get("avg_origin_time") ?? 0,
-      p95OriginTime: stats.get("p95_origin_time") ?? 0,
-      totalBytes: stats.get("total_bytes") ?? 0,
+      totalRequests,
+      avgTtfb: aggPerf.avg_ttfb ?? 0,
+      p95Ttfb: aggPerf.p95_ttfb ?? 0,
+      avgOriginTime: aggPerf.avg_origin ?? 0,
+      p95OriginTime: aggPerf.p95_origin ?? 0,
+      totalBytes: totalBytes.b,
     },
   };
 }
@@ -617,21 +559,28 @@ function readDnsData(
   fromTs: number,
   toTs: number,
 ): DnsData | null {
-  const tsRows = db.prepare(
-    `SELECT ts, query_type, count FROM dns_queries_ts WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{ ts: number; query_type: string; count: number }>;
-
-  const stats = getAggStats(db, scopeId, "dns", fromTs, toTs);
+  // Query volume by type from raw_dns_dim
+  const dimRows = db.prepare(`
+    SELECT ts, key as query_type, SUM(queries) as count FROM raw_dns_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'query_type'
+    GROUP BY ts, key ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{ ts: number; query_type: string; count: number }>;
 
   const recordsCa = getLatestCollectedAt(db, "dns_records", "zone_id", scopeId, fromTs, toTs);
 
-  if (tsRows.length === 0 && stats.size === 0 && !recordsCa) return null;
+  // Total queries from raw_dns_hourly
+  const totalRow = db.prepare(`
+    SELECT COALESCE(SUM(queries),0) as total FROM raw_dns_hourly
+    WHERE zone_id = ? AND ts >= ? AND ts < ?
+  `).get(scopeId, fromTs, toTs) as { total: number };
 
-  // Build time series pivot: group by ts, pivot query_type → columns
+  if (dimRows.length === 0 && totalRow.total === 0 && !recordsCa) return null;
+
+  // Build time series pivot
   const tsMap = new Map<number, Record<string, number>>();
   const queryTypeSet = new Set<string>();
 
-  for (const row of tsRows) {
+  for (const row of dimRows) {
     if (!tsMap.has(row.ts)) tsMap.set(row.ts, {});
     const pt = tsMap.get(row.ts)!;
     pt[row.query_type] = (pt[row.query_type] || 0) + row.count;
@@ -644,22 +593,29 @@ function readDnsData(
 
   const queryTypes = Array.from(queryTypeSet).sort();
 
-  // DNS records
+  // Response code breakdown
+  const responseCodeBreakdown = db.prepare(`
+    SELECT key as name, SUM(queries) as value FROM raw_dns_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'response_code'
+    GROUP BY key ORDER BY value DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ name: string; value: number }>;
+
+  // Top queried records
+  const topQueriedRecords = db.prepare(`
+    SELECT key as name, SUM(queries) as count FROM raw_dns_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'query_name'
+    GROUP BY key ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ name: string; count: number }>;
+
+  // DNS records from snapshot table
   let dnsRecords: DnsData["dnsRecords"] = [];
   if (recordsCa) {
     const rows = db.prepare(
       `SELECT record_id, name, type, content, ttl, proxied, query_count, has_nxdomain, status, days_since_modified FROM dns_records WHERE zone_id = ? AND collected_at = ?`,
     ).all(scopeId, recordsCa) as Array<{
-      record_id: string;
-      name: string;
-      type: string;
-      content: string | null;
-      ttl: number | null;
-      proxied: number | null;
-      query_count: number;
-      has_nxdomain: number;
-      status: string | null;
-      days_since_modified: number | null;
+      record_id: string; name: string; type: string; content: string | null;
+      ttl: number | null; proxied: number | null; query_count: number;
+      has_nxdomain: number; status: string | null; days_since_modified: number | null;
     }>;
 
     dnsRecords = rows.map((r) => ({
@@ -676,12 +632,12 @@ function readDnsData(
     }));
   }
 
-  const responseCodeBreakdown = getTopItems(db, scopeId, "dns", "response_codes", fromTs, toTs);
-  const topQueriedRaw = getTopItems(db, scopeId, "dns", "top_queried_records", fromTs, toTs);
-  const nxdomainRaw = getTopItems(db, scopeId, "dns", "nxdomain_hotspots", fromTs, toTs);
-
-  const topQueriedRecords = topQueriedRaw.map((r) => ({ name: r.name, count: r.value }));
-  const nxdomainHotspots = nxdomainRaw.map((r) => ({ name: r.name, count: r.value }));
+  // NXDOMAIN hotspots from response_code dim
+  const nxdomainHotspots = db.prepare(`
+    SELECT key as name, SUM(queries) as count FROM raw_dns_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'response_code' AND key = 'NXDOMAIN'
+    GROUP BY key
+  `).all(scopeId, fromTs, toTs) as Array<{ name: string; count: number }>;
 
   // Derive stale records
   const staleRecords = buildStaleRecordSummary(dnsRecords);
@@ -689,17 +645,12 @@ function readDnsData(
   return {
     queryVolumeByType,
     queryTypes,
-    responseCodeBreakdown: responseCodeBreakdown.map((r) => ({ name: r.name, value: r.value })),
+    responseCodeBreakdown,
     dnsRecords,
     topQueriedRecords,
     nxdomainHotspots,
-    totalQueries: stats.get("total_queries") ?? 0,
-    latency: {
-      avg: stats.get("latency_avg") ?? 0,
-      p50: stats.get("latency_p50") ?? 0,
-      p90: stats.get("latency_p90") ?? 0,
-      p99: stats.get("latency_p99") ?? 0,
-    },
+    totalQueries: totalRow.total,
+    latency: { avg: 0, p50: 0, p90: 0, p99: 0 },
     staleRecords,
   };
 }
@@ -739,59 +690,69 @@ function readOriginHealthData(
   fromTs: number,
   toTs: number,
 ): OriginHealthData | null {
-  const tsRows = db.prepare(
-    `SELECT ts, requests, avg_response_time_ms, error_rate FROM origin_health_ts WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{
-    ts: number;
-    requests: number;
-    avg_response_time_ms: number | null;
-    error_rate: number | null;
+  // Origin response time series from raw_http_hourly
+  const tsRows = db.prepare(`
+    SELECT ts, requests, origin_time_avg,
+           CASE WHEN requests > 0 THEN CAST(status_5xx AS REAL) / requests ELSE 0 END as error_rate
+    FROM raw_http_hourly
+    WHERE zone_id = ? AND ts >= ? AND ts < ?
+    ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{
+    ts: number; requests: number; origin_time_avg: number | null; error_rate: number;
   }>;
 
-  const stats = getAggStats(db, scopeId, "origin-health", fromTs, toTs);
+  const healthChecksCa = getLatestCollectedAt(db, "health_checks", "zone_id", scopeId, fromTs, toTs);
 
-  if (tsRows.length === 0 && stats.size === 0) return null;
+  // Health events from raw_health_events
+  const healthEventRows = db.prepare(`
+    SELECT ts, name, origin_ip, status, response_status, rtt_ms, failure_reason, region
+    FROM raw_health_events
+    WHERE zone_id = ? AND ts >= ? AND ts < ?
+    ORDER BY ts DESC LIMIT 500
+  `).all(scopeId, fromTs, toTs) as Array<{
+    ts: number; name: string; origin_ip: string; status: string;
+    response_status: number | null; rtt_ms: number | null;
+    failure_reason: string | null; region: string | null;
+  }>;
+
+  if (tsRows.length === 0 && !healthChecksCa && healthEventRows.length === 0) return null;
 
   const timeSeries = tsRows.map((r) => ({
     date: epochToIso(r.ts),
-    avgResponseTime: r.avg_response_time_ms ?? 0,
+    avgResponseTime: r.origin_time_avg ?? 0,
     requests: r.requests,
-    errorRate: r.error_rate ?? 0,
+    errorRate: r.error_rate,
   }));
 
-  // origin_status_breakdown
-  const statusCa = getLatestCollectedAt(db, "origin_status_breakdown", "zone_id", scopeId, fromTs, toTs);
-  let statusBreakdown: OriginHealthData["statusBreakdown"] = [];
-  if (statusCa) {
-    const rows = db.prepare(
-      `SELECT status_code, status_group, requests, avg_response_time_ms FROM origin_status_breakdown WHERE zone_id = ? AND collected_at = ?`,
-    ).all(scopeId, statusCa) as Array<{
-      status_code: number;
-      status_group: string;
-      requests: number;
-      avg_response_time_ms: number | null;
-    }>;
+  // Origin status breakdown from raw_http_dim dim='origin_status'
+  const statusRows = db.prepare(`
+    SELECT key as status_code, SUM(requests) as requests,
+           SUM(origin_avg * requests) / NULLIF(SUM(CASE WHEN origin_avg IS NOT NULL THEN requests END),0) as avg_origin
+    FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'origin_status'
+    GROUP BY key ORDER BY requests DESC
+  `).all(scopeId, fromTs, toTs) as Array<{
+    status_code: string; requests: number; avg_origin: number | null;
+  }>;
 
-    statusBreakdown = rows.map((r) => ({
-      status: r.status_code,
-      statusGroup: r.status_group,
+  const statusBreakdown = statusRows.map((r) => {
+    const code = parseInt(r.status_code, 10) || 0;
+    const group = code < 200 ? "1xx" : code < 300 ? "2xx" : code < 400 ? "3xx" : code < 500 ? "4xx" : "5xx";
+    return {
+      status: code,
+      statusGroup: group,
       requests: r.requests,
-      avgResponseTime: r.avg_response_time_ms ?? 0,
-    }));
-  }
+      avgResponseTime: r.avg_origin ?? 0,
+    };
+  });
 
-  // health_checks
-  const healthChecksCa = getLatestCollectedAt(db, "health_checks", "zone_id", scopeId, fromTs, toTs);
+  // Health checks from snapshot table
   let healthChecks: OriginHealthData["healthChecks"] = [];
   if (healthChecksCa) {
     const rows = db.prepare(
       `SELECT name, status, address, type, interval_sec FROM health_checks WHERE zone_id = ? AND collected_at = ?`,
     ).all(scopeId, healthChecksCa) as Array<{
-      name: string;
-      status: string;
-      address: string | null;
-      type: string | null;
-      interval_sec: number | null;
+      name: string; status: string; address: string | null; type: string | null; interval_sec: number | null;
     }>;
 
     healthChecks = rows.map((r) => ({
@@ -803,34 +764,27 @@ function readOriginHealthData(
     }));
   }
 
-  // health_events
-  const healthEventsCa = getLatestCollectedAt(db, "health_events", "zone_id", scopeId, fromTs, toTs);
-  let healthEvents: OriginHealthData["healthEvents"] = [];
-  if (healthEventsCa) {
-    const rows = db.prepare(
-      `SELECT event_time, name, status, origin_ip, response_status, rtt_ms, failure_reason, region FROM health_events WHERE zone_id = ? AND collected_at = ? ORDER BY event_time DESC`,
-    ).all(scopeId, healthEventsCa) as Array<{
-      event_time: number;
-      name: string;
-      status: string;
-      origin_ip: string | null;
-      response_status: number | null;
-      rtt_ms: number | null;
-      failure_reason: string | null;
-      region: string | null;
-    }>;
+  // Health events from raw_health_events
+  const healthEvents = healthEventRows.map((r) => ({
+    datetime: epochToIso(r.ts),
+    name: r.name,
+    status: r.status,
+    originIp: r.origin_ip ?? "",
+    responseStatus: r.response_status ?? 0,
+    rttMs: r.rtt_ms ?? 0,
+    failureReason: r.failure_reason ?? "",
+    region: r.region ?? "",
+  }));
 
-    healthEvents = rows.map((r) => ({
-      datetime: epochToIso(r.event_time),
-      name: r.name,
-      status: r.status,
-      originIp: r.origin_ip ?? "",
-      responseStatus: r.response_status ?? 0,
-      rttMs: r.rtt_ms ?? 0,
-      failureReason: r.failure_reason ?? "",
-      region: r.region ?? "",
-    }));
-  }
+  // Aggregate stats
+  const totalRequests = tsRows.reduce((s, r) => s + r.requests, 0);
+  const totalStatus5xx = db.prepare(`
+    SELECT COALESCE(SUM(status_5xx),0) as cnt FROM raw_http_hourly
+    WHERE zone_id = ? AND ts >= ? AND ts < ?
+  `).get(scopeId, fromTs, toTs) as { cnt: number };
+  const avgResponseTime = tsRows.length > 0
+    ? tsRows.reduce((s, r) => s + (r.origin_time_avg ?? 0) * r.requests, 0) / Math.max(totalRequests, 1)
+    : 0;
 
   return {
     statusBreakdown,
@@ -839,11 +793,11 @@ function readOriginHealthData(
     healthEvents,
     hasHealthChecks: healthChecks.length > 0,
     stats: {
-      totalRequests: stats.get("total_requests") ?? 0,
-      avgResponseTime: stats.get("avg_response_time") ?? 0,
-      p95ResponseTime: stats.get("p95_response_time") ?? 0,
-      errorRate5xx: stats.get("error_rate_5xx") ?? 0,
-      originStatuses: stats.get("origin_statuses") ?? 0,
+      totalRequests,
+      avgResponseTime,
+      p95ResponseTime: 0,
+      errorRate5xx: totalRequests > 0 ? totalStatus5xx.cnt / totalRequests : 0,
+      originStatuses: statusRows.length,
     },
   };
 }
@@ -859,48 +813,50 @@ function readSslData(
   fromTs: number,
   toTs: number,
 ): SslData | null {
-  const tlsVersions = getProtocolDistribution(db, scopeId, "ssl", "tls_version", fromTs, toTs);
-  const httpProtocols = getProtocolDistribution(db, scopeId, "ssl", "http_protocol", fromTs, toTs);
-  const matrixRows = getProtocolDistribution(db, scopeId, "ssl", "tls_http_matrix", fromTs, toTs);
+  // TLS versions from raw_http_dim dim='ssl_proto'
+  const tlsVersionRows = db.prepare(`
+    SELECT key as version, SUM(requests) as requests FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'ssl_proto'
+    GROUP BY key ORDER BY requests DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ version: string; requests: number }>;
 
-  const stats = getAggStats(db, scopeId, "ssl", fromTs, toTs);
+  // HTTP protocols from raw_http_dim dim='http_proto'
+  const httpProtoRows = db.prepare(`
+    SELECT key as protocol, SUM(requests) as requests FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'http_proto'
+    GROUP BY key ORDER BY requests DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ protocol: string; requests: number }>;
 
   const certsCa = getLatestCollectedAt(db, "ssl_certificates", "zone_id", scopeId, fromTs, toTs);
   const settingsCa = getLatestCollectedAt(db, "ssl_settings", "zone_id", scopeId, fromTs, toTs);
 
+  // Encryption time series from raw_http_overview_hourly
+  const encRows = db.prepare(`
+    SELECT ts, requests, encrypted_requests FROM raw_http_overview_hourly
+    WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{ ts: number; requests: number; encrypted_requests: number }>;
+
   if (
-    tlsVersions.length === 0 &&
-    httpProtocols.length === 0 &&
-    stats.size === 0 &&
-    !certsCa &&
-    !settingsCa
+    tlsVersionRows.length === 0 &&
+    httpProtoRows.length === 0 &&
+    !certsCa && !settingsCa &&
+    encRows.length === 0
   ) {
     return null;
   }
 
-  const protocolMatrix = matrixRows.map((r) => {
-    const parts = r.name.split("+");
-    return {
-      tlsVersion: parts[0] || r.name,
-      httpProtocol: parts[1] || "",
-      requests: r.requests,
-    };
-  });
+  // Protocol matrix – cross product approximation (no direct matrix in raw data)
+  const protocolMatrix: SslData["protocolMatrix"] = [];
 
-  // Certificates
+  // Certificates from snapshot table
   let certificates: SslData["certificates"] = [];
   if (certsCa) {
     const rows = db.prepare(
       `SELECT cert_id, type, hosts, status, authority, validity_days, expires_on, signature_algorithms FROM ssl_certificates WHERE zone_id = ? AND collected_at = ?`,
     ).all(scopeId, certsCa) as Array<{
-      cert_id: string;
-      type: string;
-      hosts: string;
-      status: string;
-      authority: string | null;
-      validity_days: number | null;
-      expires_on: string | null;
-      signature_algorithms: string | null;
+      cert_id: string; type: string; hosts: string; status: string;
+      authority: string | null; validity_days: number | null;
+      expires_on: string | null; signature_algorithms: string | null;
     }>;
 
     certificates = rows.map((r) => {
@@ -922,17 +878,11 @@ function readSslData(
     });
   }
 
-  // SSL settings
+  // SSL settings from snapshot table
   const defaultSettings: SslData["settings"] = {
-    mode: "unknown",
-    minTlsVersion: "unknown",
-    tls13: "off",
-    alwaysUseHttps: false,
-    autoHttpsRewrites: false,
-    opportunisticEncryption: false,
-    zeroRtt: false,
-    http2: false,
-    http3: false,
+    mode: "unknown", minTlsVersion: "unknown", tls13: "off",
+    alwaysUseHttps: false, autoHttpsRewrites: false, opportunisticEncryption: false,
+    zeroRtt: false, http2: false, http3: false,
   };
   let settings: SslData["settings"] = defaultSettings;
 
@@ -940,15 +890,10 @@ function readSslData(
     const row = db.prepare(
       `SELECT mode, min_tls_version, tls13_enabled, always_use_https, auto_https_rewrites, opportunistic_encryption, zero_rtt, http2_enabled, http3_enabled FROM ssl_settings WHERE zone_id = ? AND collected_at = ? LIMIT 1`,
     ).get(scopeId, settingsCa) as {
-      mode: string | null;
-      min_tls_version: string | null;
-      tls13_enabled: number | null;
-      always_use_https: number | null;
-      auto_https_rewrites: number | null;
-      opportunistic_encryption: number | null;
-      zero_rtt: number | null;
-      http2_enabled: number | null;
-      http3_enabled: number | null;
+      mode: string | null; min_tls_version: string | null; tls13_enabled: number | null;
+      always_use_https: number | null; auto_https_rewrites: number | null;
+      opportunistic_encryption: number | null; zero_rtt: number | null;
+      http2_enabled: number | null; http3_enabled: number | null;
     } | undefined;
 
     if (row) {
@@ -966,15 +911,6 @@ function readSslData(
     }
   }
 
-  // Encryption time series from http_requests_ts
-  const encRows = db.prepare(
-    `SELECT ts, encrypted_requests, requests FROM http_requests_ts WHERE zone_id = ? AND ts >= ? AND ts < ? AND encrypted_requests IS NOT NULL ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{
-    ts: number;
-    encrypted_requests: number;
-    requests: number;
-  }>;
-
   const encryptionTimeSeries = encRows.map((r) => ({
     date: epochToIso(r.ts),
     encryptedRequests: r.encrypted_requests,
@@ -982,20 +918,27 @@ function readSslData(
     encryptedRatio: r.requests > 0 ? r.encrypted_requests / r.requests : 0,
   }));
 
+  // Stats
+  const totalRequests = tlsVersionRows.reduce((s, r) => s + r.requests, 0) ||
+    encRows.reduce((s, r) => s + r.requests, 0);
+  const totalEncrypted = encRows.reduce((s, r) => s + r.encrypted_requests, 0);
+  const tlsv13 = tlsVersionRows.find((r) => r.version === "TLSv1.3");
+  const http3 = httpProtoRows.find((r) => r.protocol === "HTTP/3");
+
   return {
-    tlsVersions: tlsVersions.map((r) => ({ version: r.name, requests: r.requests })),
-    httpProtocols: httpProtocols.map((r) => ({ protocol: r.name, requests: r.requests })),
+    tlsVersions: tlsVersionRows.map((r) => ({ version: r.version, requests: r.requests })),
+    httpProtocols: httpProtoRows.map((r) => ({ protocol: r.protocol, requests: r.requests })),
     protocolMatrix,
     certificates,
     settings,
     encryptionTimeSeries,
     stats: {
-      totalRequests: stats.get("total_requests") ?? 0,
-      encryptedRequests: stats.get("encrypted_requests") ?? 0,
-      encryptedPercent: stats.get("encrypted_percent") ?? 0,
-      tlsv13Percent: stats.get("tlsv13_percent") ?? 0,
-      http3Percent: stats.get("http3_percent") ?? 0,
-      certCount: stats.get("cert_count") ?? certificates.length,
+      totalRequests,
+      encryptedRequests: totalEncrypted,
+      encryptedPercent: totalRequests > 0 ? (totalEncrypted / totalRequests) * 100 : 0,
+      tlsv13Percent: totalRequests > 0 && tlsv13 ? (tlsv13.requests / totalRequests) * 100 : 0,
+      http3Percent: totalRequests > 0 && http3 ? (http3.requests / totalRequests) * 100 : 0,
+      certCount: certificates.length,
     },
   };
 }
@@ -1011,78 +954,103 @@ function readBotData(
   fromTs: number,
   toTs: number,
 ): BotData | null {
-  // bot_score_distribution
-  const botScoreCa = (() => {
-    let row: { ca: number | null } | undefined;
-    if (fromTs && toTs) {
-      row = db.prepare(
-        `SELECT MAX(collected_at) as ca FROM bot_score_distribution WHERE scope_id = ? AND collected_at >= ? AND collected_at <= ?`,
-      ).get(scopeId, fromTs, toTs) as { ca: number | null } | undefined;
+  // Bot score distribution from raw_http_dim dim='bot_score'
+  const botScoreRows = db.prepare(`
+    SELECT key as range, SUM(requests) as count FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'bot_score'
+    GROUP BY key ORDER BY key ASC
+  `).all(scopeId, fromTs, toTs) as Array<{ range: string; count: number }>;
+
+  // Bot decisions from raw_http_dim dim='bot_decision'
+  const botDecisions = db.prepare(`
+    SELECT key as name, SUM(requests) as value FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'bot_decision'
+    GROUP BY key ORDER BY value DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ name: string; value: number }>;
+
+  // Verified bot categories from raw_http_dim dim='verified_bot'
+  const verifiedBotCats = db.prepare(`
+    SELECT key as category, SUM(requests) as count FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'verified_bot'
+    GROUP BY key ORDER BY count DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ category: string; count: number }>;
+
+  if (botScoreRows.length === 0 && botDecisions.length === 0) return null;
+
+  // Bot time series from bot_decision dim
+  const botTsRows = db.prepare(`
+    SELECT ts, key, SUM(requests) as requests FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'bot_decision'
+    GROUP BY ts, key ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{ ts: number; key: string; requests: number }>;
+
+  // Build bot trend time series
+  const botTsMap = new Map<number, { verified: number; unverified: number; human: number; automated: number; total: number }>();
+  for (const r of botTsRows) {
+    if (!botTsMap.has(r.ts)) {
+      botTsMap.set(r.ts, { verified: 0, unverified: 0, human: 0, automated: 0, total: 0 });
     }
-    if (!row?.ca) {
-      row = db.prepare(
-        `SELECT MAX(collected_at) as ca FROM bot_score_distribution WHERE scope_id = ?`,
-      ).get(scopeId) as { ca: number | null } | undefined;
+    const entry = botTsMap.get(r.ts)!;
+    entry.total += r.requests;
+    const key = r.key.toLowerCase();
+    if (key.includes("verified") && !key.includes("not")) {
+      entry.verified += r.requests;
+    } else if (key.includes("not") || key.includes("unverified")) {
+      entry.unverified += r.requests;
+      entry.automated += r.requests;
+    } else if (key.includes("human") || key.includes("likely_human")) {
+      entry.human += r.requests;
+    } else {
+      entry.automated += r.requests;
     }
-    return row?.ca ?? null;
-  })();
-
-  const stats = getAggStats(db, scopeId, "bots", fromTs, toTs);
-
-  const tsRows = db.prepare(
-    `SELECT ts, automated, verified_bot, unverified_bot, human, total FROM bot_traffic_ts WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{
-    ts: number;
-    automated: number;
-    verified_bot: number;
-    unverified_bot: number;
-    human: number;
-    total: number;
-  }>;
-
-  if (!botScoreCa && stats.size === 0 && tsRows.length === 0) return null;
-
-  let botScoreDistribution: BotData["botScoreDistribution"] = [];
-  if (botScoreCa) {
-    const rows = db.prepare(
-      `SELECT range_start, range_end, count FROM bot_score_distribution WHERE scope_id = ? AND collected_at = ? ORDER BY range_start ASC`,
-    ).all(scopeId, botScoreCa) as Array<{ range_start: number; range_end: number; count: number }>;
-
-    botScoreDistribution = rows.map((r) => ({
-      range: `${r.range_start}-${r.range_end}`,
-      count: r.count,
-    }));
   }
 
-  const botDecisions = getTopItems(db, scopeId, "bots", "bot_decisions", fromTs, toTs);
-  const topBotUserAgents = getTopItems(db, scopeId, "bots", "top_bot_user_agents", fromTs, toTs);
-  const botRequestsByPath = getTopItems(db, scopeId, "bots", "bot_requests_by_path", fromTs, toTs);
-  const verifiedBotCategories = getTopItems(db, scopeId, "bots", "verified_bot_categories", fromTs, toTs);
+  const botTrend = Array.from(botTsMap.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([ts, d]) => ({
+      date: epochToIso(ts),
+      verified: d.verified,
+      unverified: d.unverified,
+      human: d.human,
+    }));
 
-  const automatedTrafficOverTime = tsRows.map((r) => ({
-    date: epochToIso(r.ts),
-    automated: r.automated,
-    total: r.total,
-    percentage: r.total > 0 ? (r.automated / r.total) * 100 : 0,
-  }));
+  const automatedTrafficOverTime = Array.from(botTsMap.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([ts, d]) => ({
+      date: epochToIso(ts),
+      automated: d.automated,
+      total: d.total,
+      percentage: d.total > 0 ? (d.automated / d.total) * 100 : 0,
+    }));
 
-  const botTrend = tsRows.map((r) => ({
-    date: epochToIso(r.ts),
-    verified: r.verified_bot,
-    unverified: r.unverified_bot,
-    human: r.human,
-  }));
+  // Bot user agents from raw_fw_dim dim='ua'
+  const topBotUserAgents = db.prepare(`
+    SELECT key as userAgent, SUM(events) as count FROM raw_fw_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'ua'
+    GROUP BY key ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ userAgent: string; count: number }>;
+
+  // Bot requests by path – derived from firewall paths
+  const botRequestsByPath = db.prepare(`
+    SELECT key as path, SUM(events) as count FROM raw_fw_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'path'
+    GROUP BY key ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ path: string; count: number }>;
+
+  // Totals
+  const verifiedTotal = botDecisions.filter((d) => d.name.toLowerCase().includes("verified") && !d.name.toLowerCase().includes("not")).reduce((s, d) => s + d.value, 0);
+  const unverifiedTotal = botDecisions.filter((d) => d.name.toLowerCase().includes("not") || d.name.toLowerCase().includes("unverified")).reduce((s, d) => s + d.value, 0);
 
   return {
-    botScoreDistribution,
-    botManagementDecisions: botDecisions.map((r) => ({ name: r.name, value: r.value })),
+    botScoreDistribution: botScoreRows,
+    botManagementDecisions: botDecisions,
     automatedTrafficOverTime,
-    topBotUserAgents: topBotUserAgents.map((r) => ({ userAgent: r.name, count: r.value })),
-    botRequestsByPath: botRequestsByPath.map((r) => ({ path: r.name, count: r.value })),
-    verifiedBotCategories: verifiedBotCategories.map((r) => ({ category: r.name, count: r.value })),
+    topBotUserAgents,
+    botRequestsByPath,
+    verifiedBotCategories: verifiedBotCats,
     botTrend,
-    verifiedBotTotal: stats.get("verified_bot_total") ?? 0,
-    unverifiedBotTotal: stats.get("unverified_bot_total") ?? 0,
+    verifiedBotTotal: verifiedTotal,
+    unverifiedBotTotal: unverifiedTotal,
   };
 }
 
@@ -1099,28 +1067,15 @@ function readApiShieldData(
 ): ApiShieldData | null {
   const opsCa = getLatestCollectedAt(db, "api_operations", "zone_id", scopeId, fromTs, toTs);
   const discCa = getLatestCollectedAt(db, "api_discovered_endpoints", "zone_id", scopeId, fromTs, toTs);
-  const stats = getAggStats(db, scopeId, "api-shield", fromTs, toTs);
 
-  const tsRows = db.prepare(
-    `SELECT ts, authenticated, unauthenticated FROM api_session_ts WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{
-    ts: number;
-    authenticated: number;
-    unauthenticated: number;
-  }>;
-
-  if (!opsCa && !discCa && stats.size === 0 && tsRows.length === 0) return null;
+  if (!opsCa && !discCa) return null;
 
   let managedOperations: ApiShieldData["managedOperations"] = [];
   if (opsCa) {
     const rows = db.prepare(
       `SELECT operation_id, method, host, endpoint, last_updated FROM api_operations WHERE zone_id = ? AND collected_at = ?`,
     ).all(scopeId, opsCa) as Array<{
-      operation_id: string;
-      method: string;
-      host: string | null;
-      endpoint: string;
-      last_updated: string | null;
+      operation_id: string; method: string; host: string | null; endpoint: string; last_updated: string | null;
     }>;
 
     managedOperations = rows.map((r) => ({
@@ -1137,11 +1092,7 @@ function readApiShieldData(
     const rows = db.prepare(
       `SELECT method, host, endpoint, state, avg_requests_per_hour FROM api_discovered_endpoints WHERE zone_id = ? AND collected_at = ?`,
     ).all(scopeId, discCa) as Array<{
-      method: string;
-      host: string | null;
-      endpoint: string;
-      state: string | null;
-      avg_requests_per_hour: number | null;
+      method: string; host: string | null; endpoint: string; state: string | null; avg_requests_per_hour: number | null;
     }>;
 
     discoveredEndpoints = rows.map((r) => ({
@@ -1153,46 +1104,40 @@ function readApiShieldData(
     }));
   }
 
-  const methodDistRows = getTopItems(db, scopeId, "api-shield", "method_distribution", fromTs, toTs);
-  const topEndpointRows = getTopItems(db, scopeId, "api-shield", "top_endpoint_traffic", fromTs, toTs);
+  // Method distribution from raw_http_dim
+  const methodDist = db.prepare(`
+    SELECT key as method, SUM(requests) as count FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'method'
+    GROUP BY key ORDER BY count DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ method: string; count: number }>;
 
-  const topEndpointTraffic = topEndpointRows.map((r) => {
-    // parse detail "4xx:N,5xx:N"
-    let status4xx = 0;
-    let status5xx = 0;
-    if (r.detail) {
-      const m4 = r.detail.match(/4xx:(\d+)/);
-      const m5 = r.detail.match(/5xx:(\d+)/);
-      if (m4) status4xx = parseInt(m4[1], 10);
-      if (m5) status5xx = parseInt(m5[1], 10);
-    }
-    return {
-      endpointId: "",
-      endpointPath: r.name,
-      requests: r.value,
-      status2xx: r.value2 ?? 0,
-      status4xx,
-      status5xx,
-    };
-  });
+  // Top endpoint traffic from raw_http_dim dim='path'
+  const topPaths = db.prepare(`
+    SELECT key as path, SUM(requests) as requests FROM raw_http_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'path'
+    GROUP BY key ORDER BY requests DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ path: string; requests: number }>;
 
-  const sessionTraffic = tsRows.map((r) => ({
-    date: epochToIso(r.ts),
-    authenticated: r.authenticated,
-    unauthenticated: r.unauthenticated,
+  const topEndpointTraffic = topPaths.map((r) => ({
+    endpointId: "",
+    endpointPath: r.path,
+    requests: r.requests,
+    status2xx: 0,
+    status4xx: 0,
+    status5xx: 0,
   }));
 
   return {
     managedOperations,
     discoveredEndpoints,
-    methodDistribution: methodDistRows.map((r) => ({ method: r.name, count: r.value })),
-    sessionTraffic,
+    methodDistribution: methodDist,
+    sessionTraffic: [],
     topEndpointTraffic,
     stats: {
-      totalManaged: stats.get("total_managed") ?? managedOperations.length,
-      totalDiscovered: stats.get("total_discovered") ?? discoveredEndpoints.length,
-      discoveredInReview: stats.get("discovered_in_review") ?? 0,
-      avgRequestsPerHour: stats.get("avg_requests_per_hour") ?? 0,
+      totalManaged: managedOperations.length,
+      totalDiscovered: discoveredEndpoints.length,
+      discoveredInReview: discoveredEndpoints.filter((e) => e.state === "review").length,
+      avgRequestsPerHour: 0,
       sessionIdentifier: "",
     },
   };
@@ -1209,55 +1154,70 @@ function readDdosData(
   fromTs: number,
   toTs: number,
 ): DdosData | null {
-  const tsRows = db.prepare(
-    `SELECT ts, l7_ddos_count, rate_limit_count FROM ddos_events_ts WHERE zone_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{
-    ts: number;
-    l7_ddos_count: number;
-    rate_limit_count: number;
-  }>;
+  // DDoS events from raw_fw_dim dim='l7ddos' – hourly aggregation
+  const ddosRows = db.prepare(`
+    SELECT ts, SUM(events) as count FROM raw_fw_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'l7ddos'
+    GROUP BY ts ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{ ts: number; count: number }>;
 
-  const stats = getAggStats(db, scopeId, "ddos", fromTs, toTs);
+  // Rate limit events from raw_fw_dim dim='ratelimit' – hourly aggregation
+  const rlRows = db.prepare(`
+    SELECT ts, SUM(events) as count FROM raw_fw_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'ratelimit'
+    GROUP BY ts ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{ ts: number; count: number }>;
 
-  if (tsRows.length === 0 && stats.size === 0) return null;
+  // L3/L4 attacks from ddos_l34_attacks (kept snapshot table)
+  const l34Ca = getLatestCollectedAt(db, "ddos_l34_attacks", "zone_id", scopeId, fromTs, toTs);
 
-  const ddosEventsOverTime = tsRows.map((r) => ({
-    date: epochToIso(r.ts),
-    count: r.l7_ddos_count,
-  }));
+  if (ddosRows.length === 0 && rlRows.length === 0 && !l34Ca) return null;
 
-  const rateLimitEventsOverTime = tsRows.map((r) => ({
-    date: epochToIso(r.ts),
-    count: r.rate_limit_count,
-  }));
+  const ddosEventsOverTime = ddosRows.map((r) => ({ date: epochToIso(r.ts), count: r.count }));
+  const rateLimitEventsOverTime = rlRows.map((r) => ({ date: epochToIso(r.ts), count: r.count }));
 
-  const ddosAttackVectors = getTopItems(db, scopeId, "ddos", "ddos_attack_vectors", fromTs, toTs);
-  const ddosTopPaths = getTopItems(db, scopeId, "ddos", "ddos_top_paths", fromTs, toTs);
-  const rateLimitMethods = getTopItems(db, scopeId, "ddos", "rate_limit_methods", fromTs, toTs);
-  const rateLimitTopPaths = getTopItems(db, scopeId, "ddos", "rate_limit_top_paths", fromTs, toTs);
+  // DDoS attack vectors (top paths)
+  const ddosAttackVectors = db.prepare(`
+    SELECT key as method, SUM(events) as count FROM raw_fw_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'l7ddos'
+    GROUP BY key ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ method: string; count: number }>;
 
-  const totalDdosEvents = stats.get("total_ddos_events") ?? ddosEventsOverTime.reduce((s, r) => s + r.count, 0);
-  const totalRateLimitEvents = stats.get("total_rate_limit_events") ?? rateLimitEventsOverTime.reduce((s, r) => s + r.count, 0);
+  const ddosTopPaths = ddosAttackVectors.map((r) => ({ path: r.method, count: r.count }));
+
+  // Rate limit methods/paths
+  const rateLimitItems = db.prepare(`
+    SELECT key, SUM(events) as count FROM raw_fw_dim
+    WHERE zone_id = ? AND ts >= ? AND ts < ? AND dim = 'ratelimit'
+    GROUP BY key ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ key: string; count: number }>;
+
+  const rateLimitMethods: Array<{ method: string; count: number }> = [];
+  const rateLimitTopPaths: Array<{ path: string; count: number }> = [];
+  for (const r of rateLimitItems) {
+    const parts = r.key.split(" ", 2);
+    if (parts.length >= 2) {
+      rateLimitMethods.push({ method: parts[0], count: r.count });
+      rateLimitTopPaths.push({ path: parts[1], count: r.count });
+    } else {
+      rateLimitTopPaths.push({ path: r.key, count: r.count });
+    }
+  }
+
+  const totalDdosEvents = ddosRows.reduce((s, r) => s + r.count, 0);
+  const totalRateLimitEvents = rlRows.reduce((s, r) => s + r.count, 0);
 
   // L3/L4 attacks
-  const l34Ca = getLatestCollectedAt(db, "ddos_l34_attacks", "zone_id", scopeId, fromTs, toTs);
   let l34: DdosData["l34"] = null;
-
   if (l34Ca) {
     const rows = db.prepare(
       `SELECT attack_type, attack_vector, ip_protocol, destination_port, mitigation_type, packets, bits, dropped_packets, dropped_bits, start_time, end_time FROM ddos_l34_attacks WHERE zone_id = ? AND collected_at = ?`,
     ).all(scopeId, l34Ca) as Array<{
-      attack_type: string | null;
-      attack_vector: string | null;
-      ip_protocol: string | null;
-      destination_port: number | null;
-      mitigation_type: string | null;
-      packets: number | null;
-      bits: number | null;
-      dropped_packets: number | null;
-      dropped_bits: number | null;
-      start_time: number | null;
-      end_time: number | null;
+      attack_type: string | null; attack_vector: string | null; ip_protocol: string | null;
+      destination_port: number | null; mitigation_type: string | null;
+      packets: number | null; bits: number | null;
+      dropped_packets: number | null; dropped_bits: number | null;
+      start_time: number | null; end_time: number | null;
     }>;
 
     if (rows.length > 0) {
@@ -1275,27 +1235,23 @@ function readDdosData(
         end: r.end_time ? epochToIso(r.end_time) : "",
       }));
 
-      const l34TotalAttacks = stats.get("l34_total_attacks") ?? attacks.length;
-      const l34TotalPackets = stats.get("l34_total_packets_dropped") ?? attacks.reduce((s, a) => s + a.droppedPackets, 0);
-      const l34TotalBits = stats.get("l34_total_bits_dropped") ?? attacks.reduce((s, a) => s + a.droppedBits, 0);
-
       l34 = {
         attacks,
-        totalAttacks: l34TotalAttacks,
-        totalPacketsDropped: l34TotalPackets,
-        totalBitsDropped: l34TotalBits,
+        totalAttacks: attacks.length,
+        totalPacketsDropped: attacks.reduce((s, a) => s + a.droppedPackets, 0),
+        totalBitsDropped: attacks.reduce((s, a) => s + a.droppedBits, 0),
       };
     }
   }
 
   return {
     ddosEventsOverTime,
-    ddosAttackVectors: ddosAttackVectors.map((r) => ({ method: r.name, count: r.value })),
-    ddosTopPaths: ddosTopPaths.map((r) => ({ path: r.name, count: r.value })),
+    ddosAttackVectors,
+    ddosTopPaths,
     totalDdosEvents,
     rateLimitEventsOverTime,
-    rateLimitMethods: rateLimitMethods.map((r) => ({ method: r.name, count: r.value })),
-    rateLimitTopPaths: rateLimitTopPaths.map((r) => ({ path: r.name, count: r.value })),
+    rateLimitMethods,
+    rateLimitTopPaths,
     totalRateLimitEvents,
     l34,
   };
@@ -1312,67 +1268,113 @@ function readGatewayDnsData(
   fromTs: number,
   toTs: number,
 ): GatewayDnsData | null {
-  const tsRows = db.prepare(
-    `SELECT ts, count FROM gateway_dns_ts WHERE account_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{ ts: number; count: number }>;
+  // Query volume from raw_gw_dns_hourly
+  const tsRows = db.prepare(`
+    SELECT ts, total as count FROM raw_gw_dns_hourly
+    WHERE account_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{ ts: number; count: number }>;
 
-  const policiesCa = getLatestCollectedAt(db, "gateway_policies", "account_id", scopeId, fromTs, toTs);
+  // Top blocked domains
+  const topBlockedDomains = db.prepare(`
+    SELECT key as domain, SUM(queries) as count FROM raw_gw_dns_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'blocked_domain'
+    GROUP BY key ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ domain: string; count: number }>;
 
-  const topBlockedDomains = getTopItems(db, scopeId, "gateway-dns", "top_blocked_domains", fromTs, toTs);
-  const blockedCategories = getTopItems(db, scopeId, "gateway-dns", "blocked_categories", fromTs, toTs);
-  const resolverDecisions = getTopItems(db, scopeId, "gateway-dns", "resolver_decisions", fromTs, toTs);
-  const topBlockedLocations = getTopItems(db, scopeId, "gateway-dns", "top_blocked_locations", fromTs, toTs);
-  const locationBreakdown = getTopItems(db, scopeId, "gateway-dns", "location_breakdown", fromTs, toTs);
+  // Blocked categories
+  const blockedCategories = db.prepare(`
+    SELECT key as category, SUM(queries) as count FROM raw_gw_dns_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'category'
+    GROUP BY key ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ category: string; count: number }>;
 
-  if (
-    tsRows.length === 0 &&
-    !policiesCa &&
-    topBlockedDomains.length === 0 &&
-    blockedCategories.length === 0 &&
-    resolverDecisions.length === 0
-  ) {
+  // Resolver decisions
+  const resolverDecisions = db.prepare(`
+    SELECT key as decision, SUM(queries) as count FROM raw_gw_dns_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'decision'
+    GROUP BY key ORDER BY count DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ decision: string; count: number }>;
+
+  if (tsRows.length === 0 && resolverDecisions.length === 0 && topBlockedDomains.length === 0) {
     return null;
   }
 
-  const queryVolume = tsRows.map((r) => ({
-    date: epochToIso(r.ts),
-    count: r.count,
-  }));
+  const queryVolume = tsRows.map((r) => ({ date: epochToIso(r.ts), count: r.count }));
 
-  let policyBreakdown: GatewayDnsData["policyBreakdown"] = [];
-  if (policiesCa) {
-    const rows = db.prepare(
-      `SELECT policy_name, allowed, blocked, total FROM gateway_policies WHERE account_id = ? AND collected_at = ?`,
-    ).all(scopeId, policiesCa) as Array<{
-      policy_name: string;
-      allowed: number;
-      blocked: number;
-      total: number;
-    }>;
+  // Location breakdown from raw_gw_dns_dim dim='location'
+  const BLOCKED_DECISIONS = new Set(["2", "3", "4", "5", "6", "7", "9", "15", "16"]);
 
-    policyBreakdown = rows.map((r) => ({
-      policyName: r.policy_name,
-      allowed: r.allowed,
-      blocked: r.blocked,
-      total: r.total,
-    }));
+  const locationRows = db.prepare(`
+    SELECT key as location, detail as decision, SUM(queries) as count FROM raw_gw_dns_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'location'
+    GROUP BY key, detail ORDER BY count DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ location: string; decision: string | null; count: number }>;
+
+  // Aggregate location data
+  const locationMap = new Map<string, { total: number; blocked: number }>();
+  for (const r of locationRows) {
+    if (!locationMap.has(r.location)) locationMap.set(r.location, { total: 0, blocked: 0 });
+    const loc = locationMap.get(r.location)!;
+    loc.total += r.count;
+    if (r.decision && BLOCKED_DECISIONS.has(r.decision)) loc.blocked += r.count;
   }
 
-  // HTTP inspection – check gateway_http_ts
-  const httpTsRows = db.prepare(
-    `SELECT ts, count FROM gateway_http_ts WHERE account_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{ ts: number; count: number }>;
+  const locationBreakdown = Array.from(locationMap.entries())
+    .map(([location, data]) => ({ location, total: data.total, blocked: data.blocked }))
+    .sort((a, b) => b.total - a.total);
+
+  const topBlockedLocations = locationBreakdown
+    .filter((l) => l.blocked > 0)
+    .sort((a, b) => b.blocked - a.blocked)
+    .slice(0, 10)
+    .map((l) => ({ location: l.location, count: l.blocked }));
+
+  // Policy breakdown from raw_gw_dns_dim dim='policy'
+  const policyRows = db.prepare(`
+    SELECT key as policy_name, detail as decision, SUM(queries) as count FROM raw_gw_dns_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'policy'
+    GROUP BY key, detail ORDER BY count DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ policy_name: string; decision: string | null; count: number }>;
+
+  const policyMap = new Map<string, { allowed: number; blocked: number; total: number }>();
+  for (const r of policyRows) {
+    if (!policyMap.has(r.policy_name)) policyMap.set(r.policy_name, { allowed: 0, blocked: 0, total: 0 });
+    const p = policyMap.get(r.policy_name)!;
+    p.total += r.count;
+    if (r.decision && BLOCKED_DECISIONS.has(r.decision)) p.blocked += r.count;
+    else p.allowed += r.count;
+  }
+
+  const policyBreakdown = Array.from(policyMap.entries())
+    .map(([policyName, d]) => ({ policyName, allowed: d.allowed, blocked: d.blocked, total: d.total }))
+    .sort((a, b) => b.total - a.total);
+
+  // HTTP inspection from raw_gw_http_hourly + raw_gw_http_dim
+  const httpTsRows = db.prepare(`
+    SELECT ts, total as count FROM raw_gw_http_hourly
+    WHERE account_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{ ts: number; count: number }>;
 
   let httpInspection: GatewayDnsData["httpInspection"] = null;
   if (httpTsRows.length > 0) {
-    const httpActions = getTopItems(db, scopeId, "gateway-dns", "http_actions", fromTs, toTs);
-    const httpTopHosts = getTopItems(db, scopeId, "gateway-dns", "http_top_hosts", fromTs, toTs);
+    const httpActions = db.prepare(`
+      SELECT key as action, SUM(requests) as count FROM raw_gw_http_dim
+      WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'action'
+      GROUP BY key ORDER BY count DESC
+    `).all(scopeId, fromTs, toTs) as Array<{ action: string; count: number }>;
+
+    const httpTopHosts = db.prepare(`
+      SELECT key as host, SUM(requests) as count FROM raw_gw_http_dim
+      WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'host'
+      GROUP BY key ORDER BY count DESC LIMIT 20
+    `).all(scopeId, fromTs, toTs) as Array<{ host: string; count: number }>;
+
     const totalRequests = httpTsRows.reduce((s, r) => s + r.count, 0);
 
     httpInspection = {
       totalRequests,
-      byAction: httpActions.map((r) => ({ action: r.name, count: r.value })),
-      topHosts: httpTopHosts.map((r) => ({ host: r.name, count: r.value })),
+      byAction: httpActions,
+      topHosts: httpTopHosts,
       timeSeries: httpTsRows.map((r) => ({ date: epochToIso(r.ts), count: r.count })),
     };
   }
@@ -1380,19 +1382,15 @@ function readGatewayDnsData(
   return {
     queryVolume,
     topBlockedDomains: topBlockedDomains.map((r) => ({
-      domain: r.name,
-      category: r.detail ?? "Uncategorized",
-      count: r.value,
+      domain: r.domain,
+      category: "Uncategorized",
+      count: r.count,
     })),
-    blockedCategories: blockedCategories.map((r) => ({ category: r.name, count: r.value })),
-    resolverDecisions: resolverDecisions.map((r) => ({ decision: r.name, count: r.value })),
-    topBlockedLocations: topBlockedLocations.map((r) => ({ location: r.name, count: r.value })),
+    blockedCategories,
+    resolverDecisions,
+    topBlockedLocations,
     policyBreakdown,
-    locationBreakdown: locationBreakdown.map((r) => ({
-      location: r.name,
-      total: r.value,
-      blocked: r.value2 ?? 0,
-    })),
+    locationBreakdown,
     httpInspection,
   };
 }
@@ -1408,15 +1406,20 @@ function readGatewayNetworkData(
   fromTs: number,
   toTs: number,
 ): GatewayNetworkData | null {
-  const tsRows = db.prepare(
-    `SELECT ts, allowed, blocked FROM gateway_network_ts WHERE account_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{ ts: number; allowed: number; blocked: number }>;
+  // Sessions over time from raw_gw_net_hourly
+  const tsRows = db.prepare(`
+    SELECT ts, allowed, blocked FROM raw_gw_net_hourly
+    WHERE account_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{ ts: number; allowed: number; blocked: number }>;
 
-  const destCa = getLatestCollectedAt(db, "gateway_blocked_destinations", "account_id", scopeId, fromTs, toTs);
-  const topSourceCountries = getTopItems(db, scopeId, "gateway-network", "top_source_countries", fromTs, toTs);
-  const portBreakdown = getTopItems(db, scopeId, "gateway-network", "port_breakdown", fromTs, toTs);
+  // Top source countries
+  const topSourceCountries = db.prepare(`
+    SELECT key as country, SUM(sessions) as count FROM raw_gw_net_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'src_country'
+    GROUP BY key ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ country: string; count: number }>;
 
-  if (tsRows.length === 0 && !destCa && topSourceCountries.length === 0) return null;
+  if (tsRows.length === 0 && topSourceCountries.length === 0) return null;
 
   const sessionsOverTime = tsRows.map((r) => ({
     date: epochToIso(r.ts),
@@ -1424,50 +1427,53 @@ function readGatewayNetworkData(
     blocked: r.blocked,
   }));
 
-  let blockedDestinations: GatewayNetworkData["blockedDestinations"] = [];
-  if (destCa) {
-    const rows = db.prepare(
-      `SELECT ip, count, country, port, protocol FROM gateway_blocked_destinations WHERE account_id = ? AND collected_at = ? ORDER BY count DESC`,
-    ).all(scopeId, destCa) as Array<{
-      ip: string;
-      count: number;
-      country: string | null;
-      port: number | null;
-      protocol: string | null;
-    }>;
+  // Blocked destinations from raw_gw_net_dim dim='blocked_dest'
+  const destRows = db.prepare(`
+    SELECT key as ip, SUM(sessions) as count, detail FROM raw_gw_net_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'blocked_dest'
+    GROUP BY key, detail ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ ip: string; count: number; detail: string | null }>;
 
-    blockedDestinations = rows.map((r) => ({
-      ip: r.ip,
-      count: r.count,
-      country: r.country ?? "",
-      port: r.port,
-      protocol: r.protocol ?? "unknown",
-    }));
-  }
-
-  // Transport protocols from protocol_distribution
-  const transportRows = getProtocolDistribution(db, scopeId, "gateway-network", "transport", fromTs, toTs);
-  const transportProtocols = transportRows.map((r) => ({
-    protocol: r.name,
-    count: r.requests,
-  }));
-
-  // Port breakdown: parse "PORT (SERVICE)" format
-  const portBreakdownMapped = portBreakdown.map((r) => {
-    const match = r.name.match(/^(\d+)\s*\(([^)]+)\)$/);
-    if (match) {
-      return { port: parseInt(match[1], 10), service: match[2], count: r.value };
+  const blockedDestinations = destRows.map((r) => {
+    let country = "";
+    let port: number | null = null;
+    let protocol = "unknown";
+    if (r.detail) {
+      const cm = r.detail.match(/country:([^,]+)/);
+      const pm = r.detail.match(/port:(\d+)/);
+      const protom = r.detail.match(/proto:(\w+)/);
+      if (cm) country = cm[1];
+      if (pm) port = parseInt(pm[1], 10);
+      if (protom) protocol = protom[1];
     }
-    const portNum = parseInt(r.name, 10);
-    return { port: isNaN(portNum) ? 0 : portNum, service: "", count: r.value };
+    return { ip: r.ip, count: r.count, country, port, protocol };
+  });
+
+  // Transport protocols
+  const transportRows = db.prepare(`
+    SELECT key as protocol, SUM(sessions) as count FROM raw_gw_net_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'transport'
+    GROUP BY key ORDER BY count DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ protocol: string; count: number }>;
+
+  // Port breakdown
+  const portRows = db.prepare(`
+    SELECT key, SUM(sessions) as count FROM raw_gw_net_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'port'
+    GROUP BY key ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ key: string; count: number }>;
+
+  const portBreakdown = portRows.map((r) => {
+    const portNum = parseInt(r.key, 10);
+    return { port: isNaN(portNum) ? 0 : portNum, service: "", count: r.count };
   });
 
   return {
     sessionsOverTime,
     blockedDestinations,
-    topSourceCountries: topSourceCountries.map((r) => ({ country: r.name, count: r.value })),
-    transportProtocols,
-    portBreakdown: portBreakdownMapped,
+    topSourceCountries,
+    transportProtocols: transportRows,
+    portBreakdown,
   };
 }
 
@@ -1482,42 +1488,33 @@ function readShadowItData(
   fromTs: number,
   toTs: number,
 ): ShadowItData | null {
-  const appsCa = getLatestCollectedAt(db, "shadow_it_apps", "account_id", scopeId, fromTs, toTs);
-  const userAppsCa = getLatestCollectedAt(db, "shadow_it_user_apps", "account_id", scopeId, fromTs, toTs);
+  // Shadow IT is derived from Gateway HTTP data (hosts as "applications")
+  const hostRows = db.prepare(`
+    SELECT key as name, SUM(requests) as count FROM raw_gw_http_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'host'
+    GROUP BY key ORDER BY count DESC LIMIT 50
+  `).all(scopeId, fromTs, toTs) as Array<{ name: string; count: number }>;
 
-  const tsRows = db.prepare(
-    `SELECT ts, app_name, count FROM shadow_it_usage_ts WHERE account_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{ ts: number; app_name: string; count: number }>;
+  if (hostRows.length === 0) return null;
 
-  const stats = getAggStats(db, scopeId, "shadow-it", fromTs, toTs);
-  const categoryBreakdown = getTopItems(db, scopeId, "shadow-it", "category_breakdown", fromTs, toTs);
+  const discoveredApplications = hostRows.map((r) => ({
+    name: r.name,
+    rawName: r.name,
+    category: "Uncategorized",
+    count: r.count,
+  }));
 
-  if (!appsCa && tsRows.length === 0 && categoryBreakdown.length === 0) return null;
+  // Usage trends – hosts over time
+  const trendRows = db.prepare(`
+    SELECT ts, key as app_name, SUM(requests) as count FROM raw_gw_http_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'host'
+    GROUP BY ts, key ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{ ts: number; app_name: string; count: number }>;
 
-  let discoveredApplications: ShadowItData["discoveredApplications"] = [];
-  if (appsCa) {
-    const rows = db.prepare(
-      `SELECT app_name, raw_name, category, count FROM shadow_it_apps WHERE account_id = ? AND collected_at = ? ORDER BY count DESC`,
-    ).all(scopeId, appsCa) as Array<{
-      app_name: string;
-      raw_name: string | null;
-      category: string | null;
-      count: number;
-    }>;
-
-    discoveredApplications = rows.map((r) => ({
-      name: r.app_name,
-      rawName: r.raw_name ?? r.app_name,
-      category: r.category ?? "Uncategorized",
-      count: r.count,
-    }));
-  }
-
-  // Usage trends: pivot by app_name
   const tsByAppMap = new Map<number, Record<string, number>>();
   const trendAppSet = new Set<string>();
 
-  for (const row of tsRows) {
+  for (const row of trendRows) {
     if (!tsByAppMap.has(row.ts)) tsByAppMap.set(row.ts, {});
     const pt = tsByAppMap.get(row.ts)!;
     pt[row.app_name] = (pt[row.app_name] || 0) + row.count;
@@ -1528,38 +1525,13 @@ function readShadowItData(
     .map(([ts, counts]) => ({ date: epochToIso(ts), ...counts }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  const trendAppNames = Array.from(trendAppSet);
-
-  let userAppMappings: ShadowItData["userAppMappings"] = [];
-  if (userAppsCa) {
-    const rows = db.prepare(
-      `SELECT email, apps, total_requests FROM shadow_it_user_apps WHERE account_id = ? AND collected_at = ? ORDER BY total_requests DESC`,
-    ).all(scopeId, userAppsCa) as Array<{
-      email: string;
-      apps: string;
-      total_requests: number;
-    }>;
-
-    userAppMappings = rows.map((r) => {
-      let apps: string[] = [];
-      try { apps = JSON.parse(r.apps); } catch { apps = [r.apps]; }
-      return {
-        email: r.email,
-        apps,
-        totalRequests: r.total_requests,
-      };
-    });
-  }
-
-  const onlyBlockedLogged = !!(stats.get("only_blocked_logged"));
-
   return {
     discoveredApplications,
-    categoryBreakdown: categoryBreakdown.map((r) => ({ category: r.name, count: r.value })),
+    categoryBreakdown: [],
     usageTrends,
-    trendAppNames,
-    onlyBlockedLogged,
-    userAppMappings,
+    trendAppNames: Array.from(trendAppSet),
+    onlyBlockedLogged: false,
+    userAppMappings: [],
   };
 }
 
@@ -1577,23 +1549,17 @@ function readDevicesUsersData(
   const devicesCa = getLatestCollectedAt(db, "zt_devices", "account_id", scopeId, fromTs, toTs);
   const usersCa = getLatestCollectedAt(db, "zt_users", "account_id", scopeId, fromTs, toTs);
   const postureCa = getLatestCollectedAt(db, "zt_posture_rules", "account_id", scopeId, fromTs, toTs);
-  const stats = getAggStats(db, scopeId, "devices-users", fromTs, toTs);
 
-  if (!devicesCa && !usersCa && stats.size === 0) return null;
+  if (!devicesCa && !usersCa) return null;
 
   let devices: DevicesUsersData["devices"] = [];
   if (devicesCa) {
     const rows = db.prepare(
       `SELECT device_name, user_name, email, os, os_version, warp_version, last_seen, status FROM zt_devices WHERE account_id = ? AND collected_at = ?`,
     ).all(scopeId, devicesCa) as Array<{
-      device_name: string;
-      user_name: string | null;
-      email: string | null;
-      os: string | null;
-      os_version: string | null;
-      warp_version: string | null;
-      last_seen: number | null;
-      status: string | null;
+      device_name: string; user_name: string | null; email: string | null;
+      os: string | null; os_version: string | null; warp_version: string | null;
+      last_seen: number | null; status: string | null;
     }>;
 
     devices = rows.map((r) => ({
@@ -1613,12 +1579,8 @@ function readDevicesUsersData(
     const rows = db.prepare(
       `SELECT name, email, access_seat, gateway_seat, device_count, last_login FROM zt_users WHERE account_id = ? AND collected_at = ?`,
     ).all(scopeId, usersCa) as Array<{
-      name: string | null;
-      email: string;
-      access_seat: number | null;
-      gateway_seat: number | null;
-      device_count: number;
-      last_login: number | null;
+      name: string | null; email: string; access_seat: number | null;
+      gateway_seat: number | null; device_count: number; last_login: number | null;
     }>;
 
     users = rows.map((r) => ({
@@ -1636,11 +1598,7 @@ function readDevicesUsersData(
     const rows = db.prepare(
       `SELECT name, type, description, platform, input_json FROM zt_posture_rules WHERE account_id = ? AND collected_at = ?`,
     ).all(scopeId, postureCa) as Array<{
-      name: string;
-      type: string;
-      description: string | null;
-      platform: string | null;
-      input_json: string | null;
+      name: string; type: string; description: string | null; platform: string | null; input_json: string | null;
     }>;
 
     postureRules = rows.map((r) => ({
@@ -1653,43 +1611,48 @@ function readDevicesUsersData(
     }));
   }
 
-  const osDistribution = getTopItems(db, scopeId, "devices-users", "os_distribution", fromTs, toTs);
-  const warpVersions = getTopItems(db, scopeId, "devices-users", "warp_versions", fromTs, toTs);
-
-  // Health metrics: keys with prefix "health_"
-  const health: DevicesUsersData["health"] = [];
-  for (const [key, value] of stats) {
-    if (key.startsWith("health_")) {
-      const label = key.replace("health_", "").replace(/_/g, " ");
-      const status: "good" | "warning" | "critical" =
-        value >= 70 ? "good" : value >= 40 ? "warning" : "critical";
-      health.push({
-        label,
-        value,
-        detail: "",
-        status,
-      });
-    }
+  // OS distribution from devices
+  const osMap = new Map<string, number>();
+  const warpMap = new Map<string, number>();
+  let activeCount = 0;
+  let inactiveCount = 0;
+  let staleCount = 0;
+  for (const d of devices) {
+    osMap.set(d.os, (osMap.get(d.os) || 0) + 1);
+    warpMap.set(d.warpVersion, (warpMap.get(d.warpVersion) || 0) + 1);
+    if (d.status === "active") activeCount++;
+    else if (d.status === "stale") staleCount++;
+    else inactiveCount++;
   }
+
+  const osDistribution = Array.from(osMap.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+  const warpVersionDistribution = Array.from(warpMap.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+
+  const accessSeats = users.filter((u) => u.accessSeat).length;
+  const gatewaySeats = users.filter((u) => u.gatewaySeat).length;
 
   return {
     devices,
     users,
     postureRules,
     postureError: null,
-    osDistribution: osDistribution.map((r) => ({ name: r.name, value: r.value })),
-    warpVersionDistribution: warpVersions.map((r) => ({ name: r.name, value: r.value })),
+    osDistribution,
+    warpVersionDistribution,
     plan: null,
     stats: {
-      totalDevices: stats.get("total_devices") ?? devices.length,
-      activeDevices: stats.get("active_devices") ?? 0,
-      inactiveDevices: stats.get("inactive_devices") ?? 0,
-      staleDevices: stats.get("stale_devices") ?? 0,
-      totalUsers: stats.get("total_users") ?? users.length,
-      accessSeats: stats.get("access_seats") ?? 0,
-      gatewaySeats: stats.get("gateway_seats") ?? 0,
+      totalDevices: devices.length,
+      activeDevices: activeCount,
+      inactiveDevices: inactiveCount,
+      staleDevices: staleCount,
+      totalUsers: users.length,
+      accessSeats,
+      gatewaySeats,
     },
-    health,
+    health: [],
   };
 }
 
@@ -1704,65 +1667,120 @@ function readZtSummaryData(
   fromTs: number,
   toTs: number,
 ): ZtSummaryData | null {
-  const stats = getAggStats(db, scopeId, "zt-summary", fromTs, toTs);
+  // DNS totals from raw_gw_dns_hourly
+  const dnsTotals = db.prepare(`
+    SELECT COALESCE(SUM(total),0) as total, COALESCE(SUM(blocked),0) as blocked
+    FROM raw_gw_dns_hourly WHERE account_id = ? AND ts >= ? AND ts < ?
+  `).get(scopeId, fromTs, toTs) as { total: number; blocked: number };
 
-  const tsRows = db.prepare(
-    `SELECT ts, unique_users, logins FROM daily_active_users_ts WHERE account_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{ ts: number; unique_users: number; logins: number }>;
+  // Resolver decisions
+  const resolverDecisions = db.prepare(`
+    SELECT key as decision, SUM(queries) as count FROM raw_gw_dns_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'decision'
+    GROUP BY key ORDER BY count DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ decision: string; count: number }>;
 
-  const resolverDecisions = getTopItems(db, scopeId, "zt-summary", "resolver_decisions", fromTs, toTs);
-  const blockedByPolicy = getTopItems(db, scopeId, "zt-summary", "blocked_by_policy", fromTs, toTs);
-  const topBlockedCategories = getTopItems(db, scopeId, "zt-summary", "top_blocked_categories", fromTs, toTs);
+  // Access logins from raw_access_daily
+  const accessTotals = db.prepare(`
+    SELECT COALESCE(SUM(successful),0) as successful, COALESCE(SUM(successful + failed),0) as total
+    FROM raw_access_daily WHERE account_id = ? AND ts >= ? AND ts < ?
+  `).get(scopeId, fromTs, toTs) as { successful: number; total: number };
 
-  if (stats.size === 0 && tsRows.length === 0 && resolverDecisions.length === 0) return null;
+  // Fleet from snapshots
+  const devicesCa = getLatestCollectedAt(db, "zt_devices", "account_id", scopeId, fromTs, toTs);
+  const usersCa = getLatestCollectedAt(db, "zt_users", "account_id", scopeId, fromTs, toTs);
 
-  const dailyActiveUsers = tsRows.map((r) => ({
+  if (dnsTotals.total === 0 && resolverDecisions.length === 0 && accessTotals.total === 0 && !devicesCa) {
+    return null;
+  }
+
+  // Top blocked categories
+  const topBlockedCategories = db.prepare(`
+    SELECT key as name, SUM(queries) as value FROM raw_gw_dns_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'category'
+    GROUP BY key ORDER BY value DESC LIMIT 10
+  `).all(scopeId, fromTs, toTs) as Array<{ name: string; value: number }>;
+
+  // Blocked by policy
+  const BLOCKED_DECISIONS = new Set(["2", "3", "4", "5", "6", "7", "9", "15", "16"]);
+  const policyRows = db.prepare(`
+    SELECT key as name, SUM(queries) as value FROM raw_gw_dns_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'policy'
+    GROUP BY key ORDER BY value DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ name: string; value: number }>;
+
+  // Daily active users from raw_access_dim dim='user'
+  const dauRows = db.prepare(`
+    SELECT ts, COUNT(DISTINCT key) as unique_users, SUM(logins) as logins
+    FROM raw_access_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'user'
+    GROUP BY ts ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{ ts: number; unique_users: number; logins: number }>;
+
+  const dailyActiveUsers = dauRows.map((r) => ({
     date: epochToIso(r.ts),
     uniqueUsers: r.unique_users,
     logins: r.logins,
   }));
 
-  // Compliance metrics: keys with prefix "compliance_"
-  const compliance: ZtSummaryData["compliance"] = [];
-  for (const [key, value] of stats) {
-    if (key.startsWith("compliance_")) {
-      const label = key.replace("compliance_", "").replace(/_/g, " ");
-      const status: "good" | "warning" | "critical" =
-        value >= 70 ? "good" : value >= 40 ? "warning" : "critical";
-      compliance.push({
-        label,
-        value,
-        detail: "",
-        status,
-      });
-    }
+  // Fleet stats from snapshots
+  let fleetDevices = 0;
+  let fleetActiveDevices = 0;
+  let fleetUsers = 0;
+  let fleetAccessSeats = 0;
+  let fleetGatewaySeats = 0;
+
+  if (devicesCa) {
+    const dRow = db.prepare(
+      `SELECT COUNT(*) as total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active FROM zt_devices WHERE account_id = ? AND collected_at = ?`,
+    ).get(scopeId, devicesCa) as { total: number; active: number };
+    fleetDevices = dRow.total;
+    fleetActiveDevices = dRow.active;
+  }
+  if (usersCa) {
+    const uRow = db.prepare(
+      `SELECT COUNT(*) as total, SUM(CASE WHEN access_seat = 1 THEN 1 ELSE 0 END) as access_seats, SUM(CASE WHEN gateway_seat = 1 THEN 1 ELSE 0 END) as gateway_seats FROM zt_users WHERE account_id = ? AND collected_at = ?`,
+    ).get(scopeId, usersCa) as { total: number; access_seats: number; gateway_seats: number };
+    fleetUsers = uRow.total;
+    fleetAccessSeats = uRow.access_seats;
+    fleetGatewaySeats = uRow.gateway_seats;
+  }
+
+  // Access apps from access_app_stats
+  const appsCa = getLatestCollectedAt(db, "access_app_stats", "account_id", scopeId, fromTs, toTs);
+  let fleetAccessApps = 0;
+  if (appsCa) {
+    const aRow = db.prepare(
+      `SELECT COUNT(DISTINCT app_id) as cnt FROM access_app_stats WHERE account_id = ? AND collected_at = ?`,
+    ).get(scopeId, appsCa) as { cnt: number };
+    fleetAccessApps = aRow.cnt;
   }
 
   return {
-    totalDnsQueries: stats.get("total_dns_queries") ?? 0,
-    blockedDnsQueries: stats.get("blocked_dns_queries") ?? 0,
+    totalDnsQueries: dnsTotals.total,
+    blockedDnsQueries: dnsTotals.blocked,
     resolverDecisions: resolverDecisions.map((r) => ({
-      id: r.detail ? parseInt(r.detail, 10) : 0,
-      decision: r.name,
-      count: r.value,
+      id: parseInt(r.decision, 10) || 0,
+      decision: r.decision,
+      count: r.count,
     })),
-    blockedByPolicy: blockedByPolicy.map((r) => ({ name: r.name, value: r.value })),
-    topBlockedCategories: topBlockedCategories.map((r) => ({ name: r.name, value: r.value })),
+    blockedByPolicy: policyRows,
+    topBlockedCategories,
     accessLogins: {
-      total: stats.get("access_logins_total") ?? 0,
-      successful: stats.get("access_logins_successful") ?? 0,
+      total: accessTotals.total,
+      successful: accessTotals.successful,
     },
     fleet: {
-      totalDevices: stats.get("fleet_total_devices") ?? 0,
-      activeDevices: stats.get("fleet_active_devices") ?? 0,
-      totalUsers: stats.get("fleet_total_users") ?? 0,
-      accessSeats: stats.get("fleet_access_seats") ?? 0,
-      gatewaySeats: stats.get("fleet_gateway_seats") ?? 0,
-      accessApps: stats.get("fleet_access_apps") ?? 0,
+      totalDevices: fleetDevices,
+      activeDevices: fleetActiveDevices,
+      totalUsers: fleetUsers,
+      accessSeats: fleetAccessSeats,
+      gatewaySeats: fleetGatewaySeats,
+      accessApps: fleetAccessApps,
     },
     plan: null,
     dailyActiveUsers,
-    compliance,
+    compliance: [],
   };
 }
 
@@ -1777,22 +1795,36 @@ function readAccessAuditData(
   fromTs: number,
   toTs: number,
 ): AccessAuditData | null {
-  const tsRows = db.prepare(
-    `SELECT ts, successful, failed FROM access_logins_ts WHERE account_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC`,
-  ).all(scopeId, fromTs, toTs) as Array<{ ts: number; successful: number; failed: number }>;
+  // Logins over time from raw_access_daily
+  const tsRows = db.prepare(`
+    SELECT ts, successful, failed FROM raw_access_daily
+    WHERE account_id = ? AND ts >= ? AND ts < ? ORDER BY ts ASC
+  `).all(scopeId, fromTs, toTs) as Array<{ ts: number; successful: number; failed: number }>;
 
   const appStatsCa = getLatestCollectedAt(db, "access_app_stats", "account_id", scopeId, fromTs, toTs);
-  const stats = getAggStats(db, scopeId, "access-audit", fromTs, toTs);
 
-  const accessByApp = getTopItems(db, scopeId, "access-audit", "access_by_application", fromTs, toTs);
-  const geographicAccess = getTopItems(db, scopeId, "access-audit", "geographic_access", fromTs, toTs);
-  const identityProviders = getTopItems(db, scopeId, "access-audit", "identity_providers", fromTs, toTs);
-  const failedLoginDetails = getTopItems(db, scopeId, "access-audit", "failed_login_details", fromTs, toTs);
-  const failedByApp = getTopItems(db, scopeId, "access-audit", "failed_by_app", fromTs, toTs);
-  const failedByCountry = getTopItems(db, scopeId, "access-audit", "failed_by_country", fromTs, toTs);
-  const anomaliesRaw = getRecommendations(db, scopeId, "access-audit", fromTs, toTs);
+  // Access by application from raw_access_dim dim='app'
+  const accessByApp = db.prepare(`
+    SELECT key as app_id, SUM(logins) as count FROM raw_access_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'app'
+    GROUP BY key ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ app_id: string; count: number }>;
 
-  if (tsRows.length === 0 && !appStatsCa && stats.size === 0 && accessByApp.length === 0) return null;
+  // Geographic access
+  const geographicAccess = db.prepare(`
+    SELECT key as country, SUM(logins) as count FROM raw_access_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'country'
+    GROUP BY key ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ country: string; count: number }>;
+
+  // Identity providers
+  const identityProviders = db.prepare(`
+    SELECT key as provider, SUM(logins) as count FROM raw_access_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'idp'
+    GROUP BY key ORDER BY count DESC
+  `).all(scopeId, fromTs, toTs) as Array<{ provider: string; count: number }>;
+
+  if (tsRows.length === 0 && !appStatsCa && accessByApp.length === 0) return null;
 
   const loginsOverTime = tsRows.map((r) => ({
     date: epochToIso(r.ts),
@@ -1800,17 +1832,14 @@ function readAccessAuditData(
     failed: r.failed,
   }));
 
+  // App breakdown from access_app_stats
   let appBreakdown: AccessAuditData["appBreakdown"] = [];
   if (appStatsCa) {
     const rows = db.prepare(
       `SELECT app_id, app_name, successful, failed, total, failure_rate FROM access_app_stats WHERE account_id = ? AND collected_at = ?`,
     ).all(scopeId, appStatsCa) as Array<{
-      app_id: string;
-      app_name: string;
-      successful: number;
-      failed: number;
-      total: number;
-      failure_rate: number | null;
+      app_id: string; app_name: string; successful: number; failed: number;
+      total: number; failure_rate: number | null;
     }>;
 
     appBreakdown = rows.map((r) => ({
@@ -1823,48 +1852,34 @@ function readAccessAuditData(
     }));
   }
 
-  // Parse failed_login_details: detail field "country:X,idp:Y"
-  const parsedFailedDetails = failedLoginDetails.map((r) => {
-    let country = "";
-    let identityProvider = "";
-    if (r.detail) {
-      const countryM = r.detail.match(/country:([^,]+)/);
-      const idpM = r.detail.match(/idp:([^,]+)/);
-      if (countryM) country = countryM[1];
-      if (idpM) identityProvider = idpM[1];
-    }
-    return {
-      appId: "",
-      appName: r.name || null,
-      country,
-      identityProvider,
-      count: r.value,
-    };
-  });
+  // Failed logins from raw_access_dim dim='app' where detail='0' (isSuccessfulLogin=0)
+  const failedByAppRows = db.prepare(`
+    SELECT key as app_id, SUM(logins) as count FROM raw_access_dim
+    WHERE account_id = ? AND ts >= ? AND ts < ? AND dim = 'app' AND detail = '0'
+    GROUP BY key ORDER BY count DESC LIMIT 20
+  `).all(scopeId, fromTs, toTs) as Array<{ app_id: string; count: number }>;
+
+  const failedLoginCount = tsRows.reduce((s, r) => s + r.failed, 0);
 
   return {
     loginsOverTime,
     accessByApplication: accessByApp.map((r) => ({
-      appId: r.detail ?? "",
-      appName: r.name || null,
-      count: r.value,
+      appId: r.app_id,
+      appName: null,
+      count: r.count,
     })),
     appBreakdown,
-    geographicAccess: geographicAccess.map((r) => ({ country: r.name, count: r.value })),
-    identityProviders: identityProviders.map((r) => ({ provider: r.name, count: r.value })),
-    failedLoginCount: stats.get("failed_login_count") ?? 0,
-    failedLoginDetails: parsedFailedDetails,
-    failedByApp: failedByApp.map((r) => ({
-      appId: r.detail ?? "",
-      appName: r.name || null,
-      count: r.value,
+    geographicAccess,
+    identityProviders,
+    failedLoginCount,
+    failedLoginDetails: [],
+    failedByApp: failedByAppRows.map((r) => ({
+      appId: r.app_id,
+      appName: null,
+      count: r.count,
     })),
-    failedByCountry: failedByCountry.map((r) => ({ country: r.name, count: r.value })),
-    anomalies: anomaliesRaw.map((r) => ({
-      severity: r.severity as "critical" | "warning" | "info",
-      title: r.title,
-      description: r.description,
-    })),
+    failedByCountry: [],
+    anomalies: [],
   };
 }
 
@@ -1930,8 +1945,9 @@ export function getHistoricDataStatus(): {
   if (scopes.length === 0) return { available: false, scopes: [], dateRange: null };
 
   const scopeItems = scopes.map((s) => {
+    // Zone datasets: http, firewall, dns, health
     const hasZoneReport = db.prepare(
-      `SELECT 1 FROM collection_log WHERE scope_id = ? AND report_type IN ('executive','security','traffic','performance','dns') AND status = 'success' LIMIT 1`,
+      `SELECT 1 FROM collection_log WHERE scope_id = ? AND report_type IN ('http','firewall','dns','health','executive','security','traffic','performance') AND status = 'success' LIMIT 1`,
     ).get(s.scope_id);
     return {
       id: s.scope_id,
@@ -1940,18 +1956,17 @@ export function getHistoricDataStatus(): {
     };
   });
 
-  // Get overall date range from time series tables
+  // Get overall date range from raw time series tables
   const ranges: number[] = [];
   for (const table of [
-    "http_requests_ts",
-    "gateway_dns_ts",
-    "gateway_network_ts",
-    "daily_active_users_ts",
-    "bot_traffic_ts",
-    "ddos_events_ts",
-    "origin_health_ts",
-    "dns_queries_ts",
-    "access_logins_ts",
+    "raw_http_hourly",
+    "raw_fw_hourly",
+    "raw_dns_hourly",
+    "raw_health_events",
+    "raw_gw_dns_hourly",
+    "raw_gw_net_hourly",
+    "raw_gw_http_hourly",
+    "raw_access_daily",
   ]) {
     try {
       const minMax = db.prepare(`SELECT MIN(ts) as mn, MAX(ts) as mx FROM ${table}`).get() as {

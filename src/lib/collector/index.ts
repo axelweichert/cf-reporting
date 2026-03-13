@@ -1,11 +1,11 @@
 /**
- * Scheduled data collector – fetches all 16 report types for every zone
- * and account, then stores data in normalized SQLite tables.
+ * Scheduled data collector – dataset-oriented raw data lake.
  *
- * Zone-scoped (10): executive, security, traffic, performance, dns,
- *                   origin-health, ssl, bots, api-shield, ddos
- * Account-scoped (6): gateway-dns, gateway-network, shadow-it,
- *                     devices-users, zt-summary, access-audit
+ * Fetches each Cloudflare GraphQL dataset ONCE per zone/account, stores raw
+ * data in flexible dimension tables, and derives all reports from SQL at read time.
+ *
+ * Zone datasets:    http, http_overview, firewall, dns, health + REST snapshots
+ * Account datasets: gw-dns, gw-net, gw-http, access, dosd + REST snapshots
  *
  * Initial backfill: On the very first run (no stored data), the collector
  * fetches historical data day-by-day going back up to N days, based on
@@ -27,37 +27,21 @@ import { CloudflareClient } from "@/lib/cf-client";
 import { discoverZones, discoverAccounts } from "@/lib/token";
 import type { CloudflareZone } from "@/types/cloudflare";
 
-type ZoneReportType =
-  | "executive"
-  | "security"
-  | "traffic"
-  | "performance"
-  | "dns"
-  | "origin-health"
-  | "ssl"
-  | "bots"
-  | "api-shield"
-  | "ddos";
+// Dataset names for collection_log entries
+const ZONE_DATASETS = ["http", "firewall", "dns", "health"] as const;
+const ACCOUNT_DATASETS = ["gw-dns", "gw-net", "gw-http", "access", "dosd"] as const;
 
-type AccountReportType =
-  | "gateway-dns"
-  | "gateway-network"
-  | "shadow-it"
-  | "devices-users"
-  | "zt-summary"
-  | "access-audit";
-
-const ZONE_REPORT_TYPES: ZoneReportType[] = [
+// All report types (for getCollectorStatus – preserves UI compatibility)
+const ZONE_REPORT_TYPES = [
   "executive", "security", "traffic", "performance", "dns",
   "origin-health", "ssl", "bots", "ddos", "api-shield",
-];
-
-const ACCOUNT_REPORT_TYPES: AccountReportType[] = [
+] as const;
+const ACCOUNT_REPORT_TYPES = [
   "gateway-dns", "gateway-network", "shadow-it",
   "devices-users", "zt-summary", "access-audit",
-];
+] as const;
 
-// Delay between daily backfill slices (ms) – keeps us well under rate limits
+// Delay between daily backfill slices (ms)
 const BACKFILL_DELAY_MS = 2_000;
 
 /** Detect Cloudflare permission / plan-gated errors that should be "skipped" not "error". */
@@ -80,10 +64,6 @@ function isPermissionError(message: string): boolean {
 
 /**
  * Determine initial lookback days based on the highest plan among all zones.
- * Cloudflare analytics data retention varies by plan:
- *   Free       –  limited retention, ~3 days of adaptive data
- *   Pro / Biz  – ~30 days
- *   Enterprise – ~90 days
  */
 function detectLookbackDays(zones: CloudflareZone[]): number {
   const envOverride = process.env.INITIAL_LOOKBACK_DAYS;
@@ -125,28 +105,40 @@ function checkDb(): boolean {
   return _dbAvailable;
 }
 
-/** Lazy-load normalized data store helpers. */
+/** Lazy-load data store tracking helpers. */
 function getStore() {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require("@/lib/data-store") as typeof import("@/lib/data-store");
 }
 
-/** Lazy-load zone-scoped report data fetchers (original 5). */
-function getReportData() {
+/** Lazy-load raw fetchers. */
+function getRawFetchers() {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require("@/lib/email/report-data") as typeof import("@/lib/email/report-data");
+  return require("@/lib/collector/raw-fetchers") as typeof import("@/lib/collector/raw-fetchers");
 }
 
-/** Lazy-load zone-scoped report data fetchers (new 5). */
+/** Lazy-load raw store. */
+function getRawStore() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("@/lib/collector/raw-store") as typeof import("@/lib/collector/raw-store");
+}
+
+/** Lazy-load zone-scoped REST snapshot fetchers. */
 function getReportDataZone() {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require("@/lib/email/report-data-zone") as typeof import("@/lib/email/report-data-zone");
 }
 
-/** Lazy-load account-scoped (Zero Trust) report data fetchers. */
+/** Lazy-load account-scoped REST snapshot fetchers. */
 function getReportDataZt() {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require("@/lib/email/report-data-zt") as typeof import("@/lib/email/report-data-zt");
+}
+
+/** Lazy-load zone-scoped REST snapshot fetchers (report-data). */
+function getReportData() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("@/lib/email/report-data") as typeof import("@/lib/email/report-data");
 }
 
 export function initCollector(): void {
@@ -183,7 +175,6 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Build an array of { since, until } day-slices from oldest to newest.
- * Each slice covers exactly one UTC day (or the remainder for the last slice).
  */
 function buildDaySlices(since: Date, until: Date): Array<{ since: string; until: string }> {
   const slices: Array<{ since: string; until: string }> = [];
@@ -208,6 +199,7 @@ export async function runCollection(): Promise<void> {
   if (!token) return;
 
   const store = getStore();
+  const rawStore = getRawStore();
 
   _running = true;
   const runId = randomUUID();
@@ -237,113 +229,76 @@ export async function runCollection(): Promise<void> {
     store.startCollectionRun(runId, zones.length, accounts.length);
 
     const now = new Date();
-    const nowStr = now.toISOString();
     const lookbackDays = detectLookbackDays(zones);
-    // Overlap buffer: 1 hour back from last period_end to avoid gaps
     const OVERLAP_MS = 60 * 60 * 1000;
 
-    // --- Determine which scopes need backfill vs. incremental ---
-    // A scope/reportType needs backfill if getLastTimestamp returns null.
-    // We collect all backfill needs first, then process day-by-day.
-
+    // Determine per-scope since/until based on last timestamp
     type ScopeWork = {
       id: string;
       name: string;
-      reportType: string;
+      type: "zone" | "account";
       fetchSince: string;
       isBackfill: boolean;
     };
 
-    const zoneWork: ScopeWork[] = [];
-    const accountWork: ScopeWork[] = [];
-
+    const allWork: ScopeWork[] = [];
     let hasBackfill = false;
 
     for (const zone of zones) {
-      for (const reportType of ZONE_REPORT_TYPES) {
-        const lastTs = store.getLastTimestamp(zone.id, reportType);
-        if (lastTs) {
-          const overlapped = new Date(new Date(lastTs * 1000).getTime() - OVERLAP_MS);
-          zoneWork.push({
-            id: zone.id, name: zone.name, reportType,
-            fetchSince: overlapped.toISOString(), isBackfill: false,
-          });
-        } else {
-          hasBackfill = true;
-          const since = new Date(now);
-          since.setDate(since.getDate() - lookbackDays);
-          zoneWork.push({
-            id: zone.id, name: zone.name, reportType,
-            fetchSince: since.toISOString(), isBackfill: true,
-          });
-        }
+      const lastTs = rawStore.getZoneLastTimestamp(zone.id);
+      if (lastTs) {
+        const overlapped = new Date(new Date(lastTs * 1000).getTime() - OVERLAP_MS);
+        allWork.push({ id: zone.id, name: zone.name, type: "zone", fetchSince: overlapped.toISOString(), isBackfill: false });
+      } else {
+        hasBackfill = true;
+        const since = new Date(now);
+        since.setDate(since.getDate() - lookbackDays);
+        allWork.push({ id: zone.id, name: zone.name, type: "zone", fetchSince: since.toISOString(), isBackfill: true });
       }
     }
 
     for (const account of accounts) {
-      for (const reportType of ACCOUNT_REPORT_TYPES) {
-        const lastTs = store.getLastTimestamp(account.id, reportType);
-        if (lastTs) {
-          const overlapped = new Date(new Date(lastTs * 1000).getTime() - OVERLAP_MS);
-          accountWork.push({
-            id: account.id, name: account.name, reportType,
-            fetchSince: overlapped.toISOString(), isBackfill: false,
-          });
-        } else {
-          hasBackfill = true;
-          const since = new Date(now);
-          since.setDate(since.getDate() - lookbackDays);
-          accountWork.push({
-            id: account.id, name: account.name, reportType,
-            fetchSince: since.toISOString(), isBackfill: true,
-          });
-        }
+      const lastTs = rawStore.getAccountLastTimestamp(account.id);
+      if (lastTs) {
+        const overlapped = new Date(new Date(lastTs * 1000).getTime() - OVERLAP_MS);
+        allWork.push({ id: account.id, name: account.name, type: "account", fetchSince: overlapped.toISOString(), isBackfill: false });
+      } else {
+        hasBackfill = true;
+        const since = new Date(now);
+        since.setDate(since.getDate() - lookbackDays);
+        allWork.push({ id: account.id, name: account.name, type: "account", fetchSince: since.toISOString(), isBackfill: true });
       }
     }
 
-    // --- Process incremental work (small ranges, no throttling needed) ---
-    const incrementalZone = zoneWork.filter((w) => !w.isBackfill);
-    const incrementalAccount = accountWork.filter((w) => !w.isBackfill);
-
-    for (const work of incrementalZone) {
-      const result = await collectZoneReport(
-        token, runId, work, nowStr, accounts[0]?.id, store,
+    // Process incremental work (small ranges, no throttling needed)
+    const incrementalWork = allWork.filter((w) => !w.isBackfill);
+    for (const work of incrementalWork) {
+      const result = await collectScope(
+        client, token, runId, work, now.toISOString(), store, rawStore,
       );
       successCount += result.success;
       errorCount += result.error;
       skippedCount += result.skipped;
     }
 
-    for (const work of incrementalAccount) {
-      const result = await collectAccountReport(token, runId, work, nowStr, store);
-      successCount += result.success;
-      errorCount += result.error;
-      skippedCount += result.skipped;
-    }
-
-    // --- Process backfill work day-by-day with throttling ---
+    // Process backfill work day-by-day with throttling
     if (hasBackfill) {
-      const backfillZone = zoneWork.filter((w) => w.isBackfill);
-      const backfillAccount = accountWork.filter((w) => w.isBackfill);
-
-      // Find the earliest backfill start
+      const backfillWork = allWork.filter((w) => w.isBackfill);
       const earliestSince = new Date(Math.min(
-        ...backfillZone.map((w) => new Date(w.fetchSince).getTime()),
-        ...backfillAccount.map((w) => new Date(w.fetchSince).getTime()),
+        ...backfillWork.map((w) => new Date(w.fetchSince).getTime()),
       ));
       const daySlices = buildDaySlices(earliestSince, now);
 
-      console.log(`[collector] Backfill: ${lookbackDays} days (${daySlices.length} slices) for ${backfillZone.length + backfillAccount.length} scope/report combos`);
+      console.log(`[collector] Backfill: ${lookbackDays} days (${daySlices.length} slices) for ${backfillWork.length} scope(s)`);
 
       for (let i = 0; i < daySlices.length; i++) {
         const slice = daySlices[i];
         const dayLabel = slice.since.slice(0, 10);
 
-        // Collect all backfill scopes for this day-slice
-        for (const work of backfillZone) {
+        for (const work of backfillWork) {
           const dayWork = { ...work, fetchSince: slice.since };
-          const result = await collectZoneReport(
-            token, runId, dayWork, slice.until, accounts[0]?.id, store,
+          const result = await collectScope(
+            client, token, runId, dayWork, slice.until, store, rawStore,
             `backfill ${dayLabel}`,
           );
           successCount += result.success;
@@ -351,18 +306,6 @@ export async function runCollection(): Promise<void> {
           skippedCount += result.skipped;
         }
 
-        for (const work of backfillAccount) {
-          const dayWork = { ...work, fetchSince: slice.since };
-          const result = await collectAccountReport(
-            token, runId, dayWork, slice.until, store,
-            `backfill ${dayLabel}`,
-          );
-          successCount += result.success;
-          errorCount += result.error;
-          skippedCount += result.skipped;
-        }
-
-        // Throttle between day-slices (skip delay after the last slice)
         if (i < daySlices.length - 1) {
           await sleep(BACKFILL_DELAY_MS);
         }
@@ -386,160 +329,280 @@ export async function runCollection(): Promise<void> {
   }
 }
 
-// --- Per-scope collection helpers ---
+
+// =============================================================================
+// Per-scope collection
+// =============================================================================
 
 type CollectResult = { success: number; error: number; skipped: number };
 
-async function collectZoneReport(
+async function collectScope(
+  client: CloudflareClient,
   token: string,
   runId: string,
-  work: { id: string; name: string; reportType: string; fetchSince: string },
+  work: { id: string; name: string; type: "zone" | "account"; fetchSince: string },
   until: string,
-  accountId: string | undefined,
   store: ReturnType<typeof getStore>,
+  rawStore: ReturnType<typeof getRawStore>,
   labelOverride?: string,
 ): Promise<CollectResult> {
+  if (work.type === "zone") {
+    return collectZone(client, token, runId, work, until, store, rawStore, labelOverride);
+  } else {
+    return collectAccount(client, token, runId, work, until, store, rawStore, labelOverride);
+  }
+}
+
+async function collectZone(
+  client: CloudflareClient,
+  token: string,
+  runId: string,
+  work: { id: string; name: string; fetchSince: string },
+  until: string,
+  store: ReturnType<typeof getStore>,
+  rawStore: ReturnType<typeof getRawStore>,
+  labelOverride?: string,
+): Promise<CollectResult> {
+  const label = labelOverride ?? "incremental";
+  let success = 0;
+  let error = 0;
+  let skipped = 0;
+
+  // Fetch all GraphQL datasets
   const fetchStart = Date.now();
   try {
-    const data = await fetchZoneReportData(
-      token, work.id, work.fetchSince, until,
-      work.reportType as ZoneReportType, accountId,
-    );
+    const fetchers = getRawFetchers();
+    const rawData = await fetchers.fetchAllZoneData(client, work.id, work.fetchSince, until);
 
-    const collectedAt = Math.floor(Date.now() / 1000);
-    store.storeReportData(work.id, work.name, work.reportType, collectedAt, data);
+    // Store raw data
+    rawStore.storeRawZoneData(work.id, rawData);
+
     const duration = Date.now() - fetchStart;
-    store.logCollectionItem(runId, work.id, work.name, work.reportType, "success", duration);
-    const label = labelOverride ?? "incremental";
-    console.log(`[collector] ${work.name} / ${work.reportType} – OK (${duration}ms) [${label}]`);
-    return { success: 1, error: 0, skipped: 0 };
+
+    // Log each dataset individually
+    for (const ds of ZONE_DATASETS) {
+      const hasData = ds === "http" ? rawData.http !== null
+        : ds === "firewall" ? rawData.firewall !== null
+        : ds === "dns" ? rawData.dns !== null
+        : rawData.health !== null;
+
+      if (hasData) {
+        store.logCollectionItem(runId, work.id, work.name, ds, "success", duration);
+        success++;
+      } else {
+        store.logCollectionItem(runId, work.id, work.name, ds, "skipped", duration, "Dataset returned null (permission or no data)");
+        skipped++;
+      }
+    }
+
+    console.log(`[collector] ${work.name} / zone-datasets – OK (${duration}ms) [${label}]`);
   } catch (err) {
     const duration = Date.now() - fetchStart;
     const message = err instanceof Error ? err.message : "Unknown error";
+
     if (isPermissionError(message)) {
-      store.logCollectionItem(runId, work.id, work.name, work.reportType, "skipped", duration, message);
-      console.log(`[collector] ${work.name} / ${work.reportType} – SKIPPED (${duration}ms) [permission]`);
-      return { success: 0, error: 0, skipped: 1 };
+      for (const ds of ZONE_DATASETS) {
+        store.logCollectionItem(runId, work.id, work.name, ds, "skipped", duration, message);
+        skipped++;
+      }
+      console.log(`[collector] ${work.name} / zone-datasets – SKIPPED (${duration}ms) [permission]`);
+    } else {
+      for (const ds of ZONE_DATASETS) {
+        store.logCollectionItem(runId, work.id, work.name, ds, "error", duration, message);
+        error++;
+      }
+      console.error(`[collector] ${work.name} / zone-datasets – ERROR: ${message}`);
     }
-    store.logCollectionItem(runId, work.id, work.name, work.reportType, "error", duration, message);
-    console.error(`[collector] ${work.name} / ${work.reportType} – ERROR: ${message}`);
-    return { success: 0, error: 1, skipped: 0 };
   }
+
+  // Fetch REST snapshots (these remain unchanged)
+  const restResult = await collectZoneRestSnapshots(token, runId, work, until, store);
+  success += restResult.success;
+  error += restResult.error;
+  skipped += restResult.skipped;
+
+  return { success, error, skipped };
 }
 
-async function collectAccountReport(
+async function collectAccount(
+  client: CloudflareClient,
   token: string,
   runId: string,
-  work: { id: string; name: string; reportType: string; fetchSince: string },
+  work: { id: string; name: string; fetchSince: string },
   until: string,
   store: ReturnType<typeof getStore>,
+  rawStore: ReturnType<typeof getRawStore>,
   labelOverride?: string,
 ): Promise<CollectResult> {
+  const label = labelOverride ?? "incremental";
+  let success = 0;
+  let error = 0;
+  let skipped = 0;
+
+  // Fetch all GraphQL datasets
   const fetchStart = Date.now();
   try {
-    const data = await fetchAccountReportData(
-      token, work.id, work.fetchSince, until,
-      work.reportType as AccountReportType,
-    );
+    const fetchers = getRawFetchers();
+    const rawData = await fetchers.fetchAllAccountData(client, work.id, work.fetchSince, until);
 
-    const collectedAt = Math.floor(Date.now() / 1000);
-    store.storeReportData(work.id, work.name, work.reportType, collectedAt, data);
+    // Store raw data
+    rawStore.storeRawAccountData(work.id, rawData);
+
     const duration = Date.now() - fetchStart;
-    store.logCollectionItem(runId, work.id, work.name, work.reportType, "success", duration);
-    const label = labelOverride ?? "incremental";
-    console.log(`[collector] ${work.name} / ${work.reportType} – OK (${duration}ms) [${label}]`);
-    return { success: 1, error: 0, skipped: 0 };
+
+    // Log each dataset individually
+    for (const ds of ACCOUNT_DATASETS) {
+      const hasData = ds === "gw-dns" ? rawData.gwDns !== null
+        : ds === "gw-net" ? rawData.gwNet !== null
+        : ds === "gw-http" ? rawData.gwHttp !== null
+        : ds === "access" ? rawData.access !== null
+        : rawData.dosd !== null;
+
+      if (hasData) {
+        store.logCollectionItem(runId, work.id, work.name, ds, "success", duration);
+        success++;
+      } else {
+        store.logCollectionItem(runId, work.id, work.name, ds, "skipped", duration, "Dataset returned null (permission or no data)");
+        skipped++;
+      }
+    }
+
+    console.log(`[collector] ${work.name} / account-datasets – OK (${duration}ms) [${label}]`);
   } catch (err) {
     const duration = Date.now() - fetchStart;
     const message = err instanceof Error ? err.message : "Unknown error";
+
     if (isPermissionError(message)) {
-      store.logCollectionItem(runId, work.id, work.name, work.reportType, "skipped", duration, message);
-      console.log(`[collector] ${work.name} / ${work.reportType} – SKIPPED (${duration}ms) [permission]`);
-      return { success: 0, error: 0, skipped: 1 };
+      for (const ds of ACCOUNT_DATASETS) {
+        store.logCollectionItem(runId, work.id, work.name, ds, "skipped", duration, message);
+        skipped++;
+      }
+      console.log(`[collector] ${work.name} / account-datasets – SKIPPED (${duration}ms) [permission]`);
+    } else {
+      for (const ds of ACCOUNT_DATASETS) {
+        store.logCollectionItem(runId, work.id, work.name, ds, "error", duration, message);
+        error++;
+      }
+      console.error(`[collector] ${work.name} / account-datasets – ERROR: ${message}`);
     }
-    store.logCollectionItem(runId, work.id, work.name, work.reportType, "error", duration, message);
-    console.error(`[collector] ${work.name} / ${work.reportType} – ERROR: ${message}`);
-    return { success: 0, error: 1, skipped: 0 };
   }
+
+  // Fetch REST snapshots (devices, users, posture, access apps)
+  const restResult = await collectAccountRestSnapshots(token, runId, work, store);
+  success += restResult.success;
+  error += restResult.error;
+  skipped += restResult.skipped;
+
+  return { success, error, skipped };
 }
 
-// --- Report data fetcher dispatch ---
 
-async function fetchZoneReportData(
+// =============================================================================
+// REST snapshot collection (kept from v4 – unchanged data shapes)
+// =============================================================================
+
+async function collectZoneRestSnapshots(
   token: string,
-  zoneId: string,
-  since: string,
+  runId: string,
+  work: { id: string; name: string; fetchSince: string },
   until: string,
-  reportType: ZoneReportType,
-  accountId?: string,
-): Promise<unknown> {
-  switch (reportType) {
-    case "executive": {
+  store: ReturnType<typeof getStore>,
+): Promise<CollectResult> {
+  let success = 0;
+  let error = 0;
+  let skipped = 0;
+
+  // DNS records, SSL certs/settings, health checks – these go into kept v4 tables
+  const restSnapshotTypes = [
+    { type: "dns-records", fn: async () => {
       const m = getReportData();
-      return m.fetchExecutiveDataServer(token, zoneId, since, until);
-    }
-    case "security": {
-      const m = getReportData();
-      return m.fetchSecurityDataServer(token, zoneId, since, until);
-    }
-    case "traffic": {
-      const m = getReportData();
-      return m.fetchTrafficDataServer(token, zoneId, since, until);
-    }
-    case "performance": {
-      const m = getReportData();
-      return m.fetchPerformanceDataServer(token, zoneId, since, until);
-    }
-    case "dns": {
-      const m = getReportData();
-      return m.fetchDnsDataServer(token, zoneId, since, until);
-    }
-    case "origin-health": {
+      return m.fetchDnsDataServer(token, work.id, work.fetchSince, until);
+    }},
+    { type: "ssl-snapshots", fn: async () => {
       const m = getReportDataZone();
-      return m.fetchOriginHealthDataServer(token, zoneId, since, until);
-    }
-    case "ssl": {
+      return m.fetchSslDataServer(token, work.id, work.fetchSince, until);
+    }},
+    { type: "origin-health-snapshots", fn: async () => {
       const m = getReportDataZone();
-      return m.fetchSslDataServer(token, zoneId, since, until);
-    }
-    case "bots": {
+      return m.fetchOriginHealthDataServer(token, work.id, work.fetchSince, until);
+    }},
+    { type: "api-shield-snapshots", fn: async () => {
       const m = getReportDataZone();
-      return m.fetchBotDataServer(token, zoneId, since, until);
-    }
-    case "api-shield": {
-      const m = getReportDataZone();
-      return m.fetchApiShieldDataServer(token, zoneId, since, until);
-    }
-    case "ddos": {
-      const m = getReportDataZone();
-      return m.fetchDdosDataServer(token, zoneId, since, until, accountId);
+      return m.fetchApiShieldDataServer(token, work.id, work.fetchSince, until);
+    }},
+  ];
+
+  for (const snap of restSnapshotTypes) {
+    const fetchStart = Date.now();
+    try {
+      const data = await snap.fn();
+      const collectedAt = Math.floor(Date.now() / 1000);
+      store.storeReportData(work.id, work.name, snap.type, collectedAt, data);
+      const duration = Date.now() - fetchStart;
+      store.logCollectionItem(runId, work.id, work.name, snap.type, "success", duration);
+      success++;
+    } catch (err) {
+      const duration = Date.now() - fetchStart;
+      const message = err instanceof Error ? err.message : "Unknown error";
+      if (isPermissionError(message)) {
+        store.logCollectionItem(runId, work.id, work.name, snap.type, "skipped", duration, message);
+        skipped++;
+      } else {
+        store.logCollectionItem(runId, work.id, work.name, snap.type, "error", duration, message);
+        error++;
+      }
     }
   }
+
+  return { success, error, skipped };
 }
 
-async function fetchAccountReportData(
+async function collectAccountRestSnapshots(
   token: string,
-  accountId: string,
-  since: string,
-  until: string,
-  reportType: AccountReportType,
-): Promise<unknown> {
-  const m = getReportDataZt();
-  switch (reportType) {
-    case "gateway-dns":
-      return m.fetchGatewayDnsDataServer(token, accountId, since, until);
-    case "gateway-network":
-      return m.fetchGatewayNetworkDataServer(token, accountId, since, until);
-    case "shadow-it":
-      return m.fetchShadowItDataServer(token, accountId, since, until);
-    case "devices-users":
-      return m.fetchDevicesUsersDataServer(token, accountId);
-    case "zt-summary":
-      return m.fetchZtSummaryDataServer(token, accountId, since, until);
-    case "access-audit":
-      return m.fetchAccessAuditDataServer(token, accountId, since, until);
+  runId: string,
+  work: { id: string; name: string },
+  store: ReturnType<typeof getStore>,
+): Promise<CollectResult> {
+  let success = 0;
+  let error = 0;
+  let skipped = 0;
+
+  const restSnapshotTypes = [
+    { type: "devices-users", fn: async () => {
+      const m = getReportDataZt();
+      return m.fetchDevicesUsersDataServer(token, work.id);
+    }},
+  ];
+
+  for (const snap of restSnapshotTypes) {
+    const fetchStart = Date.now();
+    try {
+      const data = await snap.fn();
+      const collectedAt = Math.floor(Date.now() / 1000);
+      store.storeReportData(work.id, work.name, snap.type, collectedAt, data);
+      const duration = Date.now() - fetchStart;
+      store.logCollectionItem(runId, work.id, work.name, snap.type, "success", duration);
+      success++;
+    } catch (err) {
+      const duration = Date.now() - fetchStart;
+      const message = err instanceof Error ? err.message : "Unknown error";
+      if (isPermissionError(message)) {
+        store.logCollectionItem(runId, work.id, work.name, snap.type, "skipped", duration, message);
+        skipped++;
+      } else {
+        store.logCollectionItem(runId, work.id, work.name, snap.type, "error", duration, message);
+        error++;
+      }
+    }
   }
+
+  return { success, error, skipped };
 }
+
+
+// =============================================================================
+// Public API
+// =============================================================================
 
 export function getCollectorStatus() {
   // Derive running state from DB to work across Next.js workers
