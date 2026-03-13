@@ -8,15 +8,14 @@
  * Account datasets: gw-dns, gw-net, gw-http, access, dosd + REST snapshots
  *
  * Initial backfill: On the very first run (no stored data), the collector
- * fetches historical data day-by-day going back up to N days, based on
- * the highest Cloudflare plan detected:
- *   - Free:              3 days
- *   - Pro / Business:   30 days
- *   - Enterprise:       90 days
+ * fetches historical data going back 365 days by default. The CF API enforces
+ * per-dataset retention limits (typically 3–90 days depending on plan/dataset),
+ * and these are handled gracefully as "skipped" items.
  * Override with INITIAL_LOOKBACK_DAYS env var (1–365).
  *
- * Throttling: A 2-second pause is inserted between each day-slice during
- * backfill to stay well within Cloudflare's 1200 req / 5 min rate limit.
+ * Performance: Extension datasets are batched – multiple datasets are combined
+ * into a single GQL request (CF counts this as 1 query against the 300/5min
+ * GQL rate limit). Backfill uses 7-day slices instead of daily.
  *
  * Requires CF_API_TOKEN + writable SQLite database.
  */
@@ -25,7 +24,7 @@ import { randomUUID } from "crypto";
 import cron, { type ScheduledTask } from "node-cron";
 import { CloudflareClient } from "@/lib/cf-client";
 import { discoverZones, discoverAccounts } from "@/lib/token";
-import type { CloudflareZone } from "@/types/cloudflare";
+
 
 // Dataset names for collection_log entries
 const ZONE_DATASETS = ["http", "firewall", "dns", "health"] as const;
@@ -41,8 +40,11 @@ const ACCOUNT_REPORT_TYPES = [
   "devices-users", "zt-summary", "access-audit",
 ] as const;
 
-// Delay between daily backfill slices (ms)
-const BACKFILL_DELAY_MS = 2_000;
+// Delay between backfill slices (ms) – keeps us well under 300 GQL queries / 5 min
+const BACKFILL_DELAY_MS = 1_000;
+
+// How many days per backfill slice (wider = fewer API calls)
+const BACKFILL_SLICE_DAYS = 7;
 
 /** Detect Cloudflare permission / plan-gated errors that should be "skipped" not "error". */
 function isPermissionError(message: string): boolean {
@@ -59,31 +61,24 @@ function isPermissionError(message: string): boolean {
     lower.includes("not available for free") ||
     lower.includes("access denied") ||
     /\b(403|10000)\b/.test(message) ||
-    lower.includes("cannot request data older than")
+    lower.includes("cannot request data older than") ||
+    lower.includes("time range is too large") ||
+    lower.includes("time range can't be wider")
   );
 }
 
 /**
- * Determine initial lookback days based on the highest plan among all zones.
+ * Determine initial lookback days. Default: 365 days – the CF API enforces
+ * per-dataset retention limits and returns "cannot request data older than"
+ * errors that are handled gracefully as skipped items.
  */
-function detectLookbackDays(zones: CloudflareZone[]): number {
+function detectLookbackDays(): number {
   const envOverride = process.env.INITIAL_LOOKBACK_DAYS;
   if (envOverride) {
     const parsed = parseInt(envOverride, 10);
     if (!isNaN(parsed) && parsed >= 1) return Math.min(parsed, 365);
   }
-
-  let maxTier = 0; // 0=free, 1=pro, 2=business, 3=enterprise
-  for (const zone of zones) {
-    const plan = zone.plan.name.toLowerCase();
-    if (plan.includes("enterprise")) { maxTier = Math.max(maxTier, 3); }
-    else if (plan.includes("business")) { maxTier = Math.max(maxTier, 2); }
-    else if (plan.includes("pro")) { maxTier = Math.max(maxTier, 1); }
-  }
-
-  if (maxTier >= 3) return 90;
-  if (maxTier >= 1) return 30;
-  return 3;
+  return 365;
 }
 
 let _running = false;
@@ -187,17 +182,18 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Build an array of { since, until } day-slices from oldest to newest.
+ * Build an array of { since, until } slices from oldest to newest.
+ * @param sliceDays – width of each slice in days (default: BACKFILL_SLICE_DAYS)
  */
-function buildDaySlices(since: Date, until: Date): Array<{ since: string; until: string }> {
+function buildSlices(since: Date, until: Date, sliceDays = BACKFILL_SLICE_DAYS): Array<{ since: string; until: string }> {
   const slices: Array<{ since: string; until: string }> = [];
   const cursor = new Date(since);
   while (cursor < until) {
-    const dayEnd = new Date(cursor);
-    dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
-    if (dayEnd > until) dayEnd.setTime(until.getTime());
-    slices.push({ since: cursor.toISOString(), until: dayEnd.toISOString() });
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    const sliceEnd = new Date(cursor);
+    sliceEnd.setUTCDate(sliceEnd.getUTCDate() + sliceDays);
+    if (sliceEnd > until) sliceEnd.setTime(until.getTime());
+    slices.push({ since: cursor.toISOString(), until: sliceEnd.toISOString() });
+    cursor.setUTCDate(cursor.getUTCDate() + sliceDays);
   }
   return slices;
 }
@@ -242,7 +238,7 @@ export async function runCollection(): Promise<void> {
     store.startCollectionRun(runId, zones.length, accounts.length);
 
     const now = new Date();
-    const lookbackDays = detectLookbackDays(zones);
+    const lookbackDays = detectLookbackDays();
     const OVERLAP_MS = 60 * 60 * 1000;
 
     // Determine per-scope since/until based on last timestamp
@@ -300,26 +296,26 @@ export async function runCollection(): Promise<void> {
       const earliestSince = new Date(Math.min(
         ...backfillWork.map((w) => new Date(w.fetchSince).getTime()),
       ));
-      const daySlices = buildDaySlices(earliestSince, now);
+      const slices = buildSlices(earliestSince, now);
 
-      console.log(`[collector] Backfill: ${lookbackDays} days (${daySlices.length} slices) for ${backfillWork.length} scope(s)`);
+      console.log(`[collector] Backfill: ${lookbackDays} days (${slices.length} × ${BACKFILL_SLICE_DAYS}d slices) for ${backfillWork.length} scope(s)`);
 
-      for (let i = 0; i < daySlices.length; i++) {
-        const slice = daySlices[i];
-        const dayLabel = slice.since.slice(0, 10);
+      for (let i = 0; i < slices.length; i++) {
+        const slice = slices[i];
+        const sliceLabel = `${slice.since.slice(0, 10)}→${slice.until.slice(0, 10)}`;
 
         for (const work of backfillWork) {
-          const dayWork = { ...work, fetchSince: slice.since };
+          const sliceWork = { ...work, fetchSince: slice.since };
           const result = await collectScope(
-            client, token, runId, dayWork, slice.until, store, rawStore,
-            `backfill ${dayLabel}`,
+            client, token, runId, sliceWork, slice.until, store, rawStore,
+            `backfill ${sliceLabel}`,
           );
           successCount += result.success;
           errorCount += result.error;
           skippedCount += result.skipped;
         }
 
-        if (i < daySlices.length - 1) {
+        if (i < slices.length - 1) {
           await sleep(BACKFILL_DELAY_MS);
         }
       }
@@ -527,7 +523,7 @@ async function collectAccount(
 
 
 // =============================================================================
-// Extension dataset collection (generic EAV – 35 datasets)
+// Extension dataset collection (batched GQL – multiple datasets per request)
 // =============================================================================
 
 async function collectExtDatasets(
@@ -542,8 +538,8 @@ async function collectExtDatasets(
   label: string,
 ): Promise<CollectResult> {
   const { EXT_ZONE_DATASETS, EXT_ACCOUNT_DATASETS } = getExtDatasets();
-  const { fetchAndStoreExtDataset, getExtLastTimestamp } = getExtFetcher();
-  const datasets = scopeType === "zone" ? EXT_ZONE_DATASETS : EXT_ACCOUNT_DATASETS;
+  const { fetchBatchExtDatasets, fetchAndStoreExtDataset, getExtLastTimestamp, BATCH_SIZE } = getExtFetcher();
+  const allDatasets = scopeType === "zone" ? EXT_ZONE_DATASETS : EXT_ACCOUNT_DATASETS;
 
   let success = 0;
   let error = 0;
@@ -551,42 +547,77 @@ async function collectExtDatasets(
 
   const OVERLAP_MS = 60 * 60 * 1000; // 1-hour overlap for dedup safety
 
-  for (const def of datasets) {
-    const fetchStart = Date.now();
-    try {
-      // Each ext dataset has its own incremental cursor
-      let effectiveSince = since;
-      const lastTs = getExtLastTimestamp(scopeId, def.gqlNode);
-      if (lastTs) {
-        const overlapped = new Date(new Date(lastTs * 1000).getTime() - OVERLAP_MS);
-        const overlappedIso = overlapped.toISOString();
-        // Use whichever is more recent: the ext cursor or the scope-level since
-        if (overlappedIso > effectiveSince) {
-          effectiveSince = overlappedIso;
+  // Resolve effective since per dataset (incremental cursor)
+  const datasetsWithSince = allDatasets.map((def) => {
+    let effectiveSince = since;
+    const lastTs = getExtLastTimestamp(scopeId, def.gqlNode);
+    if (lastTs) {
+      const overlapped = new Date(new Date(lastTs * 1000).getTime() - OVERLAP_MS);
+      const overlappedIso = overlapped.toISOString();
+      if (overlappedIso > effectiveSince) effectiveSince = overlappedIso;
+    }
+    return { def, since: effectiveSince };
+  });
+
+  // Group datasets that share the same effective since (can be batched together)
+  // Most datasets during backfill share the same since, so this groups efficiently
+  const byWindow = new Map<string, typeof datasetsWithSince>();
+  for (const item of datasetsWithSince) {
+    const key = item.since;
+    if (!byWindow.has(key)) byWindow.set(key, []);
+    byWindow.get(key)!.push(item);
+  }
+
+  for (const [windowSince, items] of byWindow) {
+    // Split into batches of BATCH_SIZE
+    for (let i = 0; i < items.length; i += BATCH_SIZE) {
+      const batch = items.slice(i, i + BATCH_SIZE);
+      const defs = batch.map((b) => b.def);
+      const fetchStart = Date.now();
+
+      // Try batched query first
+      const batchResult = await fetchBatchExtDatasets(client, defs, scopeId, windowSince, until);
+
+      if (batchResult !== null) {
+        // Batch succeeded – log results per dataset
+        const duration = Date.now() - fetchStart;
+        for (const def of defs) {
+          const r = batchResult.get(def.key);
+          if (!r || (r.tsRows === 0 && r.dimRows === 0)) {
+            store.logCollectionItem(runId, scopeId, scopeName, def.key, "skipped", duration, "No data returned");
+            skipped++;
+          } else {
+            store.logCollectionItem(runId, scopeId, scopeName, def.key, "success", duration);
+            success++;
+          }
         }
-      }
-
-      const result = await fetchAndStoreExtDataset(client, def, scopeId, effectiveSince, until);
-      const duration = Date.now() - fetchStart;
-
-      if (result.tsRows === 0 && result.dimRows === 0) {
-        store.logCollectionItem(runId, scopeId, scopeName, def.key, "skipped", duration, "No data returned");
-        skipped++;
       } else {
-        store.logCollectionItem(runId, scopeId, scopeName, def.key, "success", duration);
-        success++;
-      }
-    } catch (err) {
-      const duration = Date.now() - fetchStart;
-      const message = err instanceof Error ? err.message : "Unknown error";
-
-      if (isPermissionError(message)) {
-        store.logCollectionItem(runId, scopeId, scopeName, def.key, "skipped", duration, message);
-        skipped++;
-      } else {
-        store.logCollectionItem(runId, scopeId, scopeName, def.key, "error", duration, message);
-        error++;
-        console.error(`[collector] ${scopeName} / ${def.key} – ERROR: ${message}`);
+        // Batch failed – fall back to individual queries
+        for (const def of defs) {
+          const individualStart = Date.now();
+          try {
+            const result = await fetchAndStoreExtDataset(client, def, scopeId, windowSince, until);
+            const duration = Date.now() - individualStart;
+            if (result.tsRows === 0 && result.dimRows === 0) {
+              store.logCollectionItem(runId, scopeId, scopeName, def.key, "skipped", duration, "No data returned");
+              skipped++;
+            } else {
+              store.logCollectionItem(runId, scopeId, scopeName, def.key, "success", duration);
+              success++;
+            }
+          } catch (err) {
+            const duration = Date.now() - individualStart;
+            const message = err instanceof Error ? err.message : "Unknown error";
+            if (isPermissionError(message)) {
+              store.logCollectionItem(runId, scopeId, scopeName, def.key, "skipped", duration, message);
+              skipped++;
+            } else {
+              store.logCollectionItem(runId, scopeId, scopeName, def.key, "error", duration, message);
+              error++;
+              console.error(`[collector] ${scopeName} / ${def.key} – ERROR: ${message}`);
+            }
+          }
+        }
       }
     }
   }

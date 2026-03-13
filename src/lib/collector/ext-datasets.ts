@@ -10,7 +10,7 @@
  * Datasets without `count` rely on sum/max/avg metrics only.
  * The fetcher checks `hasCount` to decide whether to include count in GQL.
  *
- * Generated from GQL introspection on 2026-03-13. 27 zone + 108 account = 135 total.
+ * Generated from GQL introspection on 2026-03-13. 28 zone + 122 account = 150 total.
  */
 
 // =============================================================================
@@ -111,7 +111,7 @@ function dim(field: string, limit = 50): ExtDimensionDef {
 }
 
 // =============================================================================
-// Zone-scoped datasets (27)
+// Zone-scoped datasets (28)
 // =============================================================================
 
 export const EXT_ZONE_DATASETS: ExtDatasetDef[] = [
@@ -201,10 +201,15 @@ export const EXT_ZONE_DATASETS: ExtDatasetDef[] = [
   zoneDef("zarazTriggersAdaptiveGroups", "ext:zaraz-triggers", {
     metrics: [COUNT], dimensions: [dim("triggerName")],
   }),
+
+  // API Shield sequences (Enterprise-only)
+  zoneDef("apiRequestSequencesGroups", "ext:api-sequences", {
+    hasCount: false, metrics: [], dimensions: [],
+  }),
 ];
 
 // =============================================================================
-// Account-scoped datasets (108)
+// Account-scoped datasets (122)
 // =============================================================================
 
 export const EXT_ACCOUNT_DATASETS: ExtDatasetDef[] = [
@@ -635,6 +640,54 @@ export const EXT_ACCOUNT_DATASETS: ExtDatasetDef[] = [
   }),
   accountDef("zarazTriggersAdaptiveGroups", "ext:acct-zaraz-triggers", {
     metrics: [COUNT], dimensions: [dim("triggerName")],
+  }),
+
+  // Gateway L4/L7 sessions
+  accountDef("gatewayL4SessionsAdaptiveGroups", "ext:gw-l4-sessions", {
+    metrics: [COUNT], dimensions: [dim("action"), dim("transport")],
+  }),
+  accountDef("gatewayL7RequestsAdaptiveGroups", "ext:gw-l7-requests", {
+    metrics: [COUNT], dimensions: [dim("action"), dim("httpHost")],
+  }),
+
+  // DDoS attack analytics
+  accountDef("dosdAttackAnalyticsGroups", "ext:dosd-attacks", {
+    hasCount: false, timeDim: "startDatetime", timeBucket: "hour",
+    metrics: [], dimensions: [],
+  }),
+
+  // Aegis (Dedicated CDN Egress IPs)
+  accountDef("aegisIpUtilizationAdaptiveGroups", "ext:aegis-ip-util", {
+    hasCount: false, timeDim: "datetimeFiveMinutes", timeBucket: "hour",
+    metrics: [...avgMetrics("utilization"), ...maxMetrics("utilization")], dimensions: [],
+  }),
+
+  // Magic WAN Connector telemetry
+  accountDef("mconnTelemetrySnapshotsAdaptiveGroups", "ext:mconn-snapshots", {
+    metrics: [COUNT, ...maxMetrics("loadAverage1m", "loadAverage5m", "memoryAvailableBytes", "memoryTotalBytes", "cpuCount")],
+    dimensions: [dim("connectorId")],
+  }),
+  accountDef("mconnTelemetrySnapshotMountsAdaptiveGroups", "ext:mconn-mounts", {
+    metrics: [COUNT, ...maxMetrics("availableBytes", "totalBytes")], dimensions: [dim("connectorId"), dim("mountPoint")],
+  }),
+  accountDef("mconnTelemetrySnapshotThermalsAdaptiveGroups", "ext:mconn-thermals", {
+    metrics: [COUNT, ...maxMetrics("currentCelcius", "criticalCelcius")], dimensions: [dim("connectorId"), dim("label")],
+  }),
+  accountDef("mconnTelemetryEventsAdaptiveGroups", "ext:mconn-events", {
+    metrics: [COUNT], dimensions: [dim("connectorId")],
+  }),
+  accountDef("mconnTelemetrySnapshotDisksAdaptiveGroups", "ext:mconn-disks", {
+    metrics: [COUNT, ...sumMetrics("reads", "writes", "sectorsRead", "sectorsWritten")],
+    dimensions: [dim("connectorId")],
+  }),
+  accountDef("mconnTelemetrySnapshotInterfacesAdaptiveGroups", "ext:mconn-interfaces", {
+    metrics: [COUNT], dimensions: [dim("connectorId")],
+  }),
+  accountDef("mconnTelemetrySnapshotNetdevsAdaptiveGroups", "ext:mconn-netdevs", {
+    metrics: [COUNT, ...sumMetrics("recvBytes", "recvPackets", "sentBytes", "sentPackets")], dimensions: [dim("connectorId")],
+  }),
+  accountDef("mconnTelemetrySnapshotTunnelsAdaptiveGroups", "ext:mconn-tunnels", {
+    metrics: [COUNT], dimensions: [dim("connectorId")],
   }),
 
   // Zero Trust

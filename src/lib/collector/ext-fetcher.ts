@@ -2,8 +2,9 @@
  * Generic extension dataset fetcher – builds GQL queries from registry
  * definitions, executes them, and stores results into EAV tables.
  *
- * One GQL call per dataset. Permission errors are caught and reported
- * as "skipped" (not "error") by the caller.
+ * Supports batched queries: multiple datasets combined into a single GQL
+ * request (CF counts as 1 query against the 300/5min GQL rate limit).
+ * Falls back to individual queries if a batch fails.
  */
 
 import { CloudflareClient } from "@/lib/cf-client";
@@ -143,6 +144,150 @@ function buildQuery(
 }
 
 // =============================================================================
+// Batched GQL query builder
+// =============================================================================
+
+/** Max datasets per batch – keeps query complexity reasonable */
+const BATCH_SIZE = 10;
+
+/**
+ * Build a single GQL query that fetches multiple datasets in one request.
+ * Uses GQL aliases to disambiguate datasets under the same scope node.
+ *
+ * All datasets in a batch MUST share the same scope type (zone or account)
+ * and the same scopeId. Returns null if defs is empty.
+ */
+function buildBatchQuery(
+  defs: ExtDatasetDef[],
+  scopeId: string,
+  since: string,
+  until: string,
+): string | null {
+  if (defs.length === 0) return null;
+
+  const first = defs[0];
+  const fragments: string[] = [];
+
+  for (const def of defs) {
+    const filterSince = formatFilterValue(def.timeDim, since);
+    const filterUntil = formatFilterValue(def.timeDim, until);
+    const aggSelection = buildAggregateSelection(def.metrics);
+    // Skip datasets with no metrics and no dimensions
+    if (def.metrics.length === 0 && def.dimensions.length === 0) continue;
+
+    // Use gqlNode as alias prefix for disambiguation
+    const alias = `ts_${def.key.replace(/[^a-zA-Z0-9]/g, "_")}`;
+    fragments.push(`
+      ${alias}: ${def.gqlNode}(
+        filter: { ${def.timeDim}_geq: "${filterSince}", ${def.timeDim}_lt: "${filterUntil}" }
+        limit: ${def.limit}
+        orderBy: [${def.timeDim}_ASC]
+      ) {
+        ${def.hasCount ? "count" : ""}
+        dimensions { ${def.timeDim} }
+        ${aggSelection}
+      }`);
+
+    // Dimension breakdowns
+    const dimOrder = getDimOrderInfo(def);
+    if (dimOrder) {
+      for (const d of def.dimensions) {
+        const dimAlias = `dim_${def.key.replace(/[^a-zA-Z0-9]/g, "_")}_${d.field}`;
+        fragments.push(`
+      ${dimAlias}: ${def.gqlNode}(
+        filter: { ${def.timeDim}_geq: "${filterSince}", ${def.timeDim}_lt: "${filterUntil}" }
+        limit: ${d.limit}
+        orderBy: [${dimOrder.orderBy}]
+      ) {
+        ${dimOrder.selection}
+        dimensions { ${def.timeDim} ${d.field} }
+      }`);
+      }
+    }
+  }
+
+  if (fragments.length === 0) return null;
+
+  return `{
+    viewer {
+      ${first.parentNode}(filter: { ${first.scopeFilter}: "${scopeId}" }) {${fragments.join("")}
+      }
+    }
+  }`;
+}
+
+/**
+ * Parse a batched response for multiple datasets.
+ */
+function parseBatchResponse(
+  defs: ExtDatasetDef[],
+  scopeId: string,
+  data: Record<string, unknown>,
+): Map<string, { ts: ExtTsRow[]; dims: ExtDimRow[] }> {
+  const results = new Map<string, { ts: ExtTsRow[]; dims: ExtDimRow[] }>();
+
+  const viewer = data.viewer as Record<string, unknown> | undefined;
+  if (!viewer) return results;
+
+  const first = defs[0];
+  const scopeArr = viewer[first.parentNode] as Array<Record<string, unknown>> | undefined;
+  if (!scopeArr || scopeArr.length === 0) return results;
+  const scopeData = scopeArr[0];
+
+  for (const def of defs) {
+    const tsRows: ExtTsRow[] = [];
+    const dimRows: ExtDimRow[] = [];
+    const scopeType = def.scope;
+    const dataset = def.gqlNode;
+
+    // Parse main time series
+    const alias = `ts_${def.key.replace(/[^a-zA-Z0-9]/g, "_")}`;
+    const mainRows = scopeData[alias] as Array<Record<string, unknown>> | undefined;
+    if (mainRows) {
+      for (const row of mainRows) {
+        const dims = row.dimensions as Record<string, string> | undefined;
+        if (!dims?.[def.timeDim]) continue;
+        const ts = parseTimestamp(dims[def.timeDim], def.timeBucket);
+
+        for (const metric of def.metrics) {
+          const value = extractValue(row, metric.path);
+          if (value !== null) {
+            tsRows.push({ scope_id: scopeId, scope_type: scopeType, dataset, ts, metric: metric.name, value });
+          }
+        }
+      }
+    }
+
+    // Parse dimension breakdowns
+    const dimOrder = getDimOrderInfo(def);
+    if (dimOrder) {
+      for (const dimDef of def.dimensions) {
+        const dimAlias = `dim_${def.key.replace(/[^a-zA-Z0-9]/g, "_")}_${dimDef.field}`;
+        const breakdownRows = scopeData[dimAlias] as Array<Record<string, unknown>> | undefined;
+        if (!breakdownRows) continue;
+
+        for (const row of breakdownRows) {
+          const dims = row.dimensions as Record<string, string> | undefined;
+          if (!dims?.[def.timeDim]) continue;
+          const ts = parseTimestamp(dims[def.timeDim], def.timeBucket);
+          const key = String(dims[dimDef.field] ?? "unknown");
+          const value = extractValue(row, dimOrder.extract) ?? 0;
+
+          dimRows.push({
+            scope_id: scopeId, scope_type: scopeType, dataset,
+            ts, dim: dimDef.dimName, key, metric: dimOrder.metricName, value,
+          });
+        }
+      }
+    }
+
+    results.set(def.key, { ts: tsRows, dims: dimRows });
+  }
+
+  return results;
+}
+
+// =============================================================================
 // Response parsing
 // =============================================================================
 
@@ -277,6 +422,46 @@ export async function fetchAndStoreExtDataset(
 
   return { tsRows: ts.length, dimRows: dims.length };
 }
+
+/**
+ * Fetch a batch of extension datasets in a single GQL request.
+ * Returns per-dataset results. If the batch fails, returns null
+ * so the caller can fall back to individual queries.
+ */
+export async function fetchBatchExtDatasets(
+  client: CloudflareClient,
+  defs: ExtDatasetDef[],
+  scopeId: string,
+  since: string,
+  until: string,
+): Promise<Map<string, { tsRows: number; dimRows: number }> | null> {
+  const query = buildBatchQuery(defs, scopeId, since, until);
+  if (!query) return new Map();
+
+  try {
+    const res = await client.graphql<Record<string, unknown>>(query);
+    if (res.errors?.length) {
+      // If the batch fails, return null to signal fallback
+      return null;
+    }
+
+    const parsed = parseBatchResponse(defs, scopeId, res.data);
+    const results = new Map<string, { tsRows: number; dimRows: number }>();
+
+    for (const [key, { ts, dims }] of parsed) {
+      storeExtTsRows(ts);
+      storeExtDimRows(dims);
+      results.set(key, { tsRows: ts.length, dimRows: dims.length });
+    }
+
+    return results;
+  } catch {
+    // Batch failed – caller should retry individually
+    return null;
+  }
+}
+
+export { BATCH_SIZE };
 
 // =============================================================================
 // Store functions
