@@ -7,7 +7,7 @@ Open-source, self-hosted reporting dashboard for Cloudflare. Authenticate with y
 - **15 Report Pages** – Traffic, Security, DDoS, Bots, Performance, DNS, SSL/TLS, API Shield, Origin Health, Zero Trust Summary, Gateway DNS/HTTP, Gateway Network, Access Audit, Shadow IT, Devices & Users
 - **Executive Report** – Auto-generated multi-metric summary combining key data from all reports
 - **Period-over-Period Comparison** – Toggle to overlay current vs. previous period with percentage-change indicators
-- **PDF Export** – Server-side rendering via Playwright/Chromium for pixel-perfect A4 output
+- **PDF & HTML Export** – Server-side PDF rendering via Playwright/Chromium for pixel-perfect A4 output, plus instant HTML download
 - **Email Scheduling** – Automated report delivery (daily / weekly / monthly) to up to 10 recipients per schedule, persisted in SQLite across restarts
 - **Background Data Collection** – Cron-scheduled collector stores normalized snapshots in SQLite for historical analysis
 - **Data History** – Browse collected data, view collection run logs, and toggle between live API data and stored history with a freshness indicator
@@ -16,7 +16,7 @@ Open-source, self-hosted reporting dashboard for Cloudflare. Authenticate with y
 - **Graceful Degradation** – Adapts to your token's permissions; unavailable reports show which permissions are needed
 - **Privacy First** – API tokens stay server-side only, never exposed to the browser
 - **Dark / Light Mode** – Dark by default (matches Cloudflare dashboard aesthetic), toggle with one click
-- **Security Hardened** – CSRF protection, rate-limited login, constant-time password comparison, encrypted session cookies, security headers (X-Frame-Options, CSP, HSTS)
+- **Security Hardened** – CSRF protection, rate-limited login, constant-time password comparison, encrypted session cookies, security headers (X-Frame-Options, HSTS, Referrer-Policy)
 
 ## Quick Start
 
@@ -82,24 +82,24 @@ Managed mode enables persistent email schedules, background data collection, and
 
 ## Reports
 
-| Category | Report | Description |
-|---|---|---|
-| **Web** | Traffic Overview | Requests, bandwidth, cache hit ratio, geographic distribution |
-| | Security Posture | WAF events, firewall rules, bot scores, top attackers |
-| | DDoS & Rate Limiting | DDoS events, attack vectors, rate limiting triggers |
-| | Bot Analysis | Bot score distribution, verified bots, top user agents |
-| | Performance | TTFB, origin response time metrics |
-| | DNS Analytics | Query volume, response codes, NXDOMAIN hotspots, record inventory |
-| | SSL / TLS | Certificate status and expiration tracking |
-| | API Shield | API endpoint protection metrics |
-| | Origin Health | Origin server health check events |
-| **Zero Trust** | Executive Summary | Active users, blocked requests, incidents |
-| | Gateway DNS & HTTP | DNS queries, blocked domains, category breakdown |
-| | Gateway Network | L4 sessions, blocked IPs, posture check failures |
-| | Access Audit | Login events, app access patterns, policy denials |
-| | Shadow IT | Discovered SaaS apps, unsanctioned access, usage trends |
-| | Devices & Users | Device posture and user analytics |
-| **Summary** | Executive Report | Combined multi-metric summary with PDF export |
+| Category | Report | Permission | Description |
+|---|---|---|---|
+| **Web** | Traffic Overview | Zone Analytics | Requests, bandwidth, cache hit ratio, geographic distribution |
+| | Security Posture | Firewall Services | WAF events, firewall rules, top attackers |
+| | DDoS & Rate Limiting | Zone Analytics | DDoS events, attack vectors, rate limiting triggers |
+| | Bot Analysis | Firewall Services | Bot score distribution, verified bots, top user agents |
+| | Performance | Zone Analytics | TTFB, origin response time metrics |
+| | SSL / TLS | Zone Analytics | TLS versions, HTTP protocols, certificate status |
+| | API Shield | Zone Analytics | API endpoint protection metrics |
+| | Origin Health | Zone Analytics | Origin server health check events |
+| **DNS** | DNS Analytics | DNS Read | Query volume, response codes, NXDOMAIN hotspots, record inventory |
+| **Zero Trust** | ZT Summary | Zero Trust | Active users, blocked requests, compliance |
+| | Gateway DNS & HTTP | Gateway | DNS queries, blocked domains, category breakdown |
+| | Gateway Network | Gateway | L4 sessions, blocked IPs, protocol distribution |
+| | Access Audit | Access | Login events, app access patterns, policy denials |
+| | Shadow IT | Gateway | Discovered SaaS apps, unsanctioned access, usage trends |
+| | Devices & Users | Zero Trust | Device posture and user analytics |
+| **Summary** | Executive Report | – | Combined multi-metric summary with PDF export |
 
 ## Data Collection
 
@@ -108,7 +108,7 @@ The built-in background collector periodically fetches data from the Cloudflare 
 - **Initial backfill** – On the first run, attempts to fetch up to 365 days of historical data in 7-day slices. The Cloudflare API enforces plan-based retention limits automatically (Free gets ~3 days, Pro/Business ~30 days, Enterprise ~90 days). Override with `INITIAL_LOOKBACK_DAYS`
 - **Throttled backfill** – 1-second pause between slices to stay well within Cloudflare's rate limits
 - **Schedule** – Configurable via `COLLECTION_SCHEDULE` (default: every 6 hours)
-- **Retention** – Configurable via `DATA_RETENTION_DAYS` (default: 90 days)
+- **Retention** – Configurable via `DATA_RETENTION_DAYS` (default: 365 days)
 - **Storage** – Mount `/app/data` as a Docker volume for persistence
 - **Manual trigger** – Start a collection run on demand from the Settings page
 - **Run history** – View success/error/skipped counts per scope and report type
@@ -127,7 +127,7 @@ Send reports automatically via email on a daily, weekly, or monthly schedule.
 
 The Settings UI supports one-shot SMTP testing but scheduled delivery always uses the SMTP_* env vars. Both `CF_API_TOKEN` and `CF_ACCOUNT_TOKEN` are supported for scheduled delivery.
 
-Supported report types: Executive, Security, Traffic, DNS, Performance, SSL, DDoS, Bots. Up to 20 active schedules per instance.
+All 16 report types are supported for email scheduling, including zone-scoped reports (Traffic, Security, DDoS, Bots, Performance, DNS, SSL/TLS, API Shield, Origin Health, Executive) and account-scoped Zero Trust reports (ZT Summary, Gateway DNS & HTTP, Gateway Network, Access Audit, Shadow IT, Devices & Users). Up to 20 active schedules per instance.
 
 ## Backup & Restore
 
@@ -206,12 +206,14 @@ Create a [Cloudflare API token](https://dash.cloudflare.com/profile/api-tokens) 
 | Permission | Scope | Required | Reports |
 |---|---|---|---|
 | Account Settings | Account | Yes | Account/zone listing |
-| Zone Analytics | Zone | Yes | Traffic, Performance, DNS, SSL, Origin Health |
-| Firewall Services | Zone | Yes | Security, Bots, DDoS |
+| Zone Analytics | Zone | Yes | Traffic, DDoS, Performance, SSL/TLS, API Shield, Origin Health |
+| Firewall Services | Zone | Yes | Security Posture, Bot Analysis |
 | DNS Read | Zone | Yes | DNS Analytics |
-| Zero Trust | Account | Optional | Zero Trust Summary, Devices & Users |
+| Zero Trust | Account | Optional | ZT Summary, Devices & Users |
 | Access: Apps and Policies | Account | Optional | Access Audit |
-| Gateway | Account | Optional | Gateway DNS/HTTP, Network, Shadow IT |
+| Gateway | Account | Optional | Gateway DNS/HTTP, Gateway Network, Shadow IT |
+
+The Executive Report has no permission gate – it aggregates data from available zone-scoped permissions.
 
 Both **User API tokens** (`CF_API_TOKEN`) and **Account API tokens** (`CF_ACCOUNT_TOKEN`) are supported. Reports requiring permissions your token doesn't have will show a helpful message instead of failing.
 
@@ -234,7 +236,7 @@ Both **User API tokens** (`CF_API_TOKEN`) and **Account API tokens** (`CF_ACCOUN
 | Variable | Description | Default |
 |---|---|---|
 | `COLLECTION_SCHEDULE` | Cron expression for background collection | `0 */6 * * *` |
-| `DATA_RETENTION_DAYS` | Days to keep collected snapshots | `90` |
+| `DATA_RETENTION_DAYS` | Days to keep collected snapshots | `365` |
 | `INITIAL_LOOKBACK_DAYS` | Override initial backfill depth (1–365) | `365` |
 
 ### SMTP (Email)

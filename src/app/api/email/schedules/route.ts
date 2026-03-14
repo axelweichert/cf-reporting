@@ -1,5 +1,6 @@
 import { getAuthenticatedSession, validateOrigin } from "@/lib/auth-helpers";
 import type { ScheduleFrequency, ReportType } from "@/types/email";
+import { ACCOUNT_SCOPED_REPORTS } from "@/types/email";
 import { NextRequest } from "next/server";
 
 function buildCronExpression(frequency: ScheduleFrequency, hour: number, dayOfWeek?: number, dayOfMonth?: number): string {
@@ -37,6 +38,8 @@ interface CreateScheduleBody {
   recipients: string[];
   zoneId: string;
   zoneName: string;
+  accountId?: string;
+  accountName?: string;
   timeRange: "1d" | "7d" | "30d";
   subject?: string;
 }
@@ -59,8 +62,16 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as CreateScheduleBody;
 
-    if (!body.reportType || !body.frequency || body.hour == null || !body.recipients?.length || !body.zoneId) {
+    if (!body.reportType || !body.frequency || body.hour == null || !body.recipients?.length) {
       return Response.json({ error: "Missing required fields" }, { status: 400 });
+    }
+
+    const isAccountScoped = ACCOUNT_SCOPED_REPORTS.includes(body.reportType);
+    if (isAccountScoped && !body.accountId) {
+      return Response.json({ error: "Account ID is required for account-scoped reports" }, { status: 400 });
+    }
+    if (!isAccountScoped && !body.zoneId) {
+      return Response.json({ error: "Zone ID is required for zone-scoped reports" }, { status: 400 });
     }
 
     if (typeof body.hour !== "number" || body.hour < 0 || body.hour > 23) {
@@ -103,8 +114,10 @@ export async function POST(request: NextRequest) {
       dayOfWeek: body.dayOfWeek,
       dayOfMonth: body.dayOfMonth,
       recipients: body.recipients,
-      zoneId: body.zoneId,
-      zoneName: body.zoneName || body.zoneId,
+      zoneId: body.zoneId || "",
+      zoneName: body.zoneName || body.zoneId || "",
+      accountId: body.accountId,
+      accountName: body.accountName,
       timeRange: body.timeRange || "7d",
       subject: body.subject,
     });

@@ -12,7 +12,7 @@ let _db: Database.Database | null = null;
 let _initFailed = false;
 
 const DB_PATH = process.env.DB_PATH || "/app/data/cf-reporting.db";
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 export function getDb(): Database.Database | null {
   if (_initFailed) return null;
@@ -943,6 +943,13 @@ function runMigrations(db: Database.Database): void {
       );
     `);
     console.log("[db] Migration v7: email_schedules table for persistent schedule storage");
+  }
+
+  if (currentVersion < 8) {
+    // v8: Add account_id/account_name for account-scoped report scheduling (ZT reports).
+    db.exec(`ALTER TABLE email_schedules ADD COLUMN account_id TEXT`);
+    db.exec(`ALTER TABLE email_schedules ADD COLUMN account_name TEXT`);
+    console.log("[db] Migration v8: added account_id/account_name to email_schedules");
   }
 
   // Upsert schema version

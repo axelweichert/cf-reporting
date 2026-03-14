@@ -3,15 +3,30 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/lib/store";
 import type { SmtpConfigResponse, ScheduleConfig, EmailStatus, ReportType, ScheduleFrequency } from "@/types/email";
+import { ACCOUNT_SCOPED_REPORTS } from "@/types/email";
 import {
   Mail, Clock, AlertTriangle, CheckCircle, Info,
   Trash2, ToggleLeft, ToggleRight, Plus, Send, RefreshCw,
   Database, Play, HardDrive, Download, Upload, Cloud,
 } from "lucide-react";
 
-const REPORT_TYPES: Array<{ value: ReportType; label: string }> = [
-  { value: "executive", label: "Executive Report" },
-  { value: "security", label: "Security Report" },
+const REPORT_TYPES: Array<{ value: ReportType; label: string; group: string }> = [
+  { value: "executive", label: "Executive Report", group: "Summary" },
+  { value: "traffic", label: "Traffic Overview", group: "Web" },
+  { value: "security", label: "Security Posture", group: "Web" },
+  { value: "ddos", label: "DDoS & Rate Limiting", group: "Web" },
+  { value: "bots", label: "Bot Analysis", group: "Web" },
+  { value: "performance", label: "Performance", group: "Web" },
+  { value: "ssl", label: "SSL / TLS", group: "Web" },
+  { value: "api-shield", label: "API Shield", group: "Web" },
+  { value: "origin-health", label: "Origin Health", group: "Web" },
+  { value: "dns", label: "DNS Analytics", group: "DNS" },
+  { value: "zt-summary", label: "ZT Summary", group: "Zero Trust" },
+  { value: "gateway-dns", label: "Gateway DNS & HTTP", group: "Zero Trust" },
+  { value: "gateway-network", label: "Gateway Network", group: "Zero Trust" },
+  { value: "access-audit", label: "Access Audit", group: "Zero Trust" },
+  { value: "shadow-it", label: "Shadow IT", group: "Zero Trust" },
+  { value: "devices-users", label: "Devices & Users", group: "Zero Trust" },
 ];
 
 const FREQUENCIES: Array<{ value: ScheduleFrequency; label: string }> = [
@@ -25,6 +40,7 @@ const DAYS_OF_WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "F
 export default function SettingsPage() {
   const { capabilities } = useAuth();
   const zones = capabilities?.zones || [];
+  const accounts = capabilities?.accounts || [];
 
   // Status
   const [status, setStatus] = useState<EmailStatus | null>(null);
@@ -210,11 +226,14 @@ export default function SettingsPage() {
     setTesting(false);
   };
 
+  const isAccountScopedReport = ACCOUNT_SCOPED_REPORTS.includes(newSchedule.reportType);
+
   // Create schedule
   const handleCreateSchedule = async () => {
     setScheduleSaving(true);
     setFeedback(null);
     const zone = zones.find((z) => z.id === newSchedule.zoneId);
+    const account = accounts.find((a) => a.id === newSchedule.zoneId); // zoneId field doubles as accountId for account-scoped reports
     try {
       const res = await fetch("/api/email/schedules", {
         method: "POST",
@@ -222,7 +241,9 @@ export default function SettingsPage() {
         body: JSON.stringify({
           ...newSchedule,
           recipients: newSchedule.recipients.split(",").map((e) => e.trim()).filter(Boolean),
-          zoneName: zone?.name || newSchedule.zoneId,
+          ...(isAccountScopedReport
+            ? { accountId: newSchedule.zoneId, accountName: account?.name || newSchedule.zoneId, zoneId: "", zoneName: "" }
+            : { zoneName: zone?.name || newSchedule.zoneId }),
         }),
       });
       const data = await res.json();
@@ -595,7 +616,10 @@ export default function SettingsPage() {
               {newSchedule.frequency === "monthly" && (
                 <SelectField label="Day of Month" value={String(newSchedule.dayOfMonth)} options={Array.from({ length: 28 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))} onChange={(v) => setNewSchedule({ ...newSchedule, dayOfMonth: parseInt(v, 10) })} />
               )}
-              <SelectField label="Zone" value={newSchedule.zoneId} options={zones.map((z) => ({ value: z.id, label: z.name }))} onChange={(v) => setNewSchedule({ ...newSchedule, zoneId: v })} />
+              {isAccountScopedReport
+                ? <SelectField label="Account" value={newSchedule.zoneId} options={accounts.map((a) => ({ value: a.id, label: a.name }))} onChange={(v) => setNewSchedule({ ...newSchedule, zoneId: v })} />
+                : <SelectField label="Zone" value={newSchedule.zoneId} options={zones.map((z) => ({ value: z.id, label: z.name }))} onChange={(v) => setNewSchedule({ ...newSchedule, zoneId: v })} />
+              }
               <SelectField label="Time Range" value={newSchedule.timeRange} options={[{ value: "1d", label: "Last 24h" }, { value: "7d", label: "Last 7 days" }, { value: "30d", label: "Last 30 days" }]} onChange={(v) => setNewSchedule({ ...newSchedule, timeRange: v as "1d" | "7d" | "30d" })} />
               <div className="sm:col-span-2">
                 <InputField label="Recipients (comma-separated)" value={newSchedule.recipients} onChange={(v) => setNewSchedule({ ...newSchedule, recipients: v })} placeholder="user1@example.com, user2@example.com" />
@@ -609,7 +633,7 @@ export default function SettingsPage() {
             )}
 
             <div className="mt-4 flex gap-3">
-              <button onClick={handleCreateSchedule} disabled={scheduleSaving || !newSchedule.zoneId || !newSchedule.recipients} className="flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-medium text-white hover:bg-purple-600 disabled:opacity-50">
+              <button onClick={handleCreateSchedule} disabled={scheduleSaving || !newSchedule.zoneId || !newSchedule.recipients} className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50">
                 {scheduleSaving ? "Creating..." : "Create Schedule"}
               </button>
               <button onClick={() => setShowNewSchedule(false)} className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800">

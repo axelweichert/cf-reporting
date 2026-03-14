@@ -661,6 +661,8 @@ interface ScheduleRow {
   last_run_at: string | null;
   last_run_status: string | null;
   last_run_error: string | null;
+  account_id: string | null;
+  account_name: string | null;
 }
 
 export function getSchedulesFromDb(): ScheduleConfig[] {
@@ -686,6 +688,8 @@ export function getSchedulesFromDb(): ScheduleConfig[] {
     lastRunAt: r.last_run_at ?? undefined,
     lastRunStatus: r.last_run_status as ScheduleConfig["lastRunStatus"],
     lastRunError: r.last_run_error ?? undefined,
+    accountId: r.account_id ?? undefined,
+    accountName: r.account_name ?? undefined,
   }));
 }
 
@@ -696,8 +700,9 @@ export function saveScheduleToDb(schedule: ScheduleConfig): void {
   db.prepare(`
     INSERT OR REPLACE INTO email_schedules
       (id, enabled, report_type, frequency, cron_expression, hour, day_of_week, day_of_month,
-       recipients, zone_id, zone_name, time_range, subject, created_at, last_run_at, last_run_status, last_run_error)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       recipients, zone_id, zone_name, time_range, subject, created_at, last_run_at, last_run_status, last_run_error,
+       account_id, account_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     schedule.id,
     schedule.enabled ? 1 : 0,
@@ -716,6 +721,8 @@ export function saveScheduleToDb(schedule: ScheduleConfig): void {
     schedule.lastRunAt ?? null,
     schedule.lastRunStatus ?? null,
     schedule.lastRunError ?? null,
+    schedule.accountId ?? null,
+    schedule.accountName ?? null,
   );
 }
 

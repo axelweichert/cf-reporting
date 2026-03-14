@@ -10,9 +10,25 @@
 
 import cron, { type ScheduledTask } from "node-cron";
 import { isSmtpConfiguredViaEnv, sendReportEmail } from "@/lib/email/smtp-client";
-import { fetchExecutiveDataServer, fetchSecurityDataServer } from "@/lib/email/report-data";
+import { fetchExecutiveDataServer, fetchSecurityDataServer, fetchTrafficDataServer, fetchPerformanceDataServer, fetchDnsDataServer } from "@/lib/email/report-data";
+import { fetchSslDataServer, fetchBotDataServer, fetchDdosDataServer, fetchOriginHealthDataServer, fetchApiShieldDataServer } from "@/lib/email/report-data-zone";
+import { fetchZtSummaryDataServer, fetchGatewayDnsDataServer, fetchGatewayNetworkDataServer, fetchAccessAuditDataServer, fetchShadowItDataServer, fetchDevicesUsersDataServer } from "@/lib/email/report-data-zt";
 import { renderExecutiveEmail } from "@/lib/email/templates/executive";
 import { renderSecurityEmail } from "@/lib/email/templates/security";
+import { renderTrafficEmail } from "@/lib/email/templates/traffic";
+import { renderPerformanceEmail } from "@/lib/email/templates/performance";
+import { renderDnsEmail } from "@/lib/email/templates/dns";
+import { renderSslEmail } from "@/lib/email/templates/ssl";
+import { renderDdosEmail } from "@/lib/email/templates/ddos";
+import { renderBotsEmail } from "@/lib/email/templates/bots";
+import { renderOriginHealthEmail } from "@/lib/email/templates/origin-health";
+import { renderApiShieldEmail } from "@/lib/email/templates/api-shield";
+import { renderZtSummaryEmail } from "@/lib/email/templates/zt-summary";
+import { renderGatewayDnsEmail } from "@/lib/email/templates/gateway-dns";
+import { renderGatewayNetworkEmail } from "@/lib/email/templates/gateway-network";
+import { renderAccessAuditEmail } from "@/lib/email/templates/access-audit";
+import { renderShadowItEmail } from "@/lib/email/templates/shadow-it";
+import { renderDevicesUsersEmail } from "@/lib/email/templates/devices-users";
 import { getDateRange } from "@/lib/store-server";
 import {
   getSchedulesFromDb,
@@ -21,10 +37,30 @@ import {
   updateScheduleEnabledInDb,
   updateScheduleRunStatusInDb,
 } from "@/lib/data-store";
-import type { ScheduleConfig } from "@/types/email";
+import type { ScheduleConfig, ReportType } from "@/types/email";
+import { ACCOUNT_SCOPED_REPORTS } from "@/types/email";
 
 const activeTasks = new Map<string, ScheduledTask>();
 let _running = false;
+
+const REPORT_LABELS: Record<ReportType, string> = {
+  executive: "Executive Report",
+  security: "Security Report",
+  traffic: "Traffic Report",
+  dns: "DNS Report",
+  performance: "Performance Report",
+  ssl: "SSL/TLS Report",
+  ddos: "DDoS Report",
+  bots: "Bot Analysis Report",
+  "origin-health": "Origin Health Report",
+  "api-shield": "API Shield Report",
+  "zt-summary": "Zero Trust Summary",
+  "gateway-dns": "Gateway DNS & HTTP Report",
+  "gateway-network": "Gateway Network Report",
+  "access-audit": "Access Audit Report",
+  "shadow-it": "Shadow IT Report",
+  "devices-users": "Devices & Users Report",
+};
 
 export function isSchedulerRunning(): boolean {
   return _running;
@@ -143,31 +179,16 @@ async function runSchedule(scheduleId: string): Promise<void> {
     const since = `${start}T00:00:00Z`;
     const until = `${end}T00:00:00Z`;
 
-    const meta = {
-      zoneName: schedule.zoneName,
-      startDate: start,
-      endDate: end,
-    };
+    const isAccountScoped = ACCOUNT_SCOPED_REPORTS.includes(schedule.reportType);
+    const scopeName = isAccountScoped ? (schedule.accountName || schedule.zoneName) : schedule.zoneName;
+    const scopeId = isAccountScoped ? (schedule.accountId || schedule.zoneId) : schedule.zoneId;
 
-    let html: string;
-    let subject = schedule.subject || "";
+    const { html, subject: defaultSubject } = await renderReport(
+      token, schedule.reportType, scopeId, scopeName, since, until, start, end,
+      isAccountScoped ? schedule.accountId : undefined,
+    );
 
-    switch (schedule.reportType) {
-      case "executive": {
-        const data = await fetchExecutiveDataServer(token, schedule.zoneId, since, until);
-        html = renderExecutiveEmail(data, meta);
-        if (!subject) subject = `[cf-reporting] Executive Report – ${meta.zoneName} – ${start} to ${end}`;
-        break;
-      }
-      case "security": {
-        const data = await fetchSecurityDataServer(token, schedule.zoneId, since, until);
-        html = renderSecurityEmail(data, meta);
-        if (!subject) subject = `[cf-reporting] Security Report – ${meta.zoneName} – ${start} to ${end}`;
-        break;
-      }
-      default:
-        throw new Error(`Unsupported report type: ${schedule.reportType}`);
-    }
+    const subject = schedule.subject || defaultSubject;
 
     // No session SMTP – scheduler always uses env SMTP
     await sendReportEmail(schedule.recipients, subject, html);
@@ -177,6 +198,94 @@ async function runSchedule(scheduleId: string): Promise<void> {
     const message = err instanceof Error ? err.message : "Unknown error";
     updateScheduleRunStatusInDb(scheduleId, "error", message);
     console.error(`[scheduler] Failed to send schedule ${scheduleId}:`, message);
+  }
+}
+
+async function renderReport(
+  token: string,
+  reportType: ReportType,
+  scopeId: string,
+  scopeName: string,
+  since: string,
+  until: string,
+  startDate: string,
+  endDate: string,
+  accountId?: string,
+): Promise<{ html: string; subject: string }> {
+  const label = REPORT_LABELS[reportType];
+  const zoneMeta = { zoneName: scopeName, startDate, endDate };
+  const accountMeta = { accountName: scopeName, startDate, endDate };
+  const subjectPrefix = `[cf-reporting] ${label} – ${scopeName} – ${startDate} to ${endDate}`;
+
+  switch (reportType) {
+    case "executive": {
+      const data = await fetchExecutiveDataServer(token, scopeId, since, until);
+      return { html: renderExecutiveEmail(data, zoneMeta), subject: subjectPrefix };
+    }
+    case "security": {
+      const data = await fetchSecurityDataServer(token, scopeId, since, until);
+      return { html: renderSecurityEmail(data, zoneMeta), subject: subjectPrefix };
+    }
+    case "traffic": {
+      const data = await fetchTrafficDataServer(token, scopeId, since, until);
+      return { html: renderTrafficEmail(data, zoneMeta), subject: subjectPrefix };
+    }
+    case "performance": {
+      const data = await fetchPerformanceDataServer(token, scopeId, since, until);
+      return { html: renderPerformanceEmail(data, zoneMeta), subject: subjectPrefix };
+    }
+    case "dns": {
+      const data = await fetchDnsDataServer(token, scopeId, since, until);
+      return { html: renderDnsEmail(data, zoneMeta), subject: subjectPrefix };
+    }
+    case "ssl": {
+      const data = await fetchSslDataServer(token, scopeId, since, until);
+      return { html: renderSslEmail(data, zoneMeta), subject: subjectPrefix };
+    }
+    case "ddos": {
+      const data = await fetchDdosDataServer(token, scopeId, since, until, accountId);
+      return { html: renderDdosEmail(data, zoneMeta), subject: subjectPrefix };
+    }
+    case "bots": {
+      const data = await fetchBotDataServer(token, scopeId, since, until);
+      return { html: renderBotsEmail(data, zoneMeta), subject: subjectPrefix };
+    }
+    case "origin-health": {
+      const data = await fetchOriginHealthDataServer(token, scopeId, since, until);
+      return { html: renderOriginHealthEmail(data, zoneMeta), subject: subjectPrefix };
+    }
+    case "api-shield": {
+      const data = await fetchApiShieldDataServer(token, scopeId, since, until);
+      return { html: renderApiShieldEmail(data, zoneMeta), subject: subjectPrefix };
+    }
+    case "zt-summary": {
+      const data = await fetchZtSummaryDataServer(token, scopeId, since, until);
+      return { html: renderZtSummaryEmail(data, accountMeta), subject: subjectPrefix };
+    }
+    case "gateway-dns": {
+      const data = await fetchGatewayDnsDataServer(token, scopeId, since, until);
+      return { html: renderGatewayDnsEmail(data, accountMeta), subject: subjectPrefix };
+    }
+    case "gateway-network": {
+      const data = await fetchGatewayNetworkDataServer(token, scopeId, since, until);
+      return { html: renderGatewayNetworkEmail(data, accountMeta), subject: subjectPrefix };
+    }
+    case "access-audit": {
+      const data = await fetchAccessAuditDataServer(token, scopeId, since, until);
+      return { html: renderAccessAuditEmail(data, accountMeta), subject: subjectPrefix };
+    }
+    case "shadow-it": {
+      const data = await fetchShadowItDataServer(token, scopeId, since, until);
+      return { html: renderShadowItEmail(data, accountMeta), subject: subjectPrefix };
+    }
+    case "devices-users": {
+      const data = await fetchDevicesUsersDataServer(token, scopeId);
+      return { html: renderDevicesUsersEmail(data, accountMeta), subject: subjectPrefix };
+    }
+    default: {
+      const _exhaustive: never = reportType;
+      throw new Error(`Unsupported report type: ${_exhaustive}`);
+    }
   }
 }
 

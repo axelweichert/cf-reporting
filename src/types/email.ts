@@ -33,7 +33,25 @@ export type ReportType =
   | "performance"
   | "ssl"
   | "ddos"
-  | "bots";
+  | "bots"
+  | "origin-health"
+  | "api-shield"
+  | "zt-summary"
+  | "gateway-dns"
+  | "gateway-network"
+  | "access-audit"
+  | "shadow-it"
+  | "devices-users";
+
+/** Report types that require an accountId instead of a zoneId */
+export const ACCOUNT_SCOPED_REPORTS: ReportType[] = [
+  "zt-summary",
+  "gateway-dns",
+  "gateway-network",
+  "access-audit",
+  "shadow-it",
+  "devices-users",
+];
 
 export type ScheduleFrequency = "daily" | "weekly" | "monthly";
 
@@ -49,6 +67,8 @@ export interface ScheduleConfig {
   recipients: string[];
   zoneId: string;
   zoneName: string;
+  accountId?: string;
+  accountName?: string;
   timeRange: "1d" | "7d" | "30d";
   subject?: string; // Custom subject line
   createdAt: string;
