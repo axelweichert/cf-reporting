@@ -9,10 +9,24 @@ import { useTheme } from "@/lib/theme";
 
 const TOKEN_PERMISSIONS = [
   { key: "account_settings", type: "read" },
+  { key: "account_analytics", type: "read" },
   { key: "analytics", type: "read" },
   { key: "firewall_services", type: "read" },
   { key: "zone_dns", type: "read" },
   { key: "access", type: "read" },
+  { key: "access_acct", type: "read" },
+  { key: "access_audit_log", type: "read" },
+  { key: "account_api_gateway", type: "read" },
+  { key: "api_gateway", type: "read" },
+  { key: "bot_management", type: "read" },
+  { key: "teams", type: "read" },
+  { key: "account_ssl_and_certificates", type: "read" },
+  { key: "ssl_and_certificates", type: "read" },
+  { key: "ddos_protection", type: "read" },
+  { key: "healthcheck", type: "read" },
+  { key: "load_balancers", type: "read" },
+  { key: "load_balancers_account", type: "read" },
+  { key: "load_balancing_monitors_and_pools", type: "read" },
 ];
 
 const TOKEN_TEMPLATE_URL =
@@ -144,20 +158,15 @@ export default function SetupPage() {
           </div>
 
           {tokenType === "user" && (
-            <div className="space-y-1.5">
-              <a
-                href={TOKEN_TEMPLATE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-300 transition-colors hover:border-orange-500/50 hover:text-white"
-              >
-                <ExternalLink size={14} />
-                Create token on Cloudflare with pre-filled permissions
-              </a>
-              <p className="text-center text-xs text-zinc-500">
-                Zero Trust (read) must be added manually – it cannot be pre-filled.
-              </p>
-            </div>
+            <a
+              href={TOKEN_TEMPLATE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-300 transition-colors hover:border-orange-500/50 hover:text-white"
+            >
+              <ExternalLink size={14} />
+              Create token on Cloudflare with pre-filled permissions
+            </a>
           )}
 
           {error && (
@@ -187,19 +196,27 @@ export default function SetupPage() {
           <h3 className="mb-3 text-sm font-semibold text-zinc-100">Required permissions</h3>
           <ul className="space-y-2 text-sm text-zinc-300 leading-relaxed">
             {[
-              { name: "Account Settings (read)", optional: false },
-              { name: "Zone Analytics (read)", optional: false },
-              { name: "Firewall Services (read)", optional: false },
-              { name: "DNS (read)", optional: false },
-              { name: "Access: Apps and Policies (read)", optional: true },
-              { name: "Zero Trust (read)", optional: true, note: "includes Gateway" },
+              { name: "Account Settings", optional: false },
+              { name: "Account Analytics", optional: false },
+              { name: "Analytics", optional: false },
+              { name: "Firewall Services", optional: false },
+              { name: "DNS", optional: false },
+              { name: "Access: Apps and Policies", optional: true },
+              { name: "Access: Organizations, IdP, and Groups", optional: true },
+              { name: "Access: Audit Logs", optional: true },
+              { name: "Zero Trust", optional: true },
+              { name: "API Gateway", optional: true },
+              { name: "Bot Management", optional: true },
+              { name: "SSL and Certificates", optional: true },
+              { name: "DDoS Protection", optional: true },
+              { name: "Health Checks", optional: true },
+              { name: "Load Balancers", optional: true },
             ].map((p) => (
               <li key={p.name} className="flex items-center gap-2">
                 <CheckCircle2 size={14} className={p.optional ? "shrink-0 text-zinc-500" : "shrink-0 text-emerald-500/70"} />
                 <span>
                   {p.name}
-                  {p.optional && <span className="ml-1 text-zinc-500">– optional</span>}
-                  {"note" in p && p.note && <span className="ml-1 text-zinc-600">({p.note})</span>}
+                  <span className="ml-1 text-zinc-500">{p.optional ? "– optional" : "– read"}</span>
                 </span>
               </li>
             ))}

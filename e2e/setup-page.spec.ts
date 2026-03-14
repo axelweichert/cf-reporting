@@ -38,12 +38,26 @@ test.describe("Setup page", () => {
     const href = await link.getAttribute("href");
     expect(href).toContain("dash.cloudflare.com/profile/api-tokens");
     expect(href).toContain("permissionGroupKeys");
+    // Core permissions
     expect(href).toContain("account_settings");
+    expect(href).toContain("account_analytics");
     expect(href).toContain("analytics");
     expect(href).toContain("firewall_services");
     expect(href).toContain("zone_dns");
+    // Access / Zero Trust
     expect(href).toContain("access");
-    expect(href).not.toContain("access_acct");
+    expect(href).toContain("access_acct");
+    expect(href).toContain("access_audit_log");
+    expect(href).toContain("teams");
+    // Security
+    expect(href).toContain("bot_management");
+    expect(href).toContain("ddos_protection");
+    expect(href).toContain("ssl_and_certificates");
+    // Infrastructure
+    expect(href).toContain("healthcheck");
+    expect(href).toContain("load_balancers");
+    expect(href).toContain("api_gateway");
+    // URL params
     expect(href).toContain("name=cf-reporting");
     expect(href).toContain("accountId=*");
     expect(href).toContain("zoneId=all");
@@ -71,21 +85,16 @@ test.describe("Setup page", () => {
   });
 
   test("lists all required and optional permissions", async ({ page }) => {
-    for (const perm of [
-      "Account Settings (read)",
-      "Zone Analytics (read)",
-      "Firewall Services (read)",
-      "DNS (read)",
-      "Access: Apps and Policies (read)",
-    ]) {
-      await expect(page.getByText(perm)).toBeVisible();
+    // Required
+    for (const perm of ["Account Settings", "Account Analytics", "Firewall Services", "DNS"]) {
+      await expect(page.locator("li", { hasText: perm })).toBeVisible();
     }
-    // Zero Trust listed in permissions (use locator to avoid matching hint text too)
-    await expect(page.locator("li", { hasText: "Zero Trust (read)" })).toBeVisible();
-    // Zero Trust note
-    await expect(page.getByText("includes Gateway")).toBeVisible();
-    // Manual add note
-    await expect(page.getByText(/must be added manually/)).toBeVisible();
+    // "Analytics" needs exact match to avoid matching "Account Analytics"
+    await expect(page.locator("li").filter({ hasText: /^Analytics/ })).toBeVisible();
+    // Optional
+    for (const perm of ["Zero Trust", "API Gateway", "Bot Management", "SSL and Certificates", "DDoS Protection", "Health Checks", "Load Balancers"]) {
+      await expect(page.locator("li", { hasText: perm })).toBeVisible();
+    }
   });
 
   test("submit button is disabled when token input is empty", async ({ page }) => {
