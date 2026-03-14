@@ -13,7 +13,6 @@ const TOKEN_PERMISSIONS = [
   { key: "firewall_services", type: "read" },
   { key: "zone_dns", type: "read" },
   { key: "access", type: "read" },
-  { key: "access_acct", type: "read" },
 ];
 
 const TOKEN_TEMPLATE_URL =
@@ -145,15 +144,20 @@ export default function SetupPage() {
           </div>
 
           {tokenType === "user" && (
-            <a
-              href={TOKEN_TEMPLATE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-300 transition-colors hover:border-orange-500/50 hover:text-white"
-            >
-              <ExternalLink size={14} />
-              Create token on Cloudflare with required permissions
-            </a>
+            <div className="space-y-1.5">
+              <a
+                href={TOKEN_TEMPLATE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-300 transition-colors hover:border-orange-500/50 hover:text-white"
+              >
+                <ExternalLink size={14} />
+                Create token on Cloudflare with pre-filled permissions
+              </a>
+              <p className="text-center text-xs text-zinc-500">
+                Zero Trust (read) must be added manually – it cannot be pre-filled.
+              </p>
+            </div>
           )}
 
           {error && (
@@ -187,15 +191,15 @@ export default function SetupPage() {
               { name: "Zone Analytics (read)", optional: false },
               { name: "Firewall Services (read)", optional: false },
               { name: "DNS (read)", optional: false },
-              { name: "Zero Trust (read)", optional: true },
               { name: "Access: Apps and Policies (read)", optional: true },
-              { name: "Gateway (read)", optional: true },
+              { name: "Zero Trust (read)", optional: true, note: "includes Gateway" },
             ].map((p) => (
               <li key={p.name} className="flex items-center gap-2">
                 <CheckCircle2 size={14} className={p.optional ? "shrink-0 text-zinc-500" : "shrink-0 text-emerald-500/70"} />
                 <span>
                   {p.name}
                   {p.optional && <span className="ml-1 text-zinc-500">– optional</span>}
+                  {"note" in p && p.note && <span className="ml-1 text-zinc-600">({p.note})</span>}
                 </span>
               </li>
             ))}

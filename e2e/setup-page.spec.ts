@@ -43,7 +43,7 @@ test.describe("Setup page", () => {
     expect(href).toContain("firewall_services");
     expect(href).toContain("zone_dns");
     expect(href).toContain("access");
-    expect(href).toContain("access_acct");
+    expect(href).not.toContain("access_acct");
     expect(href).toContain("name=cf-reporting");
     expect(href).toContain("accountId=*");
     expect(href).toContain("zoneId=all");
@@ -76,12 +76,16 @@ test.describe("Setup page", () => {
       "Zone Analytics (read)",
       "Firewall Services (read)",
       "DNS (read)",
-      "Zero Trust (read)",
       "Access: Apps and Policies (read)",
-      "Gateway (read)",
     ]) {
       await expect(page.getByText(perm)).toBeVisible();
     }
+    // Zero Trust listed in permissions (use locator to avoid matching hint text too)
+    await expect(page.locator("li", { hasText: "Zero Trust (read)" })).toBeVisible();
+    // Zero Trust note
+    await expect(page.getByText("includes Gateway")).toBeVisible();
+    // Manual add note
+    await expect(page.getByText(/must be added manually/)).toBeVisible();
   });
 
   test("submit button is disabled when token input is empty", async ({ page }) => {
