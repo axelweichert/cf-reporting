@@ -4,8 +4,23 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/store";
 import type { TokenType } from "@/types/cloudflare";
-import { Shield, Eye, EyeOff, Loader2, AlertCircle, CheckCircle2, Sun, Moon } from "lucide-react";
+import { Shield, Eye, EyeOff, Loader2, AlertCircle, CheckCircle2, Sun, Moon, ExternalLink } from "lucide-react";
 import { useTheme } from "@/lib/theme";
+
+const TOKEN_PERMISSIONS = [
+  { key: "account_settings", type: "read" },
+  { key: "analytics", type: "read" },
+  { key: "firewall_services", type: "read" },
+  { key: "zone_dns", type: "read" },
+  { key: "access", type: "read" },
+  { key: "access_acct", type: "read" },
+];
+
+const TOKEN_TEMPLATE_URL =
+  `https://dash.cloudflare.com/profile/api-tokens?` +
+  `permissionGroupKeys=${encodeURIComponent(JSON.stringify(TOKEN_PERMISSIONS))}` +
+  `&accountId=*&zoneId=all` +
+  `&name=${encodeURIComponent("cf-reporting")}`;
 
 export default function SetupPage() {
   const [tokenType, setTokenType] = useState<TokenType>("user");
@@ -128,6 +143,18 @@ export default function SetupPage() {
               </p>
             )}
           </div>
+
+          {tokenType === "user" && (
+            <a
+              href={TOKEN_TEMPLATE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-300 transition-colors hover:border-orange-500/50 hover:text-white"
+            >
+              <ExternalLink size={14} />
+              Create token on Cloudflare with required permissions
+            </a>
+          )}
 
           {error && (
             <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-sm text-red-300">
