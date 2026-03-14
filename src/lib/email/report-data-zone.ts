@@ -1186,7 +1186,8 @@ export async function fetchDdosDataServer(
     rateLimitEventsOverTime,
     rateLimitMethods,
     rateLimitTopPaths,
-    rateLimitRules,
+    rawRules,
+    triggersByRule,
     l34,
   ] = await Promise.all([
     fetchFilteredEventsOverTime(client, zoneId, since, until, ["l7ddos"]),
@@ -1196,8 +1197,13 @@ export async function fetchDdosDataServer(
     fetchFilteredAttackVectors(client, zoneId, since, until, ["ratelimit"]),
     fetchFilteredTopPaths(client, zoneId, since, until, ["ratelimit"]),
     fetchRateLimitRulesServer(client, zoneId),
+    fetchRateLimitByRuleServer(client, zoneId, since, until),
     accountId ? fetchL34DdosData(client, accountId, since, until) : Promise.resolve(null),
   ]);
+
+  const rateLimitRules = rawRules
+    .map((r) => ({ ...r, triggers: triggersByRule.get(r.id) || 0 }))
+    .sort((a, b) => b.triggers - a.triggers);
 
   const totalDdosEvents = ddosEventsOverTime.reduce((sum, p) => sum + p.count, 0);
   const totalRateLimitEvents = rateLimitEventsOverTime.reduce((sum, p) => sum + p.count, 0);
@@ -1458,8 +1464,55 @@ async function fetchRateLimitRulesServer(
         mitigationTimeout: r.ratelimit!.mitigation_timeout || 0,
         countingExpression: r.ratelimit!.counting_expression || "",
         characteristics: r.ratelimit!.characteristics || [],
+        triggers: 0,
       }));
   } catch {
     return [];
+  }
+}
+
+async function fetchRateLimitByRuleServer(
+  client: CloudflareClient,
+  zoneId: string,
+  since: string,
+  until: string,
+): Promise<Map<string, number>> {
+  const query = `{
+    viewer {
+      zones(filter: { zoneTag: "${zoneId}" }) {
+        firewallEventsAdaptiveGroups(
+          limit: 200
+          filter: {
+            datetime_geq: "${since}"
+            datetime_lt: "${until}"
+            source_in: ["ratelimit"]
+          }
+          orderBy: [count_DESC]
+        ) {
+          count
+          dimensions { ruleId }
+        }
+      }
+    }
+  }`;
+
+  interface Group {
+    count: number;
+    dimensions: { ruleId: string };
+  }
+
+  try {
+    const data = await gql<{
+      viewer: { zones: Array<{ firewallEventsAdaptiveGroups: Group[] }> };
+    }>(client, query);
+
+    const map = new Map<string, number>();
+    for (const g of data.viewer.zones[0]?.firewallEventsAdaptiveGroups || []) {
+      const id = g.dimensions.ruleId;
+      map.set(id, (map.get(id) || 0) + g.count);
+    }
+    return map;
+  } catch {
+    return new Map();
   }
 }

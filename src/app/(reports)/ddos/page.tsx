@@ -237,6 +237,18 @@ export default function DdosPage() {
                   },
                 },
                 {
+                  key: "triggers",
+                  label: "Triggers",
+                  align: "right",
+                  width: "100px",
+                  render: (v) => {
+                    const count = v as number;
+                    return count > 0
+                      ? <span className="font-medium text-orange-400">{formatNumber(count)}</span>
+                      : <span className="text-zinc-600">0</span>;
+                  },
+                },
+                {
                   key: "threshold",
                   label: "Threshold",
                   align: "right",

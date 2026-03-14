@@ -49,6 +49,7 @@ export interface RateLimitRule {
   mitigationTimeout: number;
   countingExpression: string;
   characteristics: string[];
+  triggers: number;
 }
 
 export interface DdosData {
@@ -81,7 +82,8 @@ export async function fetchDdosData(
     rateLimitEventsOverTime,
     rateLimitMethods,
     rateLimitTopPaths,
-    rateLimitRules,
+    rawRules,
+    triggersByRule,
     l34,
   ] = await Promise.all([
     fetchFilteredEventsOverTime(zoneTag, since, until, ["l7ddos"]),
@@ -91,8 +93,14 @@ export async function fetchDdosData(
     fetchFilteredAttackVectors(zoneTag, since, until, ["ratelimit"]),
     fetchFilteredTopPaths(zoneTag, since, until, ["ratelimit"]),
     fetchRateLimitRules(zoneTag),
+    fetchRateLimitByRule(zoneTag, since, until),
     accountTag ? fetchL34DdosData(accountTag, since, until) : Promise.resolve(null),
   ]);
+
+  // Merge trigger counts into rules and sort by triggers descending
+  const rateLimitRules = rawRules
+    .map((r) => ({ ...r, triggers: triggersByRule.get(r.id) || 0 }))
+    .sort((a, b) => b.triggers - a.triggers);
 
   const totalDdosEvents = ddosEventsOverTime.reduce((sum, p) => sum + p.count, 0);
   const totalRateLimitEvents = rateLimitEventsOverTime.reduce((sum, p) => sum + p.count, 0);
@@ -354,9 +362,51 @@ async function fetchRateLimitRules(zoneTag: string): Promise<RateLimitRule[]> {
         mitigationTimeout: r.ratelimit!.mitigation_timeout || 0,
         countingExpression: r.ratelimit!.counting_expression || "",
         characteristics: r.ratelimit!.characteristics || [],
+        triggers: 0,
       }));
   } catch {
     // Phase may not exist or no permission
     return [];
   }
+}
+
+async function fetchRateLimitByRule(
+  zoneTag: string,
+  since: string,
+  until: string,
+): Promise<Map<string, number>> {
+  const query = `{
+    viewer {
+      zones(filter: { zoneTag: "${zoneTag}" }) {
+        firewallEventsAdaptiveGroups(
+          limit: 200
+          filter: {
+            datetime_geq: "${since}"
+            datetime_lt: "${until}"
+            source_in: ["ratelimit"]
+          }
+          orderBy: [count_DESC]
+        ) {
+          count
+          dimensions { ruleId }
+        }
+      }
+    }
+  }`;
+
+  interface Group {
+    count: number;
+    dimensions: { ruleId: string };
+  }
+
+  const data = await cfGraphQL<{
+    viewer: { zones: Array<{ firewallEventsAdaptiveGroups: Group[] }> };
+  }>(query);
+
+  const map = new Map<string, number>();
+  for (const g of data.viewer.zones[0]?.firewallEventsAdaptiveGroups || []) {
+    const id = g.dimensions.ruleId;
+    map.set(id, (map.get(id) || 0) + g.count);
+  }
+  return map;
 }

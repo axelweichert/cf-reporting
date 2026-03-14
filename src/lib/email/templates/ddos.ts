@@ -75,6 +75,7 @@ export function renderDdosEmail(data: DdosData, meta: ReportMeta): string {
             [
               { label: "Rule" },
               { label: "Action" },
+              { label: "Triggers", align: "right" as const },
               { label: "Threshold", align: "right" as const },
               { label: "Timeout", align: "right" as const },
               { label: "Status" },
@@ -82,6 +83,7 @@ export function renderDdosEmail(data: DdosData, meta: ReportMeta): string {
             data.rateLimitRules.map((r) => [
               escapeHtml(r.description),
               escapeHtml(r.action.replace(/_/g, " ")),
+              formatNum(r.triggers),
               `${formatNum(r.threshold)} / ${r.period}s`,
               fmtTimeout(r.mitigationTimeout),
               r.enabled ? "Active" : "Off",
