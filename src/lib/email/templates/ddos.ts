@@ -66,6 +66,34 @@ export function renderDdosEmail(data: DdosData, meta: ReportMeta): string {
 
     spacer(),
 
+    // Rate limiting rules
+    data.rateLimitRules.length > 0
+      ? (() => {
+          const title = sectionTitle("Rate Limiting Rules");
+          const fmtTimeout = (s: number) => s >= 3600 ? `${Math.round(s / 3600)}h` : s >= 60 ? `${Math.round(s / 60)}m` : `${s}s`;
+          const table = dataTable(
+            [
+              { label: "Rule" },
+              { label: "Action" },
+              { label: "Threshold", align: "right" as const },
+              { label: "Timeout", align: "right" as const },
+              { label: "Status" },
+            ],
+            data.rateLimitRules.map((r) => [
+              escapeHtml(r.description),
+              escapeHtml(r.action.replace(/_/g, " ")),
+              `${formatNum(r.threshold)} / ${r.period}s`,
+              fmtTimeout(r.mitigationTimeout),
+              r.enabled ? "Active" : "Off",
+            ]),
+            20
+          );
+          return title + table;
+        })()
+      : "",
+
+    spacer(),
+
     // L3/L4 attacks section (if available)
     ...(data.l34
       ? [

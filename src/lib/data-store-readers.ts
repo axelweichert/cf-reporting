@@ -591,7 +591,17 @@ function readDnsData(
     .map(([ts, counts]) => ({ date: epochToIso(ts), ...counts }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  const queryTypes = Array.from(queryTypeSet).sort();
+  // Sort query types by total volume (descending) so top-N slice picks the biggest types
+  const typeTotals = new Map<string, number>();
+  for (const t of queryTypeSet) typeTotals.set(t, 0);
+  for (const counts of tsMap.values()) {
+    for (const [key, value] of Object.entries(counts)) {
+      typeTotals.set(key, (typeTotals.get(key) || 0) + value);
+    }
+  }
+  const queryTypes = Array.from(typeTotals.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([type]) => type);
 
   // Response code breakdown
   const responseCodeBreakdown = db.prepare(`
@@ -1253,6 +1263,7 @@ function readDdosData(
     rateLimitMethods,
     rateLimitTopPaths,
     totalRateLimitEvents,
+    rateLimitRules: [], // Rules are live config, not collected historically
     l34,
   };
 }

@@ -1,4 +1,4 @@
-import { cfGraphQL } from "@/lib/use-cf-data";
+import { cfGraphQL, cfRest } from "@/lib/use-cf-data";
 
 // --- Types ---
 interface DdosTimeSeriesPoint {
@@ -38,6 +38,19 @@ export interface L34DdosData {
   totalBitsDropped: number;
 }
 
+export interface RateLimitRule {
+  id: string;
+  description: string;
+  action: string;
+  expression: string;
+  enabled: boolean;
+  threshold: number;
+  period: number;
+  mitigationTimeout: number;
+  countingExpression: string;
+  characteristics: string[];
+}
+
 export interface DdosData {
   // L7 DDoS section
   ddosEventsOverTime: DdosTimeSeriesPoint[];
@@ -49,6 +62,7 @@ export interface DdosData {
   rateLimitMethods: AttackVector[];
   rateLimitTopPaths: AttackedPath[];
   totalRateLimitEvents: number;
+  rateLimitRules: RateLimitRule[];
   // L3/L4 DDoS (requires Advanced DDoS / Magic Transit)
   l34: L34DdosData | null;
 }
@@ -67,6 +81,7 @@ export async function fetchDdosData(
     rateLimitEventsOverTime,
     rateLimitMethods,
     rateLimitTopPaths,
+    rateLimitRules,
     l34,
   ] = await Promise.all([
     fetchFilteredEventsOverTime(zoneTag, since, until, ["l7ddos"]),
@@ -75,6 +90,7 @@ export async function fetchDdosData(
     fetchFilteredEventsOverTime(zoneTag, since, until, ["ratelimit"]),
     fetchFilteredAttackVectors(zoneTag, since, until, ["ratelimit"]),
     fetchFilteredTopPaths(zoneTag, since, until, ["ratelimit"]),
+    fetchRateLimitRules(zoneTag),
     accountTag ? fetchL34DdosData(accountTag, since, until) : Promise.resolve(null),
   ]);
 
@@ -90,6 +106,7 @@ export async function fetchDdosData(
     rateLimitMethods,
     rateLimitTopPaths,
     totalRateLimitEvents,
+    rateLimitRules,
     l34,
   };
 }
@@ -302,4 +319,44 @@ async function fetchFilteredTopPaths(
     path: g.dimensions.clientRequestPath || "/",
     count: g.count,
   }));
+}
+
+async function fetchRateLimitRules(zoneTag: string): Promise<RateLimitRule[]> {
+  try {
+    const ruleset = await cfRest<{
+      id: string;
+      rules?: Array<{
+        id: string;
+        description?: string;
+        expression?: string;
+        action?: string;
+        enabled?: boolean;
+        ratelimit?: {
+          characteristics?: string[];
+          period?: number;
+          requests_per_period?: number;
+          counting_expression?: string;
+          mitigation_timeout?: number;
+        };
+      }>;
+    }>(`/zones/${zoneTag}/rulesets/phases/http_ratelimit/entrypoint`);
+
+    return (ruleset.rules || [])
+      .filter((r) => r.ratelimit)
+      .map((r) => ({
+        id: r.id,
+        description: r.description || "Untitled rule",
+        action: r.action || "block",
+        expression: r.expression || "",
+        enabled: r.enabled !== false,
+        threshold: r.ratelimit!.requests_per_period || 0,
+        period: r.ratelimit!.period || 0,
+        mitigationTimeout: r.ratelimit!.mitigation_timeout || 0,
+        countingExpression: r.ratelimit!.counting_expression || "",
+        characteristics: r.ratelimit!.characteristics || [],
+      }));
+  } catch {
+    // Phase may not exist or no permission
+    return [];
+  }
 }

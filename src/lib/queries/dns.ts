@@ -249,6 +249,24 @@ async function fetchDnsAggregates(
   return { responseCodes, topQueried, allQueriedNames, nxdomainHotspots, latency };
 }
 
+// Sort query types by total volume (descending) so .slice(0, 6) picks the top types
+function sortTypesByVolume(
+  timeSeries: DnsTimeSeriesPoint[],
+  types: Set<string>
+): string[] {
+  const totals = new Map<string, number>();
+  for (const t of types) totals.set(t, 0);
+  for (const point of timeSeries) {
+    for (const [key, value] of Object.entries(point)) {
+      if (key === "date") continue;
+      totals.set(key, (totals.get(key) || 0) + (value as number));
+    }
+  }
+  return Array.from(totals.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([type]) => type);
+}
+
 // --- Time series (must stay chunked due to high cardinality) ---
 async function fetchQueryVolumeChunk(
   zoneTag: string,
@@ -330,11 +348,12 @@ async function fetchQueryVolumeByType(
     }
   }
 
+  const timeSeries = Array.from(merged.values()).sort((a, b) =>
+    (a.date as string).localeCompare(b.date as string)
+  );
   return {
-    timeSeries: Array.from(merged.values()).sort((a, b) =>
-      (a.date as string).localeCompare(b.date as string)
-    ),
-    types: Array.from(allTypes).sort(),
+    timeSeries,
+    types: sortTypesByVolume(timeSeries, allTypes),
   };
 }
 
@@ -379,11 +398,12 @@ async function fetchQueryVolumeByDay(
     byDate.set(day, existing);
   }
 
+  const timeSeries = Array.from(byDate.values()).sort((a, b) =>
+    (a.date as string).localeCompare(b.date as string)
+  );
   return {
-    timeSeries: Array.from(byDate.values()).sort((a, b) =>
-      (a.date as string).localeCompare(b.date as string)
-    ),
-    types: Array.from(types).sort(),
+    timeSeries,
+    types: sortTypesByVolume(timeSeries, types),
   };
 }
 

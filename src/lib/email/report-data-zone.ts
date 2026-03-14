@@ -11,7 +11,7 @@ import type { OriginHealthData } from "@/lib/queries/origin-health";
 import type { SslData } from "@/lib/queries/ssl";
 import type { BotData } from "@/lib/queries/bots";
 import type { ApiShieldData } from "@/lib/queries/api-shield";
-import type { DdosData, L34Attack, L34DdosData } from "@/lib/queries/ddos";
+import type { DdosData, L34Attack, L34DdosData, RateLimitRule } from "@/lib/queries/ddos";
 
 // --- Helpers ---
 
@@ -1186,6 +1186,7 @@ export async function fetchDdosDataServer(
     rateLimitEventsOverTime,
     rateLimitMethods,
     rateLimitTopPaths,
+    rateLimitRules,
     l34,
   ] = await Promise.all([
     fetchFilteredEventsOverTime(client, zoneId, since, until, ["l7ddos"]),
@@ -1194,6 +1195,7 @@ export async function fetchDdosDataServer(
     fetchFilteredEventsOverTime(client, zoneId, since, until, ["ratelimit"]),
     fetchFilteredAttackVectors(client, zoneId, since, until, ["ratelimit"]),
     fetchFilteredTopPaths(client, zoneId, since, until, ["ratelimit"]),
+    fetchRateLimitRulesServer(client, zoneId),
     accountId ? fetchL34DdosData(client, accountId, since, until) : Promise.resolve(null),
   ]);
 
@@ -1209,6 +1211,7 @@ export async function fetchDdosDataServer(
     rateLimitMethods,
     rateLimitTopPaths,
     totalRateLimitEvents,
+    rateLimitRules,
     l34,
   };
 }
@@ -1414,5 +1417,49 @@ async function fetchL34DdosData(
   } catch {
     // Not available (requires Advanced DDoS / Magic Transit)
     return null;
+  }
+}
+
+async function fetchRateLimitRulesServer(
+  client: CloudflareClient,
+  zoneId: string,
+): Promise<RateLimitRule[]> {
+  try {
+    const res = await client.rest<{
+      id: string;
+      rules?: Array<{
+        id: string;
+        description?: string;
+        expression?: string;
+        action?: string;
+        enabled?: boolean;
+        ratelimit?: {
+          characteristics?: string[];
+          period?: number;
+          requests_per_period?: number;
+          counting_expression?: string;
+          mitigation_timeout?: number;
+        };
+      }>;
+    }>(`/zones/${zoneId}/rulesets/phases/http_ratelimit/entrypoint`);
+
+    if (!res.success || !res.result) return [];
+
+    return (res.result.rules || [])
+      .filter((r) => r.ratelimit)
+      .map((r) => ({
+        id: r.id,
+        description: r.description || "Untitled rule",
+        action: r.action || "block",
+        expression: r.expression || "",
+        enabled: r.enabled !== false,
+        threshold: r.ratelimit!.requests_per_period || 0,
+        period: r.ratelimit!.period || 0,
+        mitigationTimeout: r.ratelimit!.mitigation_timeout || 0,
+        countingExpression: r.ratelimit!.counting_expression || "",
+        characteristics: r.ratelimit!.characteristics || [],
+      }));
+  } catch {
+    return [];
   }
 }

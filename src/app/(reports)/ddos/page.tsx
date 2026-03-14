@@ -3,7 +3,7 @@
 import { useFilterStore, getDateRange } from "@/lib/store";
 import { useAuth } from "@/lib/store";
 import { useReportData } from "@/lib/use-report-data";
-import { fetchDdosData, type DdosData } from "@/lib/queries/ddos";
+import { fetchDdosData, type DdosData, type RateLimitRule } from "@/lib/queries/ddos";
 import { pctChange, formatTimeSeries, buildComparisonChart } from "@/lib/compare-utils";
 import ChartWrapper from "@/components/charts/chart-wrapper";
 import TimeSeriesChart from "@/components/charts/time-series-chart";
@@ -207,6 +207,73 @@ export default function DdosPage() {
             />
           </ChartWrapper>
         </div>
+
+        {!loading && (data?.rateLimitRules || []).length > 0 && (
+          <ChartWrapper title="Rate Limiting Rules" subtitle={`${data!.rateLimitRules.length} rule${data!.rateLimitRules.length !== 1 ? "s" : ""} configured`} loading={false}>
+            <DataTable
+              columns={[
+                {
+                  key: "description",
+                  label: "Rule",
+                },
+                {
+                  key: "action",
+                  label: "Action",
+                  width: "100px",
+                  render: (v) => {
+                    const action = v as string;
+                    const colors: Record<string, string> = {
+                      block: "bg-red-500/10 text-red-400 border-red-500/20",
+                      challenge: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
+                      managed_challenge: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
+                      js_challenge: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
+                      log: "bg-zinc-500/10 text-zinc-400 border-zinc-500/20",
+                    };
+                    return (
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${colors[action] || colors.log}`}>
+                        {action.replace(/_/g, " ")}
+                      </span>
+                    );
+                  },
+                },
+                {
+                  key: "threshold",
+                  label: "Threshold",
+                  align: "right",
+                  width: "120px",
+                  render: (v, row) => {
+                    const rule = row as RateLimitRule;
+                    return `${formatNumber(rule.threshold)} / ${rule.period}s`;
+                  },
+                },
+                {
+                  key: "mitigationTimeout",
+                  label: "Timeout",
+                  align: "right",
+                  width: "90px",
+                  render: (v) => {
+                    const secs = v as number;
+                    if (secs >= 3600) return `${Math.round(secs / 3600)}h`;
+                    if (secs >= 60) return `${Math.round(secs / 60)}m`;
+                    return `${secs}s`;
+                  },
+                },
+                {
+                  key: "enabled",
+                  label: "Status",
+                  align: "center",
+                  width: "80px",
+                  render: (v) => (
+                    <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${v ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-zinc-500/10 text-zinc-500 border-zinc-500/20"}`}>
+                      {v ? "Active" : "Off"}
+                    </span>
+                  ),
+                },
+              ]}
+              data={data!.rateLimitRules}
+            />
+          </ChartWrapper>
+        )}
       </section>
 
       {/* L3/L4 DDoS Section */}

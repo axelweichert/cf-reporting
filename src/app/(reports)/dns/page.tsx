@@ -134,7 +134,6 @@ export default function DnsPage() {
             label: type,
             color: SERIES_COLORS[i % SERIES_COLORS.length],
           }))}
-          stacked
           yFormatter={formatNumber}
         />
       </ChartWrapper>
