@@ -20,10 +20,10 @@ Open-source, self-hosted reporting dashboard for Cloudflare. Authenticate with y
 
 ## Quick Start
 
-### Docker (recommended)
-
 ```bash
-docker run -p 3000:3000 ghcr.io/gladston3/cf-reporting:latest
+git clone https://github.com/gladston3/cf-reporting.git
+cd cf-reporting
+docker compose up -d
 ```
 
 Open `http://localhost:3000` and enter your Cloudflare API token. This launches in **Explore mode** – no persistence, no site password required.
@@ -33,24 +33,12 @@ Open `http://localhost:3000` and enter your Cloudflare API token. This launches 
 Skip the browser setup by providing your token as an environment variable. This enables persistent schedules, background data collection, and scheduled email delivery. **`APP_PASSWORD` and `SESSION_SECRET` are required** in managed mode:
 
 ```bash
-docker run -p 3000:3000 \
-  -e CF_API_TOKEN=your_token_here \
-  -e APP_PASSWORD=your_secret_password \
-  -e SESSION_SECRET=$(openssl rand -hex 32) \
-  -v cf_data:/app/data \
-  ghcr.io/gladston3/cf-reporting:latest
-```
-
-### Docker Compose
-
-```bash
-# Copy and edit the compose file
-cp docker-compose.yml docker-compose.override.yml
-# Set CF_API_TOKEN, APP_PASSWORD, SESSION_SECRET, etc. in .env
+cp .env.example .env
+# Edit .env – set CF_API_TOKEN, APP_PASSWORD, SESSION_SECRET
 docker compose up -d
 ```
 
-### Development
+### Development (without Docker)
 
 ```bash
 git clone https://github.com/gladston3/cf-reporting.git
