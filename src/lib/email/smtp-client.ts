@@ -1,13 +1,13 @@
 /**
  * SMTP client wrapper using nodemailer.
  *
- * Reads config from env vars (precedence) or session-provided SMTP settings.
+ * Reads config from env vars (persistent) or inline one-shot config (per-request, never stored).
  * Never logs or exposes SMTP password.
  */
 
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
-import type { SessionSmtp } from "@/types/cloudflare";
+import type { InlineSmtpConfig } from "@/types/email";
 
 // --- Rate limiting ---
 
@@ -38,7 +38,7 @@ export interface ResolvedSmtpConfig {
   password: string;
   fromAddress: string;
   fromName: string;
-  source: "env" | "session" | "none";
+  source: "env" | "inline" | "none";
 }
 
 /** Get SMTP config from env vars. Returns null if not fully configured. */
@@ -60,28 +60,28 @@ export function getSmtpFromEnv(): ResolvedSmtpConfig | null {
   };
 }
 
-/** Get SMTP config from session data. Returns null if not configured. */
-export function getSmtpFromSession(smtp?: SessionSmtp): ResolvedSmtpConfig | null {
-  if (!smtp?.host || !smtp?.user || !smtp?.password) return null;
+/** Build a resolved config from inline one-shot SMTP data. Returns null if incomplete. */
+export function resolveInlineSmtp(inline?: InlineSmtpConfig): ResolvedSmtpConfig | null {
+  if (!inline?.host || !inline?.user || !inline?.password) return null;
   return {
-    host: smtp.host,
-    port: smtp.port,
-    secure: smtp.secure,
-    user: smtp.user,
-    password: smtp.password,
-    fromAddress: smtp.fromAddress || smtp.user,
-    fromName: smtp.fromName || "cf-reporting",
-    source: "session",
+    host: inline.host,
+    port: inline.port,
+    secure: inline.secure,
+    user: inline.user,
+    password: inline.password,
+    fromAddress: inline.fromAddress || inline.user,
+    fromName: inline.fromName || "cf-reporting",
+    source: "inline",
   };
 }
 
-/** Resolve SMTP config: env vars take precedence, then session. */
-export function resolveSmtpConfig(sessionSmtp?: SessionSmtp): ResolvedSmtpConfig {
+/** Resolve SMTP config: env vars take precedence, then inline one-shot. */
+export function resolveSmtpConfig(inline?: InlineSmtpConfig): ResolvedSmtpConfig {
   const env = getSmtpFromEnv();
   if (env) return env;
 
-  const session = getSmtpFromSession(sessionSmtp);
-  if (session) return session;
+  const inlineResolved = resolveInlineSmtp(inline);
+  if (inlineResolved) return inlineResolved;
 
   return {
     host: "", port: 587, secure: true, user: "", password: "",
@@ -93,7 +93,7 @@ export function resolveSmtpConfig(sessionSmtp?: SessionSmtp): ResolvedSmtpConfig
 
 function createTransport(config: ResolvedSmtpConfig): Transporter {
   if (config.source === "none") {
-    throw new Error("SMTP is not configured. Set up SMTP in Settings or via environment variables.");
+    throw new Error("SMTP is not configured. Set SMTP_* environment variables or provide SMTP settings with your request.");
   }
 
   return nodemailer.createTransport({
@@ -121,8 +121,8 @@ function sanitizeName(name: string): string {
 }
 
 /** Test SMTP connection. Returns true if successful, throws on failure. */
-export async function testSmtpConnection(sessionSmtp?: SessionSmtp): Promise<boolean> {
-  const config = resolveSmtpConfig(sessionSmtp);
+export async function testSmtpConnection(inline?: InlineSmtpConfig): Promise<boolean> {
+  const config = resolveSmtpConfig(inline);
   const transport = createTransport(config);
   try {
     await transport.verify();
@@ -133,10 +133,10 @@ export async function testSmtpConnection(sessionSmtp?: SessionSmtp): Promise<boo
 }
 
 /** Send a test email to verify SMTP works end-to-end. */
-export async function sendTestEmail(to: string, sessionSmtp?: SessionSmtp): Promise<void> {
+export async function sendTestEmail(to: string, inline?: InlineSmtpConfig): Promise<void> {
   checkRateLimit();
 
-  const config = resolveSmtpConfig(sessionSmtp);
+  const config = resolveSmtpConfig(inline);
   const transport = createTransport(config);
 
   try {
@@ -162,12 +162,12 @@ export async function sendTestEmail(to: string, sessionSmtp?: SessionSmtp): Prom
   }
 }
 
-/** Send a report email with HTML content. Uses env SMTP (for scheduler) or provided session SMTP. */
+/** Send a report email with HTML content. Uses env SMTP (for scheduler) or inline one-shot config. */
 export async function sendReportEmail(
   recipients: string[],
   subject: string,
   html: string,
-  sessionSmtp?: SessionSmtp
+  inline?: InlineSmtpConfig
 ): Promise<void> {
   checkRateLimit();
 
@@ -181,7 +181,7 @@ export async function sendReportEmail(
     }
   }
 
-  const config = resolveSmtpConfig(sessionSmtp);
+  const config = resolveSmtpConfig(inline);
   const transport = createTransport(config);
 
   try {

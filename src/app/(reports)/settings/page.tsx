@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/lib/store";
 import type { SmtpConfigResponse, ScheduleConfig, EmailStatus, ReportType, ScheduleFrequency } from "@/types/email";
 import {
-  Mail, Server, Clock, AlertTriangle, CheckCircle, Info,
+  Mail, Clock, AlertTriangle, CheckCircle, Info,
   Trash2, ToggleLeft, ToggleRight, Plus, Send, RefreshCw,
   Database, Play,
 } from "lucide-react";
@@ -34,7 +34,6 @@ export default function SettingsPage() {
   const [smtpForm, setSmtpForm] = useState({
     host: "", port: "587", secure: true, user: "", password: "", fromAddress: "", fromName: "cf-reporting",
   });
-  const [smtpSaving, setSmtpSaving] = useState(false);
   const [smtpMessage, setSmtpMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // SMTP test
@@ -102,17 +101,6 @@ export default function SettingsPage() {
       if (smtpRes.ok) {
         const data = await smtpRes.json();
         setSmtpConfig(data.smtp);
-        if (data.smtp.source !== "env") {
-          setSmtpForm((prev) => ({
-            ...prev,
-            host: data.smtp.host || prev.host,
-            port: String(data.smtp.port || 587),
-            secure: data.smtp.secure ?? true,
-            user: data.smtp.user || prev.user,
-            fromAddress: data.smtp.fromAddress || prev.fromAddress,
-            fromName: data.smtp.fromName || prev.fromName,
-          }));
-        }
       }
       if (schedulesRes.ok) {
         const data = await schedulesRes.json();
@@ -169,36 +157,16 @@ export default function SettingsPage() {
     } catch { /* ignore */ }
   };
 
-  // Save SMTP
-  const handleSaveSmtp = async () => {
-    setSmtpSaving(true);
-    setSmtpMessage(null);
-    try {
-      const res = await fetch("/api/email/smtp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          host: smtpForm.host,
-          port: parseInt(smtpForm.port, 10),
-          secure: smtpForm.secure,
-          user: smtpForm.user,
-          password: smtpForm.password,
-          fromAddress: smtpForm.fromAddress,
-          fromName: smtpForm.fromName,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSmtpMessage({ type: "success", text: data.message });
-        loadData();
-      } else {
-        setSmtpMessage({ type: "error", text: data.error });
-      }
-    } catch {
-      setSmtpMessage({ type: "error", text: "Failed to save SMTP configuration" });
-    }
-    setSmtpSaving(false);
-  };
+  // Build inline SMTP config from form values (for one-shot use)
+  const getInlineSmtp = () => ({
+    host: smtpForm.host,
+    port: parseInt(smtpForm.port, 10),
+    secure: smtpForm.secure,
+    user: smtpForm.user,
+    password: smtpForm.password,
+    fromAddress: smtpForm.fromAddress,
+    fromName: smtpForm.fromName,
+  });
 
   // Test SMTP
   const handleTestSmtp = async () => {
@@ -208,7 +176,10 @@ export default function SettingsPage() {
       const res = await fetch("/api/email/smtp/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: testEmail || undefined }),
+        body: JSON.stringify({
+          to: testEmail || undefined,
+          smtp: isEnvSmtp ? undefined : getInlineSmtp(),
+        }),
       });
       const data = await res.json();
       setSmtpMessage({ type: res.ok ? "success" : "error", text: data.message || data.error });
@@ -291,13 +262,6 @@ export default function SettingsPage() {
         {!status?.cfApiTokenSet && (
           <p className="mt-3 text-xs text-zinc-500">
             Scheduled delivery requires CF_API_TOKEN and SMTP_* environment variables.
-          </p>
-        )}
-        {smtpConfig?.source === "session" && (
-          <p className="mt-2 text-xs text-yellow-400/80">
-            <AlertTriangle size={12} className="mr-1 inline" />
-            SMTP settings are stored in your browser session and will be lost when the session expires.
-            Set SMTP_* environment variables for persistent configuration.
           </p>
         )}
       </div>
@@ -403,10 +367,17 @@ export default function SettingsPage() {
           SMTP Configuration
         </h2>
 
-        {isEnvSmtp && (
+        {isEnvSmtp ? (
           <div className="mt-3 flex items-start gap-2 rounded-md border border-blue-500/20 bg-blue-500/5 px-3 py-2">
             <Info size={14} className="mt-0.5 shrink-0 text-blue-400" />
             <p className="text-xs text-blue-300">SMTP is configured via environment variables. Settings below are read-only.</p>
+          </div>
+        ) : (
+          <div className="mt-3 flex items-start gap-2 rounded-md border border-zinc-700 bg-zinc-800/50 px-3 py-2">
+            <Info size={14} className="mt-0.5 shrink-0 text-zinc-400" />
+            <p className="text-xs text-zinc-400">
+              SMTP settings are used for this request only and are never stored. Set SMTP_* environment variables for persistent configuration.
+            </p>
           </div>
         )}
 
@@ -438,27 +409,18 @@ export default function SettingsPage() {
           </div>
         )}
 
-        <div className="mt-4 flex flex-wrap gap-3">
-          {!isEnvSmtp && (
-            <button onClick={handleSaveSmtp} disabled={smtpSaving || !smtpForm.host} className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-orange-600 disabled:opacity-50">
-              <Server size={14} />
-              {smtpSaving ? "Saving..." : "Save SMTP"}
-            </button>
-          )}
-
-          <div className="flex items-center gap-2">
-            <input
-              type="email"
-              value={testEmail}
-              onChange={(e) => setTestEmail(e.target.value)}
-              placeholder="test@example.com"
-              className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-orange-500 focus:outline-none"
-            />
-            <button onClick={handleTestSmtp} disabled={testing || !smtpConfig || smtpConfig.source === "none"} className="flex items-center gap-2 rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-zinc-800 disabled:opacity-50">
-              <Send size={14} />
-              {testing ? "Testing..." : "Send Test"}
-            </button>
-          </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <input
+            type="email"
+            value={testEmail}
+            onChange={(e) => setTestEmail(e.target.value)}
+            placeholder="test@example.com"
+            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 focus:border-orange-500 focus:outline-none"
+          />
+          <button onClick={handleTestSmtp} disabled={testing || (isEnvSmtp ? false : !smtpForm.host)} className="flex items-center gap-2 rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-zinc-800 disabled:opacity-50">
+            <Send size={14} />
+            {testing ? "Testing..." : "Send Test"}
+          </button>
         </div>
       </div>
 
@@ -494,7 +456,7 @@ export default function SettingsPage() {
         {status?.cfApiTokenSet && !status?.smtpEnvConfigured && (
           <p className="mt-3 text-xs text-yellow-400/80">
             <AlertTriangle size={12} className="mr-1 inline" />
-            Set SMTP_* environment variables to enable scheduled email delivery. Session-based SMTP cannot be used for schedules.
+            Set SMTP_* environment variables to enable scheduled email delivery.
           </p>
         )}
 

@@ -1,6 +1,6 @@
 import { requireAuth, validateOrigin } from "@/lib/auth-helpers";
-import type { ReportType } from "@/types/email";
-import { sendReportEmail } from "@/lib/email/smtp-client";
+import type { ReportType, InlineSmtpConfig } from "@/types/email";
+import { sendReportEmail, getSmtpFromEnv } from "@/lib/email/smtp-client";
 import { fetchExecutiveDataServer, fetchSecurityDataServer } from "@/lib/email/report-data";
 import { renderExecutiveEmail } from "@/lib/email/templates/executive";
 import { renderSecurityEmail } from "@/lib/email/templates/security";
@@ -14,9 +14,10 @@ interface SendRequest {
   timeRange: "1d" | "7d" | "30d";
   recipients: string[];
   subject?: string;
+  smtp?: InlineSmtpConfig;
 }
 
-/** POST: Send a report email immediately */
+/** POST: Send a report email immediately (env SMTP or inline one-shot) */
 export async function POST(request: NextRequest) {
   const originError = validateOrigin(request);
   if (originError) return originError;
@@ -24,7 +25,7 @@ export async function POST(request: NextRequest) {
   const auth = await requireAuth();
   if (!auth) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { session, token } = auth;
+  const { token } = auth;
 
   try {
     const body = await request.json() as SendRequest;
@@ -38,6 +39,13 @@ export async function POST(request: NextRequest) {
       if (typeof email !== "string" || !emailRegex.test(email)) {
         return Response.json({ error: `Invalid email address: ${email}` }, { status: 400 });
       }
+    }
+
+    // Env SMTP takes precedence; otherwise use inline one-shot config
+    const inline = getSmtpFromEnv() ? undefined : body.smtp;
+
+    if (!getSmtpFromEnv() && !inline?.host) {
+      return Response.json({ error: "No SMTP configured. Provide SMTP settings or set SMTP_* environment variables." }, { status: 400 });
     }
 
     const { start, end } = getDateRange(body.timeRange);
@@ -76,7 +84,7 @@ export async function POST(request: NextRequest) {
         );
     }
 
-    await sendReportEmail(body.recipients, subject, html, session.smtp);
+    await sendReportEmail(body.recipients, subject, html, inline);
 
     return Response.json({ success: true, message: `Report sent to ${body.recipients.length} recipient(s)` });
   } catch (err) {

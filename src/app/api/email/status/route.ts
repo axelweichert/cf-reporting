@@ -1,13 +1,13 @@
 import { getAuthenticatedSession } from "@/lib/auth-helpers";
 import type { EmailStatus } from "@/types/email";
-import { resolveSmtpConfig, getSmtpFromEnv } from "@/lib/email/smtp-client";
+import { getSmtpFromEnv } from "@/lib/email/smtp-client";
 
 /** GET: Return email delivery system status */
 export async function GET() {
   const session = await getAuthenticatedSession();
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-  const smtp = resolveSmtpConfig(session.smtp);
+  const envSmtp = getSmtpFromEnv();
 
   let schedulerRunning = false;
   try {
@@ -26,12 +26,12 @@ export async function GET() {
   }
 
   const status: EmailStatus = {
-    smtpConfigured: smtp.source !== "none",
-    smtpSource: smtp.source,
+    smtpConfigured: !!envSmtp,
+    smtpSource: envSmtp ? "env" : "none",
     schedulerRunning,
     activeSchedules,
     cfApiTokenSet: !!process.env.CF_API_TOKEN,
-    smtpEnvConfigured: getSmtpFromEnv() !== null,
+    smtpEnvConfigured: !!envSmtp,
     appPasswordSet: !!process.env.APP_PASSWORD,
   };
 

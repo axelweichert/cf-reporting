@@ -61,23 +61,11 @@ export interface SessionCapabilities {
 
 export type TokenType = "user" | "account";
 
-export interface SessionSmtp {
-  host: string;
-  port: number;
-  secure: boolean;
-  user: string;
-  password: string;
-  fromAddress: string;
-  fromName: string;
-}
-
 export interface SessionData {
   token?: string;
   tokenType?: TokenType;
   capabilities?: SessionCapabilities;
   tokenSource?: "env" | "browser";
-  /** SMTP settings configured via the Settings UI (session-scoped) */
-  smtp?: SessionSmtp;
   /** Set to true when the user has authenticated via APP_PASSWORD */
   siteAuthenticated?: boolean;
 }

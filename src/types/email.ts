@@ -1,20 +1,17 @@
 // --- SMTP Configuration ---
 
-// SMTP config as stored in session (plaintext password – session cookie is encrypted by iron-session)
-export interface SmtpConfig {
+// One-shot SMTP config submitted inline with test/send requests (never persisted)
+export interface InlineSmtpConfig {
   host: string;
   port: number;
   secure: boolean; // true = implicit TLS (465), false = STARTTLS (587)
   user: string;
-  password: string; // stored in encrypted iron-session cookie
+  password: string;
   fromAddress: string;
   fromName: string;
 }
 
-// Input from API (same shape – no separate encryption layer needed)
-export type SmtpConfigInput = SmtpConfig;
-
-// Response to client (password masked)
+// Response to client (env SMTP status only)
 export interface SmtpConfigResponse {
   host: string;
   port: number;
@@ -23,7 +20,7 @@ export interface SmtpConfigResponse {
   passwordSet: boolean;
   fromAddress: string;
   fromName: string;
-  source: "env" | "session" | "none";
+  source: "env" | "none";
 }
 
 // --- Schedule Configuration ---
@@ -64,7 +61,7 @@ export interface ScheduleConfig {
 
 export interface EmailStatus {
   smtpConfigured: boolean;
-  smtpSource: "env" | "session" | "none";
+  smtpSource: "env" | "none";
   schedulerRunning: boolean;
   activeSchedules: number;
   cfApiTokenSet: boolean;
