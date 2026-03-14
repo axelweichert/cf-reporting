@@ -2,18 +2,18 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 /**
- * Middleware to enforce site authentication gate.
+ * Proxy to enforce site authentication gate.
  *
  * Gate applies when APP_PASSWORD is set OR when env tokens
  * (CF_API_TOKEN/CF_ACCOUNT_TOKEN) are present – deploying env tokens
  * without APP_PASSWORD would otherwise expose the app to any visitor.
  *
- * We can't read iron-session here (middleware runs on the Edge runtime),
+ * We can't read iron-session here (proxy runs on the Edge runtime),
  * so we check for the existence of the session cookie as a lightweight gate.
  * The actual session validation happens in each API route handler.
  */
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const appPassword = process.env.APP_PASSWORD;
   const hasEnvToken = !!(process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN);
   if (!appPassword && !hasEnvToken) return NextResponse.next();
