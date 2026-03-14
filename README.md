@@ -105,8 +105,8 @@ Managed mode enables persistent email schedules, background data collection, and
 
 The built-in background collector periodically fetches data from the Cloudflare API and stores normalized snapshots in a local SQLite database. This enables historical trend analysis beyond Cloudflare's default retention.
 
-- **Initial backfill** – On the first run, fetches historical data day-by-day based on your Cloudflare plan: 3 days (Free), 30 days (Pro/Business), 90 days (Enterprise). Override with `INITIAL_LOOKBACK_DAYS`
-- **Throttled backfill** – 2-second pause between each day-slice to stay well within Cloudflare's rate limits
+- **Initial backfill** – On the first run, attempts to fetch up to 365 days of historical data in 7-day slices. The Cloudflare API enforces plan-based retention limits automatically (Free gets ~3 days, Pro/Business ~30 days, Enterprise ~90 days). Override with `INITIAL_LOOKBACK_DAYS`
+- **Throttled backfill** – 1-second pause between slices to stay well within Cloudflare's rate limits
 - **Schedule** – Configurable via `COLLECTION_SCHEDULE` (default: every 6 hours)
 - **Retention** – Configurable via `DATA_RETENTION_DAYS` (default: 90 days)
 - **Storage** – Mount `/app/data` as a Docker volume for persistence
@@ -235,7 +235,7 @@ Both **User API tokens** (`CF_API_TOKEN`) and **Account API tokens** (`CF_ACCOUN
 |---|---|---|
 | `COLLECTION_SCHEDULE` | Cron expression for background collection | `0 */6 * * *` |
 | `DATA_RETENTION_DAYS` | Days to keep collected snapshots | `90` |
-| `INITIAL_LOOKBACK_DAYS` | Override auto-detected initial backfill depth (1–365) | Auto by plan |
+| `INITIAL_LOOKBACK_DAYS` | Override initial backfill depth (1–365) | `365` |
 
 ### SMTP (Email)
 
