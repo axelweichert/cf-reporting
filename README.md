@@ -14,7 +14,7 @@ Open-source, self-hosted reporting dashboard for Cloudflare. Authenticate with y
 - **Backup & Restore** – Export/import schedules as JSON, download the full SQLite database, or push backups to Cloudflare R2
 - **Two Operating Modes** – Explore (browser token, no persistence) and Managed (env token, persistent schedules, startup validation)
 - **Graceful Degradation** – Adapts to your token's permissions; unavailable reports show which permissions are needed
-- **Privacy First** – API tokens stay server-side only, never exposed to the browser
+- **Privacy First** – API tokens are stored in encrypted httpOnly cookies, never persisted to disk or logged
 - **Dark / Light Mode** – Dark by default (matches Cloudflare dashboard aesthetic), toggle with one click
 - **Security Hardened** – CSRF protection, rate-limited login, constant-time password comparison, encrypted session cookies, security headers (X-Frame-Options, HSTS, Referrer-Policy)
 
@@ -203,7 +203,7 @@ Create a [Cloudflare API token](https://dash.cloudflare.com/profile/api-tokens) 
 
 The Executive Report has no permission gate – it aggregates data from available zone-scoped permissions.
 
-Both **User API tokens** (`CF_API_TOKEN`) and **Account API tokens** (`CF_ACCOUNT_TOKEN`) are supported. Reports requiring permissions your token doesn't have will show a helpful message instead of failing.
+Both **User API tokens** (`CF_API_TOKEN`) and **Account API tokens** (`CF_ACCOUNT_TOKEN`) are supported for report browsing and email scheduling. The background data collector currently only supports `CF_API_TOKEN`. Reports requiring permissions your token doesn't have will show a helpful message instead of failing.
 
 ## Environment Variables
 
@@ -281,12 +281,12 @@ Browser → Next.js API Routes → Cloudflare API
             httpOnly cookie)
                   ↓
             SQLite (collected data + schedules)
-            node-cron (scheduler)
+            node-cron (scheduler + collector)
             Playwright (PDF export)
             R2 (optional backup)
 ```
 
-All Cloudflare API calls are proxied through server-side routes. The token never reaches client-side JavaScript. No external database – the app runs as a single container with SQLite for optional data persistence.
+Browser-initiated Cloudflare API calls are proxied through server-side API routes – the token is read from the encrypted session cookie and never included in client-side responses. Server-side features (data collector, email scheduler, token verification) call the Cloudflare API directly. In Explore mode, the user enters their token in the browser once; it is sent to the server via POST and stored in an encrypted httpOnly cookie for the session. No external database – the app runs as a single container with SQLite for optional data persistence.
 
 ## License
 
