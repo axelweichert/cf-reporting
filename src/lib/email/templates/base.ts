@@ -131,7 +131,7 @@ export function dataTable(
   const bodyRows = displayRows.map((row, i) => {
     const bg = i % 2 === 0 ? colors.cardBg : colors.bg;
     const cells = row.map((cell, j) =>
-      `<td style="padding:8px 12px;text-align:${columns[j]?.align || "left"};font-size:13px;color:${colors.text};border-bottom:1px solid ${colors.border};background:${bg};">${cell}</td>`
+      `<td style="padding:8px 12px;text-align:${columns[j]?.align || "left"};font-size:13px;color:${colors.text};border-bottom:1px solid ${colors.border};background:${bg};">${escapeHtml(String(cell))}</td>`
     ).join("");
     return `<tr>${cells}</tr>`;
   }).join("");

@@ -50,7 +50,7 @@ export async function getAuthenticatedSession(): Promise<SessionData | null> {
   }
 
   // Check if user has a CF token (session or env)
-  if (session.token || process.env.CF_API_TOKEN) {
+  if (session.token || process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN) {
     return session;
   }
 
@@ -65,7 +65,7 @@ export async function requireAuth(): Promise<{ session: SessionData; token: stri
   const session = await getAuthenticatedSession();
   if (!session) return null;
 
-  const token = session.token || process.env.CF_API_TOKEN;
+  const token = session.token || process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN;
   if (!token) return null;
 
   return { session, token };

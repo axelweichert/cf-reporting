@@ -11,12 +11,13 @@ export async function GET() {
     sessionOptions
   );
 
-  // Enforce APP_PASSWORD gate
-  if (process.env.APP_PASSWORD && !session.siteAuthenticated) {
+  // Enforce site auth gate (APP_PASSWORD or env tokens present)
+  const hasEnvToken = !!(process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN);
+  if ((process.env.APP_PASSWORD || hasEnvToken) && !session.siteAuthenticated) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const token = session.token || process.env.CF_API_TOKEN;
+  const token = session.token || process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN;
   if (!token) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }

@@ -16,7 +16,7 @@ async function getClient(): Promise<CloudflareClient | null> {
   const hasEnvToken = !!(process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN);
   if ((process.env.APP_PASSWORD || hasEnvToken) && !session.siteAuthenticated) return null;
 
-  const token = session.token || process.env.CF_API_TOKEN;
+  const token = session.token || process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN;
   if (!token) return null;
 
   return new CloudflareClient(token);
