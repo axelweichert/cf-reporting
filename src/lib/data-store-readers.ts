@@ -1934,15 +1934,16 @@ export function getHistoricDataStatus(): {
   available: boolean;
   scopes: Array<{ id: string; name: string; type: "zone" | "account" }>;
   dateRange: { from: number; to: number } | null;
+  lastCollectedAt: number | null;
 } {
   const db = getDb();
-  if (!db) return { available: false, scopes: [], dateRange: null };
+  if (!db) return { available: false, scopes: [], dateRange: null, lastCollectedAt: null };
 
   const scopes = db.prepare(
     `SELECT DISTINCT scope_id, scope_name FROM collection_log WHERE status = 'success' ORDER BY scope_name`,
   ).all() as Array<{ scope_id: string; scope_name: string }>;
 
-  if (scopes.length === 0) return { available: false, scopes: [], dateRange: null };
+  if (scopes.length === 0) return { available: false, scopes: [], dateRange: null, lastCollectedAt: null };
 
   const scopeItems = scopes.map((s) => {
     // Zone datasets: http, firewall, dns, health
@@ -1983,5 +1984,16 @@ export function getHistoricDataStatus(): {
   const dateRange =
     ranges.length >= 2 ? { from: Math.min(...ranges), to: Math.max(...ranges) } : null;
 
-  return { available: true, scopes: scopeItems, dateRange };
+  // Most recent successful collection timestamp
+  let lastCollectedAt: number | null = null;
+  try {
+    const lastRow = db.prepare(
+      "SELECT MAX(collected_at) as last_ts FROM collection_log WHERE status = 'success'",
+    ).get() as { last_ts: number | null } | undefined;
+    lastCollectedAt = lastRow?.last_ts ?? null;
+  } catch {
+    /* table may not exist */
+  }
+
+  return { available: true, scopes: scopeItems, dateRange, lastCollectedAt };
 }

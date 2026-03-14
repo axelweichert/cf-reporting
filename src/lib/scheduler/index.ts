@@ -3,10 +3,9 @@
  *
  * Uses node-cron to run scheduled report deliveries.
  * Initialized via instrumentation.ts on server startup.
- * Only runs when SMTP env vars AND CF_API_TOKEN are configured.
+ * Only runs when SMTP env vars AND a Cloudflare env token (CF_API_TOKEN or CF_ACCOUNT_TOKEN) are configured.
  *
- * Schedules are stored in-memory (configured via env or API).
- * They do NOT survive restarts – this is by design (stateless app).
+ * Schedules are persisted in SQLite and survive container restarts.
  */
 
 import cron, { type ScheduledTask } from "node-cron";
@@ -15,10 +14,16 @@ import { fetchExecutiveDataServer, fetchSecurityDataServer } from "@/lib/email/r
 import { renderExecutiveEmail } from "@/lib/email/templates/executive";
 import { renderSecurityEmail } from "@/lib/email/templates/security";
 import { getDateRange } from "@/lib/store-server";
+import {
+  getSchedulesFromDb,
+  saveScheduleToDb,
+  deleteScheduleFromDb,
+  updateScheduleEnabledInDb,
+  updateScheduleRunStatusInDb,
+} from "@/lib/data-store";
 import type { ScheduleConfig } from "@/types/email";
 
 const activeTasks = new Map<string, ScheduledTask>();
-const schedules: ScheduleConfig[] = [];
 let _running = false;
 
 export function isSchedulerRunning(): boolean {
@@ -26,7 +31,7 @@ export function isSchedulerRunning(): boolean {
 }
 
 export function getSchedules(): ScheduleConfig[] {
-  return [...schedules];
+  return getSchedulesFromDb();
 }
 
 export function addSchedule(config: Omit<ScheduleConfig, "id" | "createdAt">): ScheduleConfig {
@@ -36,33 +41,37 @@ export function addSchedule(config: Omit<ScheduleConfig, "id" | "createdAt">): S
     id: randomUUID(),
     createdAt: new Date().toISOString(),
   };
-  schedules.push(schedule);
+  saveScheduleToDb(schedule);
   reloadCronTasks();
   return schedule;
 }
 
 export function deleteSchedule(id: string): boolean {
-  const idx = schedules.findIndex((s) => s.id === id);
-  if (idx === -1) return false;
-  schedules.splice(idx, 1);
-  reloadCronTasks();
-  return true;
+  const removed = deleteScheduleFromDb(id);
+  if (removed) reloadCronTasks();
+  return removed;
 }
 
 export function updateSchedule(id: string, update: Partial<Pick<ScheduleConfig, "enabled">>): ScheduleConfig | null {
-  const schedule = schedules.find((s) => s.id === id);
-  if (!schedule) return null;
-  if (update.enabled !== undefined) schedule.enabled = update.enabled;
+  if (update.enabled !== undefined) {
+    const updated = updateScheduleEnabledInDb(id, update.enabled);
+    if (!updated) return null;
+  }
   reloadCronTasks();
-  return { ...schedule };
+  const schedules = getSchedulesFromDb();
+  return schedules.find((s) => s.id === id) ?? null;
+}
+
+function getEnvToken(): string | undefined {
+  return process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN;
 }
 
 export function initScheduler(): void {
   if (_running) return;
 
-  const token = process.env.CF_API_TOKEN;
+  const token = getEnvToken();
   if (!token) {
-    console.log("[scheduler] CF_API_TOKEN not set – scheduled email delivery disabled");
+    console.log("[scheduler] No CF_API_TOKEN or CF_ACCOUNT_TOKEN – scheduled email delivery disabled");
     return;
   }
 
@@ -73,6 +82,7 @@ export function initScheduler(): void {
 
   _running = true;
   console.log("[scheduler] Starting email report scheduler");
+  reloadCronTasks();
 }
 
 export function reloadSchedules(): void {
@@ -88,6 +98,7 @@ function reloadCronTasks(): void {
 
   if (!_running) return;
 
+  const schedules = getSchedulesFromDb();
   let loaded = 0;
   for (const schedule of schedules) {
     if (!schedule.enabled) continue;
@@ -112,17 +123,18 @@ function reloadCronTasks(): void {
 }
 
 async function runSchedule(scheduleId: string): Promise<void> {
-  const token = process.env.CF_API_TOKEN;
+  const token = getEnvToken();
   if (!token) {
-    updateRunStatus(scheduleId, "error", "CF_API_TOKEN not available");
+    updateScheduleRunStatusInDb(scheduleId, "error", "No CF_API_TOKEN or CF_ACCOUNT_TOKEN available");
     return;
   }
 
   if (!isSmtpConfiguredViaEnv()) {
-    updateRunStatus(scheduleId, "error", "SMTP env vars not configured");
+    updateScheduleRunStatusInDb(scheduleId, "error", "SMTP env vars not configured");
     return;
   }
 
+  const schedules = getSchedulesFromDb();
   const schedule = schedules.find((s) => s.id === scheduleId);
   if (!schedule || !schedule.enabled) return;
 
@@ -159,21 +171,13 @@ async function runSchedule(scheduleId: string): Promise<void> {
 
     // No session SMTP – scheduler always uses env SMTP
     await sendReportEmail(schedule.recipients, subject, html);
-    updateRunStatus(scheduleId, "success");
+    updateScheduleRunStatusInDb(scheduleId, "success");
     console.log(`[scheduler] Successfully sent ${schedule.reportType} report to ${schedule.recipients.length} recipient(s)`);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    updateRunStatus(scheduleId, "error", message);
+    updateScheduleRunStatusInDb(scheduleId, "error", message);
     console.error(`[scheduler] Failed to send schedule ${scheduleId}:`, message);
   }
-}
-
-function updateRunStatus(id: string, status: "success" | "error", error?: string): void {
-  const schedule = schedules.find((s) => s.id === id);
-  if (!schedule) return;
-  schedule.lastRunAt = new Date().toISOString();
-  schedule.lastRunStatus = status;
-  schedule.lastRunError = error;
 }
 
 /**

@@ -27,6 +27,14 @@ interface FilterBarProps {
   onToggleSidebar: () => void;
 }
 
+function formatAge(epochSeconds: number): string {
+  const diffSec = Math.floor(Date.now() / 1000) - epochSeconds;
+  if (diffSec < 60) return "just now";
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+  return `${Math.floor(diffSec / 86400)}d ago`;
+}
+
 const TIME_RANGES = [
   { label: "1D", value: "1d" },
   { label: "7D", value: "7d" },
@@ -66,6 +74,7 @@ export default function FilterBar({
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [historicAvailable, setHistoricAvailable] = useState(false);
+  const [lastCollectedAt, setLastCollectedAt] = useState<number | null>(null);
   const zoneDropdownRef = useRef<HTMLDivElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
@@ -118,6 +127,7 @@ export default function FilterBar({
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (data?.available) setHistoricAvailable(true);
+        if (data?.lastCollectedAt) setLastCollectedAt(data.lastCollectedAt);
       })
       .catch(() => {});
   }, []);
@@ -341,6 +351,13 @@ export default function FilterBar({
               Historic
             </button>
           </div>
+        )}
+
+        {/* Data freshness indicator */}
+        {historicAvailable && dataSource === "historic" && lastCollectedAt && (
+          <span className="text-xs text-zinc-500">
+            Updated {formatAge(lastCollectedAt)}
+          </span>
         )}
 
         {/* Compare toggle */}

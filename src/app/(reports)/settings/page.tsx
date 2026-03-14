@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/lib/store";
 import type { SmtpConfigResponse, ScheduleConfig, EmailStatus, ReportType, ScheduleFrequency } from "@/types/email";
 import {
   Mail, Clock, AlertTriangle, CheckCircle, Info,
   Trash2, ToggleLeft, ToggleRight, Plus, Send, RefreshCw,
-  Database, Play,
+  Database, Play, HardDrive, Download, Upload, Cloud,
 } from "lucide-react";
 
 const REPORT_TYPES: Array<{ value: ReportType; label: string }> = [
@@ -88,6 +88,17 @@ export default function SettingsPage() {
   const [triggering, setTriggering] = useState(false);
   const [collectorMessage, setCollectorMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  // Backup
+  const [backupStatus, setBackupStatus] = useState<{
+    r2Configured: boolean;
+    r2Bucket: string | null;
+    databaseAvailable: boolean;
+    databaseSizeMb: number | null;
+  } | null>(null);
+  const [backupMessage, setBackupMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [backupLoading, setBackupLoading] = useState<string | null>(null);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
+
   // Load data
   const loadData = useCallback(async () => {
     try {
@@ -107,6 +118,16 @@ export default function SettingsPage() {
         setSchedules(data.schedules || []);
       }
       if (collectorRes.ok) setCollector(await collectorRes.json());
+
+      // Load backup status
+      try {
+        const backupRes = await fetch("/api/backup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "status" }),
+        });
+        if (backupRes.ok) setBackupStatus(await backupRes.json());
+      } catch { /* ignore */ }
     } catch { /* ignore */ }
   }, []);
 
@@ -240,6 +261,67 @@ export default function SettingsPage() {
 
   const isEnvSmtp = smtpConfig?.source === "env";
 
+  // Backup handlers
+  const handleDownloadConfig = () => {
+    window.open("/api/backup?type=config", "_blank");
+  };
+
+  const handleDownloadDatabase = () => {
+    window.open("/api/backup?type=database", "_blank");
+  };
+
+  const handleR2Upload = async (type: "config" | "database") => {
+    setBackupLoading(`r2-${type}`);
+    setBackupMessage(null);
+    try {
+      const res = await fetch("/api/backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "r2", type }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setBackupMessage({ type: "success", text: `Uploaded to R2: ${data.key}` });
+      } else {
+        setBackupMessage({ type: "error", text: data.error });
+      }
+    } catch {
+      setBackupMessage({ type: "error", text: "R2 upload failed" });
+    }
+    setBackupLoading(null);
+  };
+
+  const handleRestoreFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBackupLoading("restore");
+    setBackupMessage(null);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const res = await fetch("/api/backup/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data, merge: false }),
+      });
+      const result = await res.json();
+      if (res.ok) {
+        const parts: string[] = [];
+        if (result.schedulesRestored > 0) parts.push(`${result.schedulesRestored} schedule(s) restored`);
+        if (result.schedulesSkipped > 0) parts.push(`${result.schedulesSkipped} skipped`);
+        if (result.errors?.length > 0) parts.push(`${result.errors.length} error(s)`);
+        setBackupMessage({ type: result.errors?.length > 0 ? "error" : "success", text: parts.join(", ") || "Restore complete" });
+        loadData();
+      } else {
+        setBackupMessage({ type: "error", text: result.error });
+      }
+    } catch {
+      setBackupMessage({ type: "error", text: "Failed to parse backup file" });
+    }
+    setBackupLoading(null);
+    if (restoreInputRef.current) restoreInputRef.current.value = "";
+  };
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div>
@@ -253,15 +335,16 @@ export default function SettingsPage() {
           <Info size={18} className="text-blue-400" />
           System Status
         </h2>
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <StatusBadge label="Mode" value={status?.cfApiTokenSet ? "Managed Mode" : "Explore Mode"} ok={status?.cfApiTokenSet} />
           <StatusBadge label="SMTP" value={status?.smtpConfigured ? `Via ${status.smtpSource}` : "Not configured"} ok={status?.smtpConfigured} />
           <StatusBadge label="Scheduler" value={status?.schedulerRunning ? "Running" : "Stopped"} ok={status?.schedulerRunning} />
-          <StatusBadge label="CF_API_TOKEN" value={status?.cfApiTokenSet ? "Set" : "Not set"} ok={status?.cfApiTokenSet} />
+          <StatusBadge label="API Token" value={status?.cfApiTokenSet ? "Set" : "Not set"} ok={status?.cfApiTokenSet} />
           <StatusBadge label="Site Password" value={status?.appPasswordSet ? "Enabled" : "Disabled"} ok={status?.appPasswordSet} />
         </div>
         {!status?.cfApiTokenSet && (
           <p className="mt-3 text-xs text-zinc-500">
-            Scheduled delivery requires CF_API_TOKEN and SMTP_* environment variables.
+            Scheduled delivery requires a Cloudflare API token (CF_API_TOKEN or CF_ACCOUNT_TOKEN) and SMTP_* environment variables.
           </p>
         )}
       </div>
@@ -322,7 +405,7 @@ export default function SettingsPage() {
 
         {!collector?.enabled && (
           <p className="mt-3 text-xs text-zinc-500">
-            Data collection requires CF_API_TOKEN and a writable data volume. Mount a Docker volume at /app/data to enable persistent storage.
+            Data collection requires a Cloudflare API token (CF_API_TOKEN or CF_ACCOUNT_TOKEN) and a writable data volume. Mount a Docker volume at /app/data to enable persistent storage.
           </p>
         )}
 
@@ -449,7 +532,7 @@ export default function SettingsPage() {
         {!status?.cfApiTokenSet && (
           <p className="mt-3 text-xs text-yellow-400/80">
             <AlertTriangle size={12} className="mr-1 inline" />
-            Set CF_API_TOKEN and SMTP_* environment variables to enable scheduled email delivery.
+            Set a Cloudflare API token (CF_API_TOKEN or CF_ACCOUNT_TOKEN) and SMTP_* environment variables to enable scheduled email delivery.
           </p>
         )}
 
@@ -461,7 +544,7 @@ export default function SettingsPage() {
         )}
 
         <p className="mt-2 text-xs text-zinc-500">
-          Schedules are stored in memory and will be lost on container restart. They require CF_API_TOKEN and SMTP environment variables.
+          Schedules are stored persistently and survive container restarts. They require a Cloudflare API token and SMTP environment variables.
         </p>
 
         {schedules.length === 0 && (
@@ -534,6 +617,98 @@ export default function SettingsPage() {
               </button>
             </div>
           </div>
+        )}
+      </div>
+
+      {/* Backup & Restore */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-white">
+          <HardDrive size={18} className="text-emerald-400" />
+          Backup & Restore
+        </h2>
+
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatusBadge label="Database" value={backupStatus?.databaseAvailable ? `${backupStatus.databaseSizeMb ?? 0} MB` : "Unavailable"} ok={backupStatus?.databaseAvailable} />
+          <StatusBadge label="R2 Storage" value={backupStatus?.r2Configured ? backupStatus.r2Bucket ?? "Configured" : "Not configured"} ok={backupStatus?.r2Configured} />
+          <StatusBadge label="Schedules" value={String(schedules.length)} ok={schedules.length > 0} />
+          <StatusBadge label="Collections" value={String(collector?.totalCollectionRuns ?? 0)} ok={(collector?.totalCollectionRuns ?? 0) > 0} />
+        </div>
+
+        {/* Export */}
+        <div className="mt-4">
+          <h3 className="text-sm font-medium text-zinc-300">Export</h3>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              onClick={handleDownloadConfig}
+              className="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white"
+            >
+              <Download size={14} />
+              Download Config (JSON)
+            </button>
+            <button
+              onClick={handleDownloadDatabase}
+              disabled={!backupStatus?.databaseAvailable}
+              className="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white disabled:opacity-50"
+            >
+              <Download size={14} />
+              Download Database (SQLite)
+            </button>
+            {backupStatus?.r2Configured && (
+              <>
+                <button
+                  onClick={() => handleR2Upload("config")}
+                  disabled={backupLoading === "r2-config"}
+                  className="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white disabled:opacity-50"
+                >
+                  <Cloud size={14} />
+                  {backupLoading === "r2-config" ? "Uploading..." : "Config to R2"}
+                </button>
+                <button
+                  onClick={() => handleR2Upload("database")}
+                  disabled={backupLoading === "r2-database" || !backupStatus?.databaseAvailable}
+                  className="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white disabled:opacity-50"
+                >
+                  <Cloud size={14} />
+                  {backupLoading === "r2-database" ? "Uploading..." : "Database to R2"}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Import */}
+        <div className="mt-4">
+          <h3 className="text-sm font-medium text-zinc-300">Restore</h3>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              ref={restoreInputRef}
+              type="file"
+              accept=".json"
+              onChange={handleRestoreFile}
+              className="hidden"
+            />
+            <button
+              onClick={() => restoreInputRef.current?.click()}
+              disabled={backupLoading === "restore"}
+              className="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white disabled:opacity-50"
+            >
+              <Upload size={14} />
+              {backupLoading === "restore" ? "Restoring..." : "Restore from JSON"}
+            </button>
+            <span className="text-xs text-zinc-500">Replaces all existing schedules</span>
+          </div>
+        </div>
+
+        {backupMessage && (
+          <div className={`mt-3 rounded-md px-3 py-2 text-xs ${backupMessage.type === "success" ? "border border-emerald-500/20 bg-emerald-500/5 text-emerald-400" : "border border-red-500/20 bg-red-500/5 text-red-400"}`}>
+            {backupMessage.text}
+          </div>
+        )}
+
+        {!backupStatus?.r2Configured && (
+          <p className="mt-3 text-xs text-zinc-500">
+            To enable R2 backup, set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET_NAME environment variables.
+          </p>
         )}
       </div>
     </div>

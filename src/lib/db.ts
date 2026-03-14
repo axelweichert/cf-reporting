@@ -12,7 +12,7 @@ let _db: Database.Database | null = null;
 let _initFailed = false;
 
 const DB_PATH = process.env.DB_PATH || "/app/data/cf-reporting.db";
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 export function getDb(): Database.Database | null {
   if (_initFailed) return null;
@@ -917,6 +917,32 @@ function runMigrations(db: Database.Database): void {
       CREATE INDEX IF NOT EXISTS idx_raw_ext_dim_ds_dim     ON raw_ext_dim(dataset, dim, ts);
     `);
     console.log("[db] Migration v6: extension dataset EAV tables (raw_ext_ts, raw_ext_dim)");
+  }
+
+  if (currentVersion < 7) {
+    // v7: Persistent email schedules – survive container restarts.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS email_schedules (
+        id              TEXT PRIMARY KEY,
+        enabled         INTEGER NOT NULL DEFAULT 1,
+        report_type     TEXT NOT NULL,
+        frequency       TEXT NOT NULL,
+        cron_expression TEXT NOT NULL,
+        hour            INTEGER NOT NULL,
+        day_of_week     INTEGER,
+        day_of_month    INTEGER,
+        recipients      TEXT NOT NULL,
+        zone_id         TEXT NOT NULL,
+        zone_name       TEXT NOT NULL,
+        time_range      TEXT NOT NULL DEFAULT '7d',
+        subject         TEXT,
+        created_at      TEXT NOT NULL,
+        last_run_at     TEXT,
+        last_run_status TEXT,
+        last_run_error  TEXT
+      );
+    `);
+    console.log("[db] Migration v7: email_schedules table for persistent schedule storage");
   }
 
   // Upsert schema version

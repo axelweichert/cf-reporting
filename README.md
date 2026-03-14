@@ -8,13 +8,15 @@ Open-source, self-hosted reporting dashboard for Cloudflare. Authenticate with y
 - **Executive Report** – Auto-generated multi-metric summary combining key data from all reports
 - **Period-over-Period Comparison** – Toggle to overlay current vs. previous period with percentage-change indicators
 - **PDF Export** – Server-side rendering via Playwright/Chromium for pixel-perfect A4 output
-- **Email Scheduling** – Automated report delivery (daily / weekly / monthly) to up to 10 recipients per schedule
+- **Email Scheduling** – Automated report delivery (daily / weekly / monthly) to up to 10 recipients per schedule, persisted in SQLite across restarts
 - **Background Data Collection** – Cron-scheduled collector stores normalized snapshots in SQLite for historical analysis
-- **Data History** – Browse collected data, view collection run logs, and toggle between live API data and stored history
+- **Data History** – Browse collected data, view collection run logs, and toggle between live API data and stored history with a freshness indicator
+- **Backup & Restore** – Export/import schedules as JSON, download the full SQLite database, or push backups to Cloudflare R2
+- **Two Operating Modes** – Explore (browser token, no persistence) and Managed (env token, persistent schedules, startup validation)
 - **Graceful Degradation** – Adapts to your token's permissions; unavailable reports show which permissions are needed
 - **Privacy First** – API tokens stay server-side only, never exposed to the browser
 - **Dark / Light Mode** – Dark by default (matches Cloudflare dashboard aesthetic), toggle with one click
-- **Security Hardened** – CSRF protection, rate-limited login, constant-time password comparison, encrypted session cookies
+- **Security Hardened** – CSRF protection, rate-limited login, constant-time password comparison, encrypted session cookies, security headers (X-Frame-Options, CSP, HSTS)
 
 ## Quick Start
 
@@ -24,16 +26,17 @@ Open-source, self-hosted reporting dashboard for Cloudflare. Authenticate with y
 docker run -p 3000:3000 ghcr.io/gladston3/cf-reporting:latest
 ```
 
-Open `http://localhost:3000` and enter your Cloudflare API token.
+Open `http://localhost:3000` and enter your Cloudflare API token. This launches in **Explore mode** – no persistence, no site password required.
 
-### Pre-configured token
+### Managed mode (pre-configured token)
 
-Skip the browser setup by providing your token as an environment variable. **`APP_PASSWORD` is required** when using env tokens – without it, anyone who can reach the app has full access to your Cloudflare data:
+Skip the browser setup by providing your token as an environment variable. This enables persistent schedules, background data collection, and scheduled email delivery. **`APP_PASSWORD` and `SESSION_SECRET` are required** in managed mode:
 
 ```bash
 docker run -p 3000:3000 \
   -e CF_API_TOKEN=your_token_here \
   -e APP_PASSWORD=your_secret_password \
+  -e SESSION_SECRET=$(openssl rand -hex 32) \
   -v cf_data:/app/data \
   ghcr.io/gladston3/cf-reporting:latest
 ```
@@ -57,6 +60,25 @@ npm run dev
 ```
 
 Open `http://localhost:3000`.
+
+## Operating Modes
+
+cf-reporting has two operating modes, determined automatically by whether a Cloudflare API token environment variable is set.
+
+### Explore mode
+
+No env token set. Users enter their own token in the browser. No persistence, no site password, no startup validation. Ideal for quick ad-hoc reporting.
+
+### Managed mode
+
+`CF_API_TOKEN` or `CF_ACCOUNT_TOKEN` is set. The app enforces startup validation:
+
+- `APP_PASSWORD` is required – without it, the configured token would be accessible to anyone
+- `SESSION_SECRET` must be a random string of at least 32 characters
+- Partial SMTP configuration (e.g. SMTP_HOST without SMTP_PASS) is rejected at startup
+- `SECURE_COOKIES=true` logs a reminder to serve over HTTPS
+
+Managed mode enables persistent email schedules, background data collection, and scheduled report delivery.
 
 ## Reports
 
@@ -90,6 +112,7 @@ The built-in background collector periodically fetches data from the Cloudflare 
 - **Storage** – Mount `/app/data` as a Docker volume for persistence
 - **Manual trigger** – Start a collection run on demand from the Settings page
 - **Run history** – View success/error/skipped counts per scope and report type
+- **Data freshness** – When viewing historic data, the filter bar shows how recently data was collected (e.g. "Updated 5m ago")
 
 Toggle between live API data and stored historical data on any report page.
 
@@ -97,11 +120,34 @@ Toggle between live API data and stored historical data on any report page.
 
 Send reports automatically via email on a daily, weekly, or monthly schedule.
 
-1. Configure SMTP in the Settings page (or via environment variables)
-2. Create schedules – pick a report type, time range, frequency, and up to 10 recipients
+1. Configure SMTP via environment variables (SMTP_HOST, SMTP_USER, SMTP_PASS)
+2. Create schedules in the Settings page – pick a report type, time range, frequency, and up to 10 recipients
 3. Reports are rendered server-side and delivered as styled HTML emails
+4. Schedules are persisted in SQLite and survive container restarts
+
+The Settings UI supports one-shot SMTP testing but scheduled delivery always uses the SMTP_* env vars. Both `CF_API_TOKEN` and `CF_ACCOUNT_TOKEN` are supported for scheduled delivery.
 
 Supported report types: Executive, Security, Traffic, DNS, Performance, SSL, DDoS, Bots. Up to 20 active schedules per instance.
+
+## Backup & Restore
+
+Export and restore your configuration from the Settings page:
+
+- **Config export** – Download schedules and metadata as a JSON file
+- **Database export** – Download the full SQLite database (includes collected data)
+- **Config restore** – Upload a previously exported JSON file to restore schedules
+- **R2 backup** – Push config or database backups directly to a Cloudflare R2 bucket (requires R2_* env vars)
+
+## Security Headers
+
+All responses include the following headers:
+
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+
+When `SECURE_COOKIES=true`, responses also include `Strict-Transport-Security: max-age=31536000; includeSubDomains`.
 
 ## SSL / HTTPS Deployment
 
@@ -167,7 +213,7 @@ Create a [Cloudflare API token](https://dash.cloudflare.com/profile/api-tokens) 
 | Access: Apps and Policies | Account | Optional | Access Audit |
 | Gateway | Account | Optional | Gateway DNS/HTTP, Network, Shadow IT |
 
-Both **User API tokens** and **Account API tokens** are supported. Reports requiring permissions your token doesn't have will show a helpful message instead of failing.
+Both **User API tokens** (`CF_API_TOKEN`) and **Account API tokens** (`CF_ACCOUNT_TOKEN`) are supported. Reports requiring permissions your token doesn't have will show a helpful message instead of failing.
 
 ## Environment Variables
 
@@ -177,10 +223,10 @@ Both **User API tokens** and **Account API tokens** are supported. Reports requi
 |---|---|---|
 | `CF_API_TOKEN` | Pre-configured Cloudflare User API token | – |
 | `CF_ACCOUNT_TOKEN` | Pre-configured Cloudflare Account API token (alternative) | – |
-| `APP_PASSWORD` | Site password – **required** when `CF_API_TOKEN` or `CF_ACCOUNT_TOKEN` is set | – |
-| `SESSION_SECRET` | 32+ char secret for encrypting session cookies | Auto-generated dev secret |
+| `APP_PASSWORD` | Site password – **required** in managed mode (when either token env var is set) | – |
+| `SESSION_SECRET` | 32+ char secret for encrypting session cookies – **required** in managed mode | Auto-generated dev secret |
 | `TRUSTED_PROXY` | Set to `true` when behind a reverse proxy to trust `X-Forwarded-For` | `false` |
-| `SECURE_COOKIES` | Set to `true` for HTTPS deployments (marks cookies as Secure) | `false` |
+| `SECURE_COOKIES` | Set to `true` for HTTPS deployments (marks cookies as Secure, enables HSTS) | `false` |
 | `PORT` | Server port | `3000` |
 
 ### Data Collection
@@ -202,7 +248,16 @@ Both **User API tokens** and **Account API tokens** are supported. Reports requi
 | `SMTP_FROM` | From address for outgoing emails | – |
 | `SMTP_SECURE` | Use TLS/SSL | `true` |
 
-SMTP can also be configured through the Settings UI at runtime.
+The Settings UI supports one-shot SMTP testing but scheduled delivery always uses the SMTP_* env vars.
+
+### Backup (R2)
+
+| Variable | Description | Default |
+|---|---|---|
+| `R2_ACCOUNT_ID` | Cloudflare account ID for R2 | – |
+| `R2_ACCESS_KEY_ID` | R2 API token access key ID | – |
+| `R2_SECRET_ACCESS_KEY` | R2 API token secret access key | – |
+| `R2_BUCKET_NAME` | R2 bucket name for backup storage | – |
 
 ### SSL (docker-compose.ssl.yml)
 
@@ -225,6 +280,7 @@ SMTP can also be configured through the Settings UI at runtime.
 - [Playwright](https://playwright.dev/) – server-side PDF rendering
 - [nodemailer](https://nodemailer.com/) – email delivery
 - [node-cron](https://github.com/node-cron/node-cron) – scheduled collection & email
+- [@aws-sdk/client-s3](https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/) – R2 backup (S3-compatible)
 - [Lucide React](https://lucide.dev/) – icons
 
 ## Architecture
@@ -234,9 +290,10 @@ Browser → Next.js API Routes → Cloudflare API
            (token in encrypted     (REST + GraphQL)
             httpOnly cookie)
                   ↓
-            SQLite (collected data)
+            SQLite (collected data + schedules)
             node-cron (scheduler)
             Playwright (PDF export)
+            R2 (optional backup)
 ```
 
 All Cloudflare API calls are proxied through server-side routes. The token never reaches client-side JavaScript. No external database – the app runs as a single container with SQLite for optional data persistence.

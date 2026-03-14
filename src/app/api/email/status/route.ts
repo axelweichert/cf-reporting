@@ -30,7 +30,7 @@ export async function GET() {
     smtpSource: envSmtp ? "env" : "none",
     schedulerRunning,
     activeSchedules,
-    cfApiTokenSet: !!process.env.CF_API_TOKEN,
+    cfApiTokenSet: !!(process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN),
     smtpEnvConfigured: !!envSmtp,
     appPasswordSet: !!process.env.APP_PASSWORD,
   };

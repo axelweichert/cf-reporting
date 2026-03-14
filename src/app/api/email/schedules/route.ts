@@ -49,9 +49,9 @@ export async function POST(request: NextRequest) {
   const session = await getAuthenticatedSession();
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-  if (!process.env.CF_API_TOKEN) {
+  if (!process.env.CF_API_TOKEN && !process.env.CF_ACCOUNT_TOKEN) {
     return Response.json(
-      { error: "CF_API_TOKEN environment variable is required for scheduled email delivery" },
+      { error: "CF_API_TOKEN or CF_ACCOUNT_TOKEN environment variable is required for scheduled email delivery" },
       { status: 400 }
     );
   }

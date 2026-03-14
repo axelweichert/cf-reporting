@@ -13,6 +13,7 @@
 import { getDb } from "@/lib/db";
 import type Database from "better-sqlite3";
 
+import type { ScheduleConfig } from "@/types/email";
 import type { DnsData } from "@/lib/queries/dns";
 import type { OriginHealthData } from "@/lib/queries/origin-health";
 import type { SslData } from "@/lib/queries/ssl";
@@ -635,4 +636,110 @@ export function getAggregateStats(
   _to?: number,
 ): Array<{ scope_id: string; collected_at: number; report_type: string; stat_key: string; stat_value: number }> {
   return [];
+}
+
+
+// =============================================================================
+// Schedule persistence (email_schedules table)
+// =============================================================================
+
+interface ScheduleRow {
+  id: string;
+  enabled: number;
+  report_type: string;
+  frequency: string;
+  cron_expression: string;
+  hour: number;
+  day_of_week: number | null;
+  day_of_month: number | null;
+  recipients: string;
+  zone_id: string;
+  zone_name: string;
+  time_range: string;
+  subject: string | null;
+  created_at: string;
+  last_run_at: string | null;
+  last_run_status: string | null;
+  last_run_error: string | null;
+}
+
+export function getSchedulesFromDb(): ScheduleConfig[] {
+  const db = getDb();
+  if (!db) return [];
+
+  const rows = db.prepare("SELECT * FROM email_schedules ORDER BY created_at ASC").all() as ScheduleRow[];
+  return rows.map((r) => ({
+    id: r.id,
+    enabled: r.enabled === 1,
+    reportType: r.report_type as ScheduleConfig["reportType"],
+    frequency: r.frequency as ScheduleConfig["frequency"],
+    cronExpression: r.cron_expression,
+    hour: r.hour,
+    dayOfWeek: r.day_of_week ?? undefined,
+    dayOfMonth: r.day_of_month ?? undefined,
+    recipients: JSON.parse(r.recipients) as string[],
+    zoneId: r.zone_id,
+    zoneName: r.zone_name,
+    timeRange: r.time_range as ScheduleConfig["timeRange"],
+    subject: r.subject ?? undefined,
+    createdAt: r.created_at,
+    lastRunAt: r.last_run_at ?? undefined,
+    lastRunStatus: r.last_run_status as ScheduleConfig["lastRunStatus"],
+    lastRunError: r.last_run_error ?? undefined,
+  }));
+}
+
+export function saveScheduleToDb(schedule: ScheduleConfig): void {
+  const db = getDb();
+  if (!db) return;
+
+  db.prepare(`
+    INSERT OR REPLACE INTO email_schedules
+      (id, enabled, report_type, frequency, cron_expression, hour, day_of_week, day_of_month,
+       recipients, zone_id, zone_name, time_range, subject, created_at, last_run_at, last_run_status, last_run_error)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    schedule.id,
+    schedule.enabled ? 1 : 0,
+    schedule.reportType,
+    schedule.frequency,
+    schedule.cronExpression,
+    schedule.hour,
+    schedule.dayOfWeek ?? null,
+    schedule.dayOfMonth ?? null,
+    JSON.stringify(schedule.recipients),
+    schedule.zoneId,
+    schedule.zoneName,
+    schedule.timeRange,
+    schedule.subject ?? null,
+    schedule.createdAt,
+    schedule.lastRunAt ?? null,
+    schedule.lastRunStatus ?? null,
+    schedule.lastRunError ?? null,
+  );
+}
+
+export function deleteScheduleFromDb(id: string): boolean {
+  const db = getDb();
+  if (!db) return false;
+
+  const result = db.prepare("DELETE FROM email_schedules WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+export function updateScheduleEnabledInDb(id: string, enabled: boolean): boolean {
+  const db = getDb();
+  if (!db) return false;
+
+  const result = db.prepare("UPDATE email_schedules SET enabled = ? WHERE id = ?").run(enabled ? 1 : 0, id);
+  return result.changes > 0;
+}
+
+export function updateScheduleRunStatusInDb(id: string, status: string, error?: string): void {
+  const db = getDb();
+  if (!db) return;
+
+  db.prepare(
+    "UPDATE email_schedules SET last_run_at = ?, last_run_status = ?, last_run_error = ? WHERE id = ?",
+  ).run(new Date().toISOString(), status, error ?? null, id);
 }
