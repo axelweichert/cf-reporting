@@ -7,7 +7,7 @@
 
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
-import type { InlineSmtpConfig } from "@/types/email";
+import type { InlineSmtpConfig, SmtpSecurity } from "@/types/email";
 
 // --- Rate limiting ---
 
@@ -33,12 +33,23 @@ function recordSend(): void {
 export interface ResolvedSmtpConfig {
   host: string;
   port: number;
-  secure: boolean;
+  security: SmtpSecurity;
   user: string;
   password: string;
   fromAddress: string;
   fromName: string;
   source: "env" | "inline" | "none";
+}
+
+/** Parse SMTP_SECURITY env var, with backward compat for legacy SMTP_SECURE boolean. */
+function parseSmtpSecurity(): SmtpSecurity {
+  const security = process.env.SMTP_SECURITY?.toLowerCase();
+  if (security === "tls" || security === "starttls" || security === "none") return security;
+  // Backward compat: SMTP_SECURE=true → tls, SMTP_SECURE=false → starttls
+  if (process.env.SMTP_SECURE !== undefined) {
+    return process.env.SMTP_SECURE === "false" ? "starttls" : "tls";
+  }
+  return "starttls"; // safe default for port 587
 }
 
 /** Get SMTP config from env vars. Returns null if not fully configured. */
@@ -51,7 +62,7 @@ export function getSmtpFromEnv(): ResolvedSmtpConfig | null {
   return {
     host,
     port: parseInt(process.env.SMTP_PORT || "587", 10),
-    secure: process.env.SMTP_SECURE !== "false",
+    security: parseSmtpSecurity(),
     user,
     password: pass,
     fromAddress: process.env.SMTP_FROM || user,
@@ -66,7 +77,7 @@ export function resolveInlineSmtp(inline?: InlineSmtpConfig): ResolvedSmtpConfig
   return {
     host: inline.host,
     port: inline.port,
-    secure: inline.secure,
+    security: inline.security,
     user: inline.user,
     password: inline.password,
     fromAddress: inline.fromAddress || inline.user,
@@ -84,7 +95,7 @@ export function resolveSmtpConfig(inline?: InlineSmtpConfig): ResolvedSmtpConfig
   if (inlineResolved) return inlineResolved;
 
   return {
-    host: "", port: 587, secure: true, user: "", password: "",
+    host: "", port: 587, security: "starttls", user: "", password: "",
     fromAddress: "", fromName: "cf-reporting", source: "none",
   };
 }
@@ -96,16 +107,20 @@ function createTransport(config: ResolvedSmtpConfig): Transporter {
     throw new Error("SMTP is not configured. Set SMTP_* environment variables or provide SMTP settings with your request.");
   }
 
+  const useTls = config.security === "tls";
+  const useStarttls = config.security === "starttls";
+
   return nodemailer.createTransport({
     host: config.host,
     port: config.port,
-    secure: config.secure,
+    secure: useTls, // true = implicit TLS (port 465), false = plain or STARTTLS
+    requireTLS: useStarttls, // force STARTTLS upgrade when not using implicit TLS
     auth: {
       user: config.user,
       pass: config.password,
     },
     tls: {
-      rejectUnauthorized: true,
+      rejectUnauthorized: config.security !== "none",
     },
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,

@@ -1,10 +1,12 @@
 // --- SMTP Configuration ---
 
 // One-shot SMTP config submitted inline with test/send requests (never persisted)
+export type SmtpSecurity = "tls" | "starttls" | "none";
+
 export interface InlineSmtpConfig {
   host: string;
   port: number;
-  secure: boolean; // true = implicit TLS (465), false = STARTTLS (587)
+  security: SmtpSecurity;
   user: string;
   password: string;
   fromAddress: string;
@@ -15,7 +17,7 @@ export interface InlineSmtpConfig {
 export interface SmtpConfigResponse {
   host: string;
   port: number;
-  secure: boolean;
+  security: SmtpSecurity;
   user: string;
   passwordSet: boolean;
   fromAddress: string;

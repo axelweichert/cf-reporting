@@ -21,7 +21,7 @@ services:
       - SMTP_USER=${SMTP_USER:-}
       - SMTP_PASS=${SMTP_PASS:-}
       - SMTP_FROM=${SMTP_FROM:-}
-      - SMTP_SECURE=${SMTP_SECURE:-true}
+      - SMTP_SECURITY=${SMTP_SECURITY:-starttls}
       - APP_PASSWORD=${APP_PASSWORD:-}
       - SECURE_COOKIES=true
       - TRUSTED_PROXY=true

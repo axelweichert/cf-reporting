@@ -9,13 +9,13 @@ services:
       - CF_API_TOKEN=${CF_API_TOKEN:-}
       # Pre-configure Account API token (alternative to CF_API_TOKEN)
       - CF_ACCOUNT_TOKEN=${CF_ACCOUNT_TOKEN:-}
-      # SMTP settings for email report delivery (optional – can also configure via Settings UI)
+      # SMTP settings for email report delivery (optional)
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-}
       - SMTP_PASS=${SMTP_PASS:-}
       - SMTP_FROM=${SMTP_FROM:-}
-      - SMTP_SECURE=${SMTP_SECURE:-true}
+      - SMTP_SECURITY=${SMTP_SECURITY:-starttls}
       # Optional: protect the site with a password (required when env tokens are set)
       - APP_PASSWORD=${APP_PASSWORD:-}
       # Set to "true" when behind a trusted reverse proxy

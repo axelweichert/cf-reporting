@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/lib/store";
-import type { SmtpConfigResponse, ScheduleConfig, EmailStatus, ReportType, ScheduleFrequency } from "@/types/email";
+import type { SmtpConfigResponse, ScheduleConfig, EmailStatus, ReportType, ScheduleFrequency, SmtpSecurity } from "@/types/email";
 import { ACCOUNT_SCOPED_REPORTS } from "@/types/email";
 import {
   Mail, Clock, AlertTriangle, CheckCircle, Info,
@@ -48,7 +48,7 @@ export default function SettingsPage() {
   // SMTP form
   const [smtpConfig, setSmtpConfig] = useState<SmtpConfigResponse | null>(null);
   const [smtpForm, setSmtpForm] = useState({
-    host: "", port: "587", secure: true, user: "", password: "", fromAddress: "", fromName: "cf-reporting",
+    host: "", port: "587", security: "starttls" as SmtpSecurity, user: "", password: "", fromAddress: "", fromName: "cf-reporting",
   });
   const [smtpMessage, setSmtpMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -198,7 +198,7 @@ export default function SettingsPage() {
   const getInlineSmtp = () => ({
     host: smtpForm.host,
     port: parseInt(smtpForm.port, 10),
-    secure: smtpForm.secure,
+    security: smtpForm.security,
     user: smtpForm.user,
     password: smtpForm.password,
     fromAddress: smtpForm.fromAddress,
@@ -494,17 +494,18 @@ export default function SettingsPage() {
           <InputField label="From Name" value={isEnvSmtp ? (smtpConfig?.fromName || "") : smtpForm.fromName} onChange={(v) => setSmtpForm({ ...smtpForm, fromName: v })} placeholder="cf-reporting" disabled={isEnvSmtp} />
         </div>
 
-        <div className="mt-3 flex items-center gap-2">
-          <button
-            onClick={() => setSmtpForm({ ...smtpForm, secure: !smtpForm.secure })}
-            className="flex items-center gap-2 text-sm text-zinc-300"
+        <div className="mt-3 flex items-center gap-3">
+          <label className="text-sm text-zinc-400">Security</label>
+          <select
+            value={isEnvSmtp ? (smtpConfig?.security || "starttls") : smtpForm.security}
+            onChange={(e) => setSmtpForm({ ...smtpForm, security: e.target.value as SmtpSecurity })}
             disabled={isEnvSmtp}
+            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-white focus:border-orange-500 focus:outline-none disabled:opacity-60"
           >
-            {(isEnvSmtp ? smtpConfig?.secure : smtpForm.secure)
-              ? <ToggleRight size={20} className="text-emerald-400" />
-              : <ToggleLeft size={20} className="text-zinc-500" />}
-            TLS / SSL
-          </button>
+            <option value="starttls">STARTTLS (port 587)</option>
+            <option value="tls">TLS/SSL (port 465)</option>
+            <option value="none">None (unencrypted)</option>
+          </select>
         </div>
 
         {smtpMessage && (

@@ -12,7 +12,7 @@ export async function GET() {
     smtp: {
       host: env?.host || "",
       port: env?.port || 587,
-      secure: env?.secure ?? true,
+      security: env?.security ?? "starttls",
       user: env?.user || "",
       passwordSet: !!env?.password,
       fromAddress: env?.fromAddress || "",
