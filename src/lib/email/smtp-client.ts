@@ -214,6 +214,52 @@ export async function sendReportEmail(
   }
 }
 
+/** Send a report email with a PDF attachment. Uses env SMTP (for scheduler) or inline one-shot config. */
+export async function sendReportEmailWithAttachment(
+  recipients: string[],
+  subject: string,
+  html: string,
+  pdfBuffer: Buffer,
+  pdfFilename: string,
+  inline?: InlineSmtpConfig,
+): Promise<void> {
+  checkRateLimit();
+
+  if (recipients.length === 0) throw new Error("No recipients specified");
+  if (recipients.length > 10) throw new Error("Maximum 10 recipients per email");
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  for (const email of recipients) {
+    if (!emailRegex.test(email)) {
+      throw new Error(`Invalid email address: ${email}`);
+    }
+  }
+
+  const config = resolveSmtpConfig(inline);
+  const transport = createTransport(config);
+
+  try {
+    await transport.sendMail({
+      from: `"${sanitizeName(config.fromName)}" <${config.fromAddress}>`,
+      to: recipients.join(", "),
+      subject,
+      html,
+      text: "This email contains an HTML report with a PDF attachment. Please view it in an HTML-capable email client.",
+      attachments: [
+        {
+          filename: pdfFilename,
+          content: pdfBuffer,
+          contentType: "application/pdf",
+        },
+      ],
+    });
+
+    recordSend();
+  } finally {
+    transport.close();
+  }
+}
+
 /** Check if SMTP is configured via env vars (for scheduler – no session available). */
 export function isSmtpConfiguredViaEnv(): boolean {
   return getSmtpFromEnv() !== null;

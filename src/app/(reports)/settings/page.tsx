@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/lib/store";
-import type { SmtpConfigResponse, ScheduleConfig, EmailStatus, ReportType, ScheduleFrequency, SmtpSecurity } from "@/types/email";
+import type { SmtpConfigResponse, ScheduleConfig, EmailStatus, ReportType, ScheduleFrequency, SmtpSecurity, ReportFormat } from "@/types/email";
 import { ACCOUNT_SCOPED_REPORTS } from "@/types/email";
 import {
   Mail, Clock, AlertTriangle, CheckCircle, Info,
@@ -37,6 +37,44 @@ const FREQUENCIES: Array<{ value: ScheduleFrequency; label: string }> = [
 
 const DAYS_OF_WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+const COMMON_TIMEZONES = [
+  "UTC",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+  "America/Sao_Paulo",
+  "America/Argentina/Buenos_Aires",
+  "Europe/London",
+  "Europe/Berlin",
+  "Europe/Vienna",
+  "Europe/Paris",
+  "Europe/Madrid",
+  "Europe/Rome",
+  "Europe/Zurich",
+  "Europe/Amsterdam",
+  "Europe/Stockholm",
+  "Europe/Helsinki",
+  "Europe/Warsaw",
+  "Europe/Prague",
+  "Europe/Bucharest",
+  "Europe/Athens",
+  "Europe/Istanbul",
+  "Europe/Moscow",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Bangkok",
+  "Asia/Singapore",
+  "Asia/Shanghai",
+  "Asia/Tokyo",
+  "Asia/Seoul",
+  "Australia/Sydney",
+  "Australia/Melbourne",
+  "Pacific/Auckland",
+];
+
 export default function SettingsPage() {
   const { capabilities } = useAuth();
   const zones = capabilities?.zones || [];
@@ -62,14 +100,16 @@ export default function SettingsPage() {
   // New schedule form
   const [showNewSchedule, setShowNewSchedule] = useState(false);
   const [newSchedule, setNewSchedule] = useState({
-    reportType: "executive" as ReportType,
+    reportTypes: ["executive"] as ReportType[],
     frequency: "weekly" as ScheduleFrequency,
     hour: 7,
     dayOfWeek: 1,
     dayOfMonth: 1,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     recipients: "",
     zoneId: "",
     timeRange: "7d" as "1d" | "7d" | "30d",
+    format: "html" as ReportFormat,
   });
   const [scheduleSaving, setScheduleSaving] = useState(false);
 
@@ -226,7 +266,10 @@ export default function SettingsPage() {
     setTesting(false);
   };
 
-  const isAccountScopedReport = ACCOUNT_SCOPED_REPORTS.includes(newSchedule.reportType);
+  // All selected report types are account-scoped (ZT) or zone-scoped – don't allow mixing
+  const isAccountScopedReport = newSchedule.reportTypes.length > 0 && newSchedule.reportTypes.every((rt) => ACCOUNT_SCOPED_REPORTS.includes(rt));
+  const isZoneScopedReport = newSchedule.reportTypes.length > 0 && newSchedule.reportTypes.every((rt) => !ACCOUNT_SCOPED_REPORTS.includes(rt));
+  const hasMixedScopes = newSchedule.reportTypes.length > 0 && !isAccountScopedReport && !isZoneScopedReport;
 
   // Create schedule
   const handleCreateSchedule = async () => {
@@ -239,7 +282,15 @@ export default function SettingsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...newSchedule,
+          reportType: newSchedule.reportTypes[0],
+          reportTypes: newSchedule.reportTypes,
+          frequency: newSchedule.frequency,
+          hour: newSchedule.hour,
+          dayOfWeek: newSchedule.dayOfWeek,
+          dayOfMonth: newSchedule.dayOfMonth,
+          timezone: newSchedule.timezone,
+          timeRange: newSchedule.timeRange,
+          format: newSchedule.format,
           recipients: newSchedule.recipients.split(",").map((e) => e.trim()).filter(Boolean),
           ...(isAccountScopedReport
             ? { accountId: newSchedule.zoneId, accountName: account?.name || newSchedule.zoneId, zoneId: "", zoneName: "" }
@@ -578,15 +629,21 @@ export default function SettingsPage() {
             {schedules.map((s) => (
               <div key={s.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-white">{s.reportType}</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium text-white">
+                      {s.reportTypes && s.reportTypes.length > 1
+                        ? s.reportTypes.join(", ")
+                        : s.reportType}
+                    </span>
                     <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">{s.frequency}</span>
                     <span className="text-xs text-zinc-500">{s.cronExpression}</span>
+                    {s.timezone && s.timezone !== "UTC" && <span className="text-xs text-zinc-500">({s.timezone})</span>}
+                    {s.format && s.format !== "html" && <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-orange-400">{s.format.toUpperCase()}</span>}
                     {s.lastRunStatus === "success" && <CheckCircle size={12} className="text-emerald-400" />}
                     {s.lastRunStatus === "error" && <span title={s.lastRunError}><AlertTriangle size={12} className="text-red-400" /></span>}
                   </div>
                   <div className="mt-1 text-xs text-zinc-500">
-                    {s.zoneName} · {s.timeRange} · {s.recipients.join(", ")}
+                    {s.accountName || s.zoneName} · {s.timeRange} · {s.recipients.join(", ")}
                     {s.lastRunAt && <span> · Last run: {new Date(s.lastRunAt).toLocaleString()}</span>}
                   </div>
                 </div>
@@ -607,10 +664,55 @@ export default function SettingsPage() {
         {showNewSchedule && (
           <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-800/50 p-4">
             <h3 className="text-sm font-semibold text-white">New Schedule</h3>
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <SelectField label="Report Type" value={newSchedule.reportType} options={REPORT_TYPES} onChange={(v) => setNewSchedule({ ...newSchedule, reportType: v as ReportType })} />
+
+            {/* Report type checkboxes grouped by category */}
+            <div className="mt-3">
+              <label className="mb-2 block text-xs font-medium text-zinc-400">Report Types</label>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {Object.entries(
+                  REPORT_TYPES.reduce((groups, rt) => {
+                    (groups[rt.group] = groups[rt.group] || []).push(rt);
+                    return groups;
+                  }, {} as Record<string, typeof REPORT_TYPES>)
+                ).map(([group, types]) => (
+                  <div key={group}>
+                    <div className="mb-1 text-xs font-medium text-zinc-500">{group}</div>
+                    {types.map((rt) => (
+                      <label key={rt.value} className="flex items-center gap-2 py-0.5 text-sm text-zinc-300 hover:text-white cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newSchedule.reportTypes.includes(rt.value)}
+                          onChange={(e) => {
+                            const updated = e.target.checked
+                              ? [...newSchedule.reportTypes, rt.value]
+                              : newSchedule.reportTypes.filter((v) => v !== rt.value);
+                            setNewSchedule({ ...newSchedule, reportTypes: updated, zoneId: "" });
+                          }}
+                          className="rounded border-zinc-600 bg-zinc-700 text-orange-500 focus:ring-orange-500"
+                        />
+                        {rt.label}
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+              {hasMixedScopes && (
+                <p className="mt-2 text-xs text-yellow-400">
+                  <AlertTriangle size={12} className="mr-1 inline" />
+                  Cannot mix zone-scoped and account-scoped reports in one schedule. Select only web/DNS reports or only Zero Trust reports.
+                </p>
+              )}
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <SelectField label="Frequency" value={newSchedule.frequency} options={FREQUENCIES} onChange={(v) => setNewSchedule({ ...newSchedule, frequency: v as ScheduleFrequency })} />
-              <SelectField label="Hour (UTC)" value={String(newSchedule.hour)} options={Array.from({ length: 24 }, (_, i) => ({ value: String(i), label: `${String(i).padStart(2, "0")}:00 UTC` }))} onChange={(v) => setNewSchedule({ ...newSchedule, hour: parseInt(v, 10) })} />
+              <SelectField label="Hour" value={String(newSchedule.hour)} options={Array.from({ length: 24 }, (_, i) => ({ value: String(i), label: `${String(i).padStart(2, "0")}:00` }))} onChange={(v) => setNewSchedule({ ...newSchedule, hour: parseInt(v, 10) })} />
+              <SelectField
+                label="Timezone"
+                value={newSchedule.timezone}
+                options={COMMON_TIMEZONES.map((tz) => ({ value: tz, label: tz.replace(/_/g, " ") }))}
+                onChange={(v) => setNewSchedule({ ...newSchedule, timezone: v })}
+              />
               {newSchedule.frequency === "weekly" && (
                 <SelectField label="Day of Week" value={String(newSchedule.dayOfWeek)} options={DAYS_OF_WEEK.map((d, i) => ({ value: String(i), label: d }))} onChange={(v) => setNewSchedule({ ...newSchedule, dayOfWeek: parseInt(v, 10) })} />
               )}
@@ -622,6 +724,16 @@ export default function SettingsPage() {
                 : <SelectField label="Zone" value={newSchedule.zoneId} options={zones.map((z) => ({ value: z.id, label: z.name }))} onChange={(v) => setNewSchedule({ ...newSchedule, zoneId: v })} />
               }
               <SelectField label="Time Range" value={newSchedule.timeRange} options={[{ value: "1d", label: "Last 24h" }, { value: "7d", label: "Last 7 days" }, { value: "30d", label: "Last 30 days" }]} onChange={(v) => setNewSchedule({ ...newSchedule, timeRange: v as "1d" | "7d" | "30d" })} />
+              <SelectField
+                label="Format"
+                value={newSchedule.format}
+                options={[
+                  { value: "html", label: "HTML Email" },
+                  { value: "pdf", label: "PDF Attachment" },
+                  { value: "both", label: "HTML + PDF Attachment" },
+                ]}
+                onChange={(v) => setNewSchedule({ ...newSchedule, format: v as ReportFormat })}
+              />
               <div className="sm:col-span-2">
                 <InputField label="Recipients (comma-separated)" value={newSchedule.recipients} onChange={(v) => setNewSchedule({ ...newSchedule, recipients: v })} placeholder="user1@example.com, user2@example.com" />
               </div>
@@ -634,7 +746,7 @@ export default function SettingsPage() {
             )}
 
             <div className="mt-4 flex gap-3">
-              <button onClick={handleCreateSchedule} disabled={scheduleSaving || !newSchedule.zoneId || !newSchedule.recipients} className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50">
+              <button onClick={handleCreateSchedule} disabled={scheduleSaving || !newSchedule.zoneId || !newSchedule.recipients || newSchedule.reportTypes.length === 0 || hasMixedScopes} className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50">
                 {scheduleSaving ? "Creating..." : "Create Schedule"}
               </button>
               <button onClick={() => setShowNewSchedule(false)} className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800">

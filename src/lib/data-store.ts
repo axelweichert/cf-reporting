@@ -663,6 +663,9 @@ interface ScheduleRow {
   last_run_error: string | null;
   account_id: string | null;
   account_name: string | null;
+  timezone: string | null;
+  format: string | null;
+  report_types: string | null;
 }
 
 export function getSchedulesFromDb(): ScheduleConfig[] {
@@ -674,15 +677,18 @@ export function getSchedulesFromDb(): ScheduleConfig[] {
     id: r.id,
     enabled: r.enabled === 1,
     reportType: r.report_type as ScheduleConfig["reportType"],
+    reportTypes: r.report_types ? JSON.parse(r.report_types) as ScheduleConfig["reportTypes"] : undefined,
     frequency: r.frequency as ScheduleConfig["frequency"],
     cronExpression: r.cron_expression,
     hour: r.hour,
     dayOfWeek: r.day_of_week ?? undefined,
     dayOfMonth: r.day_of_month ?? undefined,
+    timezone: r.timezone || "UTC",
     recipients: JSON.parse(r.recipients) as string[],
     zoneId: r.zone_id,
     zoneName: r.zone_name,
     timeRange: r.time_range as ScheduleConfig["timeRange"],
+    format: (r.format || "html") as ScheduleConfig["format"],
     subject: r.subject ?? undefined,
     createdAt: r.created_at,
     lastRunAt: r.last_run_at ?? undefined,
@@ -701,8 +707,8 @@ export function saveScheduleToDb(schedule: ScheduleConfig): void {
     INSERT OR REPLACE INTO email_schedules
       (id, enabled, report_type, frequency, cron_expression, hour, day_of_week, day_of_month,
        recipients, zone_id, zone_name, time_range, subject, created_at, last_run_at, last_run_status, last_run_error,
-       account_id, account_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       account_id, account_name, timezone, format, report_types)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     schedule.id,
     schedule.enabled ? 1 : 0,
@@ -723,6 +729,9 @@ export function saveScheduleToDb(schedule: ScheduleConfig): void {
     schedule.lastRunError ?? null,
     schedule.accountId ?? null,
     schedule.accountName ?? null,
+    schedule.timezone || "UTC",
+    schedule.format || "html",
+    schedule.reportTypes ? JSON.stringify(schedule.reportTypes) : null,
   );
 }
 

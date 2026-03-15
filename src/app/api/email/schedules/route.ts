@@ -1,5 +1,5 @@
 import { getAuthenticatedSession, validateOrigin } from "@/lib/auth-helpers";
-import type { ScheduleFrequency, ReportType } from "@/types/email";
+import type { ScheduleFrequency, ReportType, ReportFormat } from "@/types/email";
 import { ACCOUNT_SCOPED_REPORTS } from "@/types/email";
 import { NextRequest } from "next/server";
 
@@ -31,16 +31,19 @@ export async function GET() {
 
 interface CreateScheduleBody {
   reportType: ReportType;
+  reportTypes?: ReportType[];
   frequency: ScheduleFrequency;
   hour: number;
   dayOfWeek?: number;
   dayOfMonth?: number;
+  timezone?: string;
   recipients: string[];
   zoneId: string;
   zoneName: string;
   accountId?: string;
   accountName?: string;
   timeRange: "1d" | "7d" | "30d";
+  format?: ReportFormat;
   subject?: string;
 }
 
@@ -108,17 +111,20 @@ export async function POST(request: NextRequest) {
     const schedule = addSchedule({
       enabled: true,
       reportType: body.reportType,
+      reportTypes: body.reportTypes,
       frequency: body.frequency,
       cronExpression,
       hour: body.hour,
       dayOfWeek: body.dayOfWeek,
       dayOfMonth: body.dayOfMonth,
+      timezone: body.timezone || "UTC",
       recipients: body.recipients,
       zoneId: body.zoneId || "",
       zoneName: body.zoneName || body.zoneId || "",
       accountId: body.accountId,
       accountName: body.accountName,
       timeRange: body.timeRange || "7d",
+      format: body.format || "html",
       subject: body.subject,
     });
 

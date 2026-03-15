@@ -57,21 +57,26 @@ export const ACCOUNT_SCOPED_REPORTS: ReportType[] = [
 
 export type ScheduleFrequency = "daily" | "weekly" | "monthly";
 
+export type ReportFormat = "html" | "pdf" | "both";
+
 export interface ScheduleConfig {
   id: string;
   enabled: boolean;
   reportType: ReportType;
+  reportTypes?: ReportType[]; // Multiple report types per schedule
   frequency: ScheduleFrequency;
   cronExpression: string; // Derived from frequency + hour/day settings
-  hour: number; // UTC hour (0-23)
+  hour: number; // Hour in the schedule's timezone (0-23)
   dayOfWeek?: number; // 0=Sun, 1=Mon, ..., 6=Sat (for weekly)
   dayOfMonth?: number; // 1-31 (for monthly)
+  timezone: string; // IANA timezone (e.g. "Europe/Vienna"), default "UTC"
   recipients: string[];
   zoneId: string;
   zoneName: string;
   accountId?: string;
   accountName?: string;
   timeRange: "1d" | "7d" | "30d";
+  format: ReportFormat; // "html", "pdf", or "both"
   subject?: string; // Custom subject line
   createdAt: string;
   lastRunAt?: string;

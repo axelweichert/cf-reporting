@@ -9,7 +9,7 @@
  */
 
 import cron, { type ScheduledTask } from "node-cron";
-import { isSmtpConfiguredViaEnv, sendReportEmail } from "@/lib/email/smtp-client";
+import { isSmtpConfiguredViaEnv, sendReportEmail, sendReportEmailWithAttachment } from "@/lib/email/smtp-client";
 import { fetchExecutiveDataServer, fetchSecurityDataServer, fetchTrafficDataServer, fetchPerformanceDataServer, fetchDnsDataServer } from "@/lib/email/report-data";
 import { fetchSslDataServer, fetchBotDataServer, fetchDdosDataServer, fetchOriginHealthDataServer, fetchApiShieldDataServer } from "@/lib/email/report-data-zone";
 import { fetchZtSummaryDataServer, fetchGatewayDnsDataServer, fetchGatewayNetworkDataServer, fetchAccessAuditDataServer, fetchShadowItDataServer, fetchDevicesUsersDataServer } from "@/lib/email/report-data-zt";
@@ -147,7 +147,7 @@ function reloadCronTasks(): void {
       runSchedule(schedule.id).catch((err) => {
         console.error(`[scheduler] Error running schedule ${schedule.id}:`, err.message);
       });
-    }, { timezone: "UTC" });
+    }, { timezone: schedule.timezone || "UTC" });
 
     activeTasks.set(schedule.id, task);
     loaded++;
@@ -179,25 +179,64 @@ async function runSchedule(scheduleId: string): Promise<void> {
     const since = `${start}T00:00:00Z`;
     const until = `${end}T00:00:00Z`;
 
-    const isAccountScoped = ACCOUNT_SCOPED_REPORTS.includes(schedule.reportType);
-    const scopeName = isAccountScoped ? (schedule.accountName || schedule.zoneName) : schedule.zoneName;
-    const scopeId = isAccountScoped ? (schedule.accountId || schedule.zoneId) : schedule.zoneId;
+    // Determine which report types to run
+    const reportTypes = schedule.reportTypes && schedule.reportTypes.length > 0
+      ? schedule.reportTypes
+      : [schedule.reportType];
 
-    const { html, subject: defaultSubject } = await renderReport(
-      token, schedule.reportType, scopeId, scopeName, since, until, start, end,
-      isAccountScoped ? schedule.accountId : undefined,
-    );
+    for (const reportType of reportTypes) {
+      const isAccountScoped = ACCOUNT_SCOPED_REPORTS.includes(reportType);
+      const scopeName = isAccountScoped ? (schedule.accountName || schedule.zoneName) : schedule.zoneName;
+      const scopeId = isAccountScoped ? (schedule.accountId || schedule.zoneId) : schedule.zoneId;
 
-    const subject = schedule.subject || defaultSubject;
+      const { html, subject: defaultSubject } = await renderReport(
+        token, reportType, scopeId, scopeName, since, until, start, end,
+        isAccountScoped ? schedule.accountId : undefined,
+      );
 
-    // No session SMTP – scheduler always uses env SMTP
-    await sendReportEmail(schedule.recipients, subject, html);
+      const subject = schedule.subject || defaultSubject;
+      const format = schedule.format || "html";
+
+      if (format === "html") {
+        await sendReportEmail(schedule.recipients, subject, html);
+      } else if (format === "pdf") {
+        const pdfBuffer = await renderPdf(html);
+        const pdfOnlyHtml = `<p>Your ${REPORT_LABELS[reportType]} is attached as a PDF.</p>`;
+        await sendReportEmailWithAttachment(schedule.recipients, subject, pdfOnlyHtml, pdfBuffer, `${reportType}-report.pdf`);
+      } else {
+        // "both" – full HTML email body + PDF attachment
+        const pdfBuffer = await renderPdf(html);
+        await sendReportEmailWithAttachment(schedule.recipients, subject, html, pdfBuffer, `${reportType}-report.pdf`);
+      }
+
+      console.log(`[scheduler] Successfully sent ${reportType} (${format}) report to ${schedule.recipients.length} recipient(s)`);
+    }
+
     updateScheduleRunStatusInDb(scheduleId, "success");
-    console.log(`[scheduler] Successfully sent ${schedule.reportType} report to ${schedule.recipients.length} recipient(s)`);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     updateScheduleRunStatusInDb(scheduleId, "error", message);
     console.error(`[scheduler] Failed to send schedule ${scheduleId}:`, message);
+  }
+}
+
+async function renderPdf(html: string): Promise<Buffer> {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+  });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: "networkidle" });
+    const pdfBuffer = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "1cm", right: "1cm", bottom: "1cm", left: "1cm" },
+    });
+    return pdfBuffer;
+  } finally {
+    await browser.close();
   }
 }
 
