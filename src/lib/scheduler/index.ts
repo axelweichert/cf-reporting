@@ -215,12 +215,12 @@ async function runSchedule(scheduleId: string): Promise<void> {
       if (format === "html") {
         await sendReportEmail(schedule.recipients, subject, html);
       } else if (format === "pdf") {
-        const pdfBuffer = await renderPdf(html);
+        const pdfBuffer = await renderScheduledPdf(reportType, scopeId, scopeName, schedule.timeRange, isAccountScoped);
         const pdfOnlyHtml = `<p>Your ${REPORT_LABELS[reportType]} is attached as a PDF.</p>`;
         await sendReportEmailWithAttachment(schedule.recipients, subject, pdfOnlyHtml, pdfBuffer, `${reportType}-report.pdf`);
       } else {
         // "both" – full HTML email body + PDF attachment
-        const pdfBuffer = await renderPdf(html);
+        const pdfBuffer = await renderScheduledPdf(reportType, scopeId, scopeName, schedule.timeRange, isAccountScoped);
         await sendReportEmailWithAttachment(schedule.recipients, subject, html, pdfBuffer, `${reportType}-report.pdf`);
       }
 
@@ -235,24 +235,41 @@ async function runSchedule(scheduleId: string): Promise<void> {
   }
 }
 
-async function renderPdf(html: string): Promise<Buffer> {
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch({
-    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-  });
-  try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "networkidle" });
-    const pdfBuffer = await page.pdf({
-      format: "A4",
-      printBackground: true,
-      margin: { top: "1cm", right: "1cm", bottom: "1cm", left: "1cm" },
-    });
-    return pdfBuffer;
-  } finally {
-    await browser.close();
+async function renderScheduledPdf(
+  reportType: ReportType,
+  scopeId: string,
+  scopeName: string,
+  timeRange: string,
+  isAccountScoped: boolean,
+): Promise<Buffer> {
+  const { generatePdf } = await import("@/lib/pdf/browser-pool");
+  const { sealData } = await import("iron-session");
+  const { sessionOptions } = await import("@/lib/session");
+
+  // Create a server-side session cookie so Playwright can authenticate
+  const token = getEnvToken()!;
+  const sessionCookie = await sealData(
+    { token, tokenType: "api", tokenSource: "env", siteAuthenticated: true },
+    { password: sessionOptions.password as string },
+  );
+
+  const port = process.env.PORT || "3000";
+  const url = new URL(`/${reportType}`, `http://localhost:${port}`);
+  url.searchParams.set("_pdf", "true");
+  url.searchParams.set("timeRange", timeRange);
+  if (isAccountScoped) {
+    url.searchParams.set("account", scopeId);
+  } else {
+    url.searchParams.set("zone", scopeId);
   }
+
+  const title = REPORT_LABELS[reportType];
+  return generatePdf({
+    url: url.toString(),
+    sessionCookie,
+    title,
+    ...(isAccountScoped ? { accountName: scopeName } : { zoneName: scopeName }),
+  });
 }
 
 async function renderReport(
