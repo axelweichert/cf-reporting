@@ -70,11 +70,18 @@ export interface RenderOptions {
   zoneName?: string;
 }
 
+interface PrepareOptions {
+  /** Force light theme (for PDF). If false, keeps the page's current theme. */
+  forceLight?: boolean;
+  /** Resize viewport to A4 width (for PDF). If false, keeps the original viewport. */
+  resizeToA4?: boolean;
+}
+
 /**
- * Shared page preparation: navigate, wait for data, apply light theme,
- * resize for export, and clean up interactive elements.
+ * Shared page preparation: navigate, wait for data, clean up interactive elements.
+ * PDF passes forceLight + resizeToA4; HTML keeps the user's theme and viewport.
  */
-async function preparePage(page: Page, opts: RenderOptions): Promise<void> {
+async function preparePage(page: Page, opts: RenderOptions, prep: PrepareOptions = {}): Promise<void> {
   page.setDefaultTimeout(RENDER_TIMEOUT);
 
   // Navigate and wait for network to settle
@@ -98,22 +105,29 @@ async function preparePage(page: Page, opts: RenderOptions): Promise<void> {
 
   await page.emulateMedia({ media: "screen" });
 
-  // Apply light theme + set document title
+  // Set document title
   const docTitleParts = [opts.title || "Report"];
   if (opts.accountName) docTitleParts.push(opts.accountName);
   if (opts.zoneName) docTitleParts.push(opts.zoneName);
   const docTitle = docTitleParts.join(" \u2013 ");
 
-  await page.evaluate((dt: string) => {
-    document.documentElement.classList.add("light");
-    document.title = dt;
-  }, docTitle);
+  if (prep.forceLight) {
+    await page.evaluate((dt: string) => {
+      document.documentElement.classList.add("light");
+      document.title = dt;
+    }, docTitle);
+  } else {
+    await page.evaluate((dt: string) => {
+      document.title = dt;
+    }, docTitle);
+  }
 
-  // Resize viewport to A4 content width so ResponsiveContainer fits charts
-  await page.setViewportSize({ width: A4_CONTENT_WIDTH, height: VIEWPORT_HEIGHT });
-
-  // Wait for ResponsiveContainer to re-measure and React to re-render
-  await page.waitForTimeout(1000);
+  if (prep.resizeToA4) {
+    // Resize viewport to A4 content width so ResponsiveContainer fits charts
+    await page.setViewportSize({ width: A4_CONTENT_WIDTH, height: VIEWPORT_HEIGHT });
+    // Wait for ResponsiveContainer to re-measure and React to re-render
+    await page.waitForTimeout(1000);
+  }
 
   // Clean up elements and apply export-specific layout fixes
   await page.evaluate(() => {
@@ -206,7 +220,7 @@ export async function generatePdf(opts: RenderOptions): Promise<Buffer> {
       },
     ]);
 
-    await preparePage(page, opts);
+    await preparePage(page, opts, { forceLight: true, resizeToA4: true });
 
     const now = new Date();
     const timestamp = now.toLocaleDateString("en-US", {
@@ -254,7 +268,7 @@ export async function generateHtml(opts: RenderOptions): Promise<Buffer> {
       },
     ]);
 
-    await preparePage(page, opts);
+    await preparePage(page, opts, { forceLight: false, resizeToA4: false });
 
     // Use SingleFile to capture a faithful self-contained HTML snapshot.
     // SingleFile inlines all CSS, images (as data URIs), and fonts,
