@@ -4,6 +4,8 @@
  * HTML clones the report content into a standalone downloadable file.
  */
 
+import { buildReportFilename } from "@/lib/report-pages";
+
 interface PdfExportParams {
   pathname: string;
   zone?: string | null;
@@ -13,20 +15,6 @@ interface PdfExportParams {
   customEnd?: string | null;
   zoneName?: string | null;
   accountName?: string | null;
-}
-
-/** Build a descriptive filename: date-account-zone-report.ext */
-function buildExportFilename(title: string, ext: string, accountName?: string | null, zoneName?: string | null): string {
-  const dateStr = new Date().toISOString().split("T")[0];
-  const parts = [dateStr];
-  if (accountName) parts.push(accountName);
-  if (zoneName) parts.push(zoneName);
-  parts.push(title);
-  return parts
-    .join(" ")
-    .replace(/[^a-zA-Z0-9 .-]/g, "")
-    .replace(/\s+/g, "-")
-    .toLowerCase() + `.${ext}`;
 }
 
 /**
@@ -372,7 +360,7 @@ export function exportHTML(title: string, accountName?: string | null, zoneName?
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = buildExportFilename(title, "html", accountName, zoneName);
+  a.download = buildReportFilename(title, "html", { accountName: accountName ?? undefined, zoneName: zoneName ?? undefined });
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
