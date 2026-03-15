@@ -21,7 +21,7 @@
  */
 
 import { randomUUID } from "crypto";
-import cron, { type ScheduledTask } from "node-cron";
+import { Cron } from "croner";
 import { CloudflareClient } from "@/lib/cf-client";
 import { discoverZones, discoverAccounts } from "@/lib/token";
 
@@ -85,7 +85,7 @@ let _running = false;
 let _lastRunAt: string | null = null;
 let _lastRunStatus: "success" | "partial" | "error" | null = null;
 let _nextRunAt: string | null = null;
-let _cronTask: ScheduledTask | null = null;
+let _cronTask: Cron | null = null;
 let _dbAvailable: boolean | null = null;
 
 /** Try to initialize SQLite lazily – returns true if available. */
@@ -163,11 +163,11 @@ export function initCollector(): void {
 
   const schedule = process.env.COLLECTION_SCHEDULE || "0 */6 * * *";
 
-  if (!cron.validate(schedule)) {
+  try {
+    _cronTask = new Cron(schedule, () => runCollection());
+  } catch {
     console.error(`[collector] Invalid COLLECTION_SCHEDULE: "${schedule}" – using default`);
-    _cronTask = cron.schedule("0 */6 * * *", () => runCollection());
-  } else {
-    _cronTask = cron.schedule(schedule, () => runCollection());
+    _cronTask = new Cron("0 */6 * * *", () => runCollection());
   }
 
   console.log(`[collector] Scheduled data collection: ${schedule}`);

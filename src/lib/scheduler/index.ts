@@ -1,14 +1,14 @@
 /**
  * Email report scheduler.
  *
- * Uses node-cron to run scheduled report deliveries.
+ * Uses Croner to run scheduled report deliveries.
  * Initialized via instrumentation.ts on server startup.
  * Only runs when SMTP env vars AND a Cloudflare env token (CF_API_TOKEN or CF_ACCOUNT_TOKEN) are configured.
  *
  * Schedules are persisted in SQLite and survive container restarts.
  */
 
-import cron, { type ScheduledTask } from "node-cron";
+import { Cron } from "croner";
 import { isSmtpConfiguredViaEnv, sendReportEmail, sendReportEmailWithAttachment } from "@/lib/email/smtp-client";
 import { fetchExecutiveDataServer, fetchSecurityDataServer, fetchTrafficDataServer, fetchPerformanceDataServer, fetchDnsDataServer } from "@/lib/email/report-data";
 import { fetchSslDataServer, fetchBotDataServer, fetchDdosDataServer, fetchOriginHealthDataServer, fetchApiShieldDataServer } from "@/lib/email/report-data-zone";
@@ -46,7 +46,7 @@ import { ACCOUNT_SCOPED_REPORTS } from "@/types/email";
 // instrumentation.ts, so reloadCronTasks() sees _running=false and exits.
 interface SchedulerGlobal {
   __cfr_scheduler_running?: boolean;
-  __cfr_scheduler_tasks?: Map<string, ScheduledTask>;
+  __cfr_scheduler_tasks?: Map<string, Cron>;
 }
 const _g = globalThis as SchedulerGlobal;
 if (!_g.__cfr_scheduler_tasks) _g.__cfr_scheduler_tasks = new Map();
@@ -151,19 +151,21 @@ function reloadCronTasks(): void {
   let loaded = 0;
   for (const schedule of schedules) {
     if (!schedule.enabled) continue;
-    if (!cron.validate(schedule.cronExpression)) {
-      console.warn(`[scheduler] Invalid cron expression for schedule ${schedule.id}: ${schedule.cronExpression}`);
-      continue;
-    }
 
-    const task = cron.schedule(schedule.cronExpression, () => {
-      runSchedule(schedule.id).catch((err) => {
-        console.error(`[scheduler] Error running schedule ${schedule.id}:`, err.message);
+    try {
+      const task = new Cron(schedule.cronExpression, {
+        timezone: schedule.timezone || "UTC",
+      }, () => {
+        runSchedule(schedule.id).catch((err) => {
+          console.error(`[scheduler] Error running schedule ${schedule.id}:`, err.message);
+        });
       });
-    }, { timezone: schedule.timezone || "UTC" });
 
-    activeTasks.set(schedule.id, task);
-    loaded++;
+      activeTasks.set(schedule.id, task);
+      loaded++;
+    } catch (err) {
+      console.warn(`[scheduler] Invalid cron expression for schedule ${schedule.id}: ${schedule.cronExpression} – ${(err as Error).message}`);
+    }
   }
 
   if (loaded > 0) {
