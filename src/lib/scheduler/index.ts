@@ -30,6 +30,7 @@ import { renderAccessAuditEmail } from "@/lib/email/templates/access-audit";
 import { renderShadowItEmail } from "@/lib/email/templates/shadow-it";
 import { renderDevicesUsersEmail } from "@/lib/email/templates/devices-users";
 import { getDateRange } from "@/lib/store-server";
+import { buildReportFilename } from "@/lib/report-pages";
 import {
   getSchedulesFromDb,
   saveScheduleToDb,
@@ -213,10 +214,12 @@ async function runSchedule(scheduleId: string): Promise<void> {
       const format = schedule.format || "html";
 
       const attachments: Array<{ filename: string; content: Buffer; contentType: string }> = [];
+      const nameOpts = isAccountScoped ? { accountName: scopeName } : { zoneName: scopeName };
+      const label = REPORT_LABELS[reportType];
 
       if (format === "html" || format === "both") {
         attachments.push({
-          filename: `${reportType}-report.html`,
+          filename: buildReportFilename(label, "html", nameOpts),
           content: Buffer.from(html, "utf-8"),
           contentType: "text/html",
         });
@@ -224,7 +227,7 @@ async function runSchedule(scheduleId: string): Promise<void> {
       if (format === "pdf" || format === "both") {
         const pdfBuffer = await renderScheduledPdf(reportType, scopeId, scopeName, schedule.timeRange, isAccountScoped);
         attachments.push({
-          filename: `${reportType}-report.pdf`,
+          filename: buildReportFilename(label, "pdf", nameOpts),
           content: pdfBuffer,
           contentType: "application/pdf",
         });

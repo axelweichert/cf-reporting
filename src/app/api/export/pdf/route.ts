@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { requireAuth, validateOrigin } from "@/lib/auth-helpers";
 import { generatePdf } from "@/lib/pdf/browser-pool";
-import { PAGE_TITLES } from "@/lib/report-pages";
+import { PAGE_TITLES, buildReportFilename } from "@/lib/report-pages";
 
 interface PdfRequest {
   path: string;
@@ -76,17 +76,10 @@ export async function POST(request: NextRequest) {
       zoneName: body.zoneName,
     });
 
-    // Build filename: date-account-zone-report.pdf
-    const dateStr = new Date().toISOString().split("T")[0];
-    const parts = [dateStr];
-    if (body.accountName) parts.push(body.accountName);
-    if (body.zoneName) parts.push(body.zoneName);
-    parts.push(title);
-    const filename = parts
-      .join(" ")
-      .replace(/[^a-zA-Z0-9 .-]/g, "")
-      .replace(/\s+/g, "-")
-      .toLowerCase() + ".pdf";
+    const filename = buildReportFilename(title, "pdf", {
+      zoneName: body.zoneName,
+      accountName: body.accountName,
+    });
 
     return new Response(new Uint8Array(pdfBuffer), {
       status: 200,
