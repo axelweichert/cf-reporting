@@ -9,7 +9,7 @@
  */
 
 import { Cron } from "croner";
-import { isSmtpConfiguredViaEnv, sendReportEmail, sendReportEmailWithAttachment } from "@/lib/email/smtp-client";
+import { isSmtpConfiguredViaEnv, sendReportEmailWithAttachments } from "@/lib/email/smtp-client";
 import { fetchExecutiveDataServer, fetchSecurityDataServer, fetchTrafficDataServer, fetchPerformanceDataServer, fetchDnsDataServer } from "@/lib/email/report-data";
 import { fetchSslDataServer, fetchBotDataServer, fetchDdosDataServer, fetchOriginHealthDataServer, fetchApiShieldDataServer } from "@/lib/email/report-data-zone";
 import { fetchZtSummaryDataServer, fetchGatewayDnsDataServer, fetchGatewayNetworkDataServer, fetchAccessAuditDataServer, fetchShadowItDataServer, fetchDevicesUsersDataServer } from "@/lib/email/report-data-zt";
@@ -212,17 +212,29 @@ async function runSchedule(scheduleId: string): Promise<void> {
       const subject = schedule.subject || defaultSubject;
       const format = schedule.format || "html";
 
-      if (format === "html") {
-        await sendReportEmail(schedule.recipients, subject, html);
-      } else if (format === "pdf") {
-        const pdfBuffer = await renderScheduledPdf(reportType, scopeId, scopeName, schedule.timeRange, isAccountScoped);
-        const pdfOnlyHtml = `<p>Your ${REPORT_LABELS[reportType]} is attached as a PDF.</p>`;
-        await sendReportEmailWithAttachment(schedule.recipients, subject, pdfOnlyHtml, pdfBuffer, `${reportType}-report.pdf`);
-      } else {
-        // "both" – full HTML email body + PDF attachment
-        const pdfBuffer = await renderScheduledPdf(reportType, scopeId, scopeName, schedule.timeRange, isAccountScoped);
-        await sendReportEmailWithAttachment(schedule.recipients, subject, html, pdfBuffer, `${reportType}-report.pdf`);
+      const attachments: Array<{ filename: string; content: Buffer; contentType: string }> = [];
+
+      if (format === "html" || format === "both") {
+        attachments.push({
+          filename: `${reportType}-report.html`,
+          content: Buffer.from(html, "utf-8"),
+          contentType: "text/html",
+        });
       }
+      if (format === "pdf" || format === "both") {
+        const pdfBuffer = await renderScheduledPdf(reportType, scopeId, scopeName, schedule.timeRange, isAccountScoped);
+        attachments.push({
+          filename: `${reportType}-report.pdf`,
+          content: pdfBuffer,
+          contentType: "application/pdf",
+        });
+      }
+
+      await sendReportEmailWithAttachments(
+        schedule.recipients, subject,
+        `Your ${REPORT_LABELS[reportType]} for ${scopeName} (${start} to ${end}) is attached.`,
+        attachments,
+      );
 
       console.log(`[scheduler] Successfully sent ${reportType} (${format}) report to ${schedule.recipients.length} recipient(s)`);
     }

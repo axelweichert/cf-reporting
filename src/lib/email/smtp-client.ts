@@ -214,13 +214,12 @@ export async function sendReportEmail(
   }
 }
 
-/** Send a report email with a PDF attachment. Uses env SMTP (for scheduler) or inline one-shot config. */
-export async function sendReportEmailWithAttachment(
+/** Send a report email with file attachments. Uses env SMTP (for scheduler) or inline one-shot config. */
+export async function sendReportEmailWithAttachments(
   recipients: string[],
   subject: string,
-  html: string,
-  pdfBuffer: Buffer,
-  pdfFilename: string,
+  bodyText: string,
+  attachments: Array<{ filename: string; content: Buffer; contentType: string }>,
   inline?: InlineSmtpConfig,
 ): Promise<void> {
   checkRateLimit();
@@ -243,15 +242,8 @@ export async function sendReportEmailWithAttachment(
       from: `"${sanitizeName(config.fromName)}" <${config.fromAddress}>`,
       to: recipients.join(", "),
       subject,
-      html,
-      text: "This email contains an HTML report with a PDF attachment. Please view it in an HTML-capable email client.",
-      attachments: [
-        {
-          filename: pdfFilename,
-          content: pdfBuffer,
-          contentType: "application/pdf",
-        },
-      ],
+      text: bodyText,
+      attachments,
     });
 
     recordSend();
