@@ -534,6 +534,7 @@ export default function SettingsPage() {
         )}
       </div>
 
+      {status?.cfApiTokenSet && <>
       {/* Data Collection */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
         <div className="flex items-center justify-between">
@@ -1011,6 +1012,7 @@ export default function SettingsPage() {
           </p>
         )}
       </div>
+      </>}
     </div>
   );
 }
