@@ -299,7 +299,7 @@ export default function FilterBar({
                     Download as PDF
                   </button>
                   <button
-                    onClick={() => { exportHTML(PAGE_TITLES[pathname] || "Report", selectedAccountName, selectedZoneName); setShowExportMenu(false); }}
+                    onClick={() => { exportHTML({ pathname, zone: selectedZone, account: selectedAccount, timeRange, customStart, customEnd, zoneName: selectedZoneName, accountName: selectedAccountName }); setShowExportMenu(false); }}
                     className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white"
                   >
                     Download as HTML
