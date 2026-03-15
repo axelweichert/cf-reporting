@@ -256,54 +256,31 @@ export async function generateHtml(opts: RenderOptions): Promise<Buffer> {
 
     await preparePage(page, opts);
 
-    // Capture the fully-rendered page as standalone HTML.
-    // Keep SVGs and chart elements exactly as Playwright rendered them –
-    // the fixed pixel widths from the A4 viewport are correct.
-    const htmlContent = await page.evaluate(() => {
-      // Ensure only light theme is active
-      document.documentElement.classList.remove("dark");
+    // Use SingleFile to capture a faithful self-contained HTML snapshot.
+    // SingleFile inlines all CSS, images (as data URIs), and fonts,
+    // producing a single HTML file that renders identically cross-browser.
+    const { script } = await import("@/lib/pdf/single-file-bundle.js");
+    await page.addScriptTag({ content: script });
 
-      // Ensure all SVGs have xmlns for standalone rendering
-      document.querySelectorAll("svg").forEach((svg) => {
-        svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    const htmlContent = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sf = (window as any).singlefile;
+      const data = await sf.getPageData({
+        removeHiddenElements: false,
+        removeUnusedStyles: true,
+        removeUnusedFonts: true,
+        removeImports: true,
+        blockScripts: true,
+        blockVideos: true,
+        blockAudios: true,
+        compressHTML: false,
+        removeAlternativeFonts: true,
+        removeAlternativeMedias: true,
+        removeAlternativeImages: true,
+        groupDuplicateImages: true,
+        insertSingleFileComment: false,
       });
-
-      // Collect all stylesheets into inline <style> blocks
-      const styles: string[] = [];
-      for (const sheet of document.styleSheets) {
-        try {
-          const rules = Array.from(sheet.cssRules)
-            .map((r) => r.cssText)
-            // Strip @font-face rules with relative URLs that won't resolve
-            .filter((r) => !r.startsWith("@font-face"))
-            .join("\n");
-          styles.push(rules);
-        } catch {
-          // Cross-origin stylesheets can't be read – skip
-        }
-      }
-
-      // Remove script tags (React hydration, Next.js chunks)
-      document.querySelectorAll("script, link[rel=preload], link[rel=modulepreload]").forEach((el) => el.remove());
-
-      // Remove existing <link rel="stylesheet"> since we inlined them
-      document.querySelectorAll('link[rel="stylesheet"]').forEach((el) => el.remove());
-
-      // Inject inlined styles + system font fallback
-      const styleEl = document.createElement("style");
-      styleEl.textContent = `
-        :root { --font-geist-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; --font-geist-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-        ${styles.join("\n")}
-      `;
-      document.head.appendChild(styleEl);
-
-      // Add export footer
-      const footer = document.createElement("div");
-      footer.style.cssText = "margin-top:3rem;padding-top:1rem;border-top:1px solid #e4e4e7;font-size:0.75rem;color:#71717a;text-align:center;";
-      footer.textContent = `Exported from cf-reporting on ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
-      document.body.appendChild(footer);
-
-      return "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
+      return data.content as string;
     });
 
     return Buffer.from(htmlContent, "utf-8");
