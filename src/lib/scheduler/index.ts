@@ -35,6 +35,7 @@ import {
   saveScheduleToDb,
   deleteScheduleFromDb,
   updateScheduleEnabledInDb,
+  updateScheduleFieldsInDb,
   updateScheduleRunStatusInDb,
 } from "@/lib/data-store";
 import type { ScheduleConfig, ReportType } from "@/types/email";
@@ -88,9 +89,13 @@ export function deleteSchedule(id: string): boolean {
   return removed;
 }
 
-export function updateSchedule(id: string, update: Partial<Pick<ScheduleConfig, "enabled">>): ScheduleConfig | null {
-  if (update.enabled !== undefined) {
+export function updateSchedule(id: string, update: Partial<ScheduleConfig>): ScheduleConfig | null {
+  // Simple toggle-only path
+  if (Object.keys(update).length === 1 && update.enabled !== undefined) {
     const updated = updateScheduleEnabledInDb(id, update.enabled);
+    if (!updated) return null;
+  } else {
+    const updated = updateScheduleFieldsInDb(id, update);
     if (!updated) return null;
   }
   reloadCronTasks();

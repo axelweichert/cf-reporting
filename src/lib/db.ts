@@ -12,7 +12,7 @@ let _db: Database.Database | null = null;
 let _initFailed = false;
 
 const DB_PATH = process.env.DB_PATH || "/app/data/cf-reporting.db";
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 export function getDb(): Database.Database | null {
   if (_initFailed) return null;
@@ -958,6 +958,12 @@ function runMigrations(db: Database.Database): void {
     db.exec(`ALTER TABLE email_schedules ADD COLUMN format TEXT DEFAULT 'html'`);
     db.exec(`ALTER TABLE email_schedules ADD COLUMN report_types TEXT`);
     console.log("[db] Migration v9: added timezone, format, report_types to email_schedules");
+  }
+
+  if (currentVersion < 10) {
+    // v10: Add minute column for sub-hour scheduling.
+    db.exec(`ALTER TABLE email_schedules ADD COLUMN minute INTEGER DEFAULT 0`);
+    console.log("[db] Migration v10: added minute to email_schedules");
   }
 
   // Upsert schema version

@@ -666,6 +666,7 @@ interface ScheduleRow {
   timezone: string | null;
   format: string | null;
   report_types: string | null;
+  minute: number | null;
 }
 
 export function getSchedulesFromDb(): ScheduleConfig[] {
@@ -681,6 +682,7 @@ export function getSchedulesFromDb(): ScheduleConfig[] {
     frequency: r.frequency as ScheduleConfig["frequency"],
     cronExpression: r.cron_expression,
     hour: r.hour,
+    minute: r.minute ?? 0,
     dayOfWeek: r.day_of_week ?? undefined,
     dayOfMonth: r.day_of_month ?? undefined,
     timezone: r.timezone || "UTC",
@@ -705,10 +707,10 @@ export function saveScheduleToDb(schedule: ScheduleConfig): void {
 
   db.prepare(`
     INSERT OR REPLACE INTO email_schedules
-      (id, enabled, report_type, frequency, cron_expression, hour, day_of_week, day_of_month,
+      (id, enabled, report_type, frequency, cron_expression, hour, minute, day_of_week, day_of_month,
        recipients, zone_id, zone_name, time_range, subject, created_at, last_run_at, last_run_status, last_run_error,
        account_id, account_name, timezone, format, report_types)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     schedule.id,
     schedule.enabled ? 1 : 0,
@@ -716,6 +718,7 @@ export function saveScheduleToDb(schedule: ScheduleConfig): void {
     schedule.frequency,
     schedule.cronExpression,
     schedule.hour,
+    schedule.minute ?? 0,
     schedule.dayOfWeek ?? null,
     schedule.dayOfMonth ?? null,
     JSON.stringify(schedule.recipients),
@@ -748,6 +751,39 @@ export function updateScheduleEnabledInDb(id: string, enabled: boolean): boolean
   if (!db) return false;
 
   const result = db.prepare("UPDATE email_schedules SET enabled = ? WHERE id = ?").run(enabled ? 1 : 0, id);
+  return result.changes > 0;
+}
+
+export function updateScheduleFieldsInDb(id: string, fields: Partial<ScheduleConfig>): boolean {
+  const db = getDb();
+  if (!db) return false;
+
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+
+  if (fields.enabled !== undefined) { sets.push("enabled = ?"); vals.push(fields.enabled ? 1 : 0); }
+  if (fields.reportType !== undefined) { sets.push("report_type = ?"); vals.push(fields.reportType); }
+  if (fields.reportTypes !== undefined) { sets.push("report_types = ?"); vals.push(JSON.stringify(fields.reportTypes)); }
+  if (fields.frequency !== undefined) { sets.push("frequency = ?"); vals.push(fields.frequency); }
+  if (fields.cronExpression !== undefined) { sets.push("cron_expression = ?"); vals.push(fields.cronExpression); }
+  if (fields.hour !== undefined) { sets.push("hour = ?"); vals.push(fields.hour); }
+  if (fields.minute !== undefined) { sets.push("minute = ?"); vals.push(fields.minute); }
+  if (fields.dayOfWeek !== undefined) { sets.push("day_of_week = ?"); vals.push(fields.dayOfWeek); }
+  if (fields.dayOfMonth !== undefined) { sets.push("day_of_month = ?"); vals.push(fields.dayOfMonth); }
+  if (fields.timezone !== undefined) { sets.push("timezone = ?"); vals.push(fields.timezone); }
+  if (fields.recipients !== undefined) { sets.push("recipients = ?"); vals.push(JSON.stringify(fields.recipients)); }
+  if (fields.zoneId !== undefined) { sets.push("zone_id = ?"); vals.push(fields.zoneId); }
+  if (fields.zoneName !== undefined) { sets.push("zone_name = ?"); vals.push(fields.zoneName); }
+  if (fields.accountId !== undefined) { sets.push("account_id = ?"); vals.push(fields.accountId); }
+  if (fields.accountName !== undefined) { sets.push("account_name = ?"); vals.push(fields.accountName); }
+  if (fields.timeRange !== undefined) { sets.push("time_range = ?"); vals.push(fields.timeRange); }
+  if (fields.format !== undefined) { sets.push("format = ?"); vals.push(fields.format); }
+  if (fields.subject !== undefined) { sets.push("subject = ?"); vals.push(fields.subject || null); }
+
+  if (sets.length === 0) return false;
+
+  vals.push(id);
+  const result = db.prepare(`UPDATE email_schedules SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
   return result.changes > 0;
 }
 

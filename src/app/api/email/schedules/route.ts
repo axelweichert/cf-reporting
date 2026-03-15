@@ -3,16 +3,16 @@ import type { ScheduleFrequency, ReportType, ReportFormat } from "@/types/email"
 import { ACCOUNT_SCOPED_REPORTS } from "@/types/email";
 import { NextRequest } from "next/server";
 
-function buildCronExpression(frequency: ScheduleFrequency, hour: number, dayOfWeek?: number, dayOfMonth?: number): string {
+function buildCronExpression(frequency: ScheduleFrequency, hour: number, minute: number, dayOfWeek?: number, dayOfMonth?: number): string {
   switch (frequency) {
     case "daily":
-      return `0 ${hour} * * *`;
+      return `${minute} ${hour} * * *`;
     case "weekly":
-      return `0 ${hour} * * ${dayOfWeek ?? 1}`;
+      return `${minute} ${hour} * * ${dayOfWeek ?? 1}`;
     case "monthly":
-      return `0 ${hour} ${dayOfMonth ?? 1} * *`;
+      return `${minute} ${hour} ${dayOfMonth ?? 1} * *`;
     default:
-      return `0 ${hour} * * *`;
+      return `${minute} ${hour} * * *`;
   }
 }
 
@@ -34,6 +34,7 @@ interface CreateScheduleBody {
   reportTypes?: ReportType[];
   frequency: ScheduleFrequency;
   hour: number;
+  minute?: number;
   dayOfWeek?: number;
   dayOfMonth?: number;
   timezone?: string;
@@ -78,7 +79,11 @@ export async function POST(request: NextRequest) {
     }
 
     if (typeof body.hour !== "number" || body.hour < 0 || body.hour > 23) {
-      return Response.json({ error: "Hour must be 0-23 (UTC)" }, { status: 400 });
+      return Response.json({ error: "Hour must be 0-23" }, { status: 400 });
+    }
+    const minute = body.minute ?? 0;
+    if (typeof minute !== "number" || minute < 0 || minute > 59) {
+      return Response.json({ error: "Minute must be 0-59" }, { status: 400 });
     }
 
     // Validate dayOfWeek and dayOfMonth
@@ -106,7 +111,7 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "Maximum 20 schedules allowed" }, { status: 400 });
     }
 
-    const cronExpression = buildCronExpression(body.frequency, body.hour, body.dayOfWeek, body.dayOfMonth);
+    const cronExpression = buildCronExpression(body.frequency, body.hour, minute, body.dayOfWeek, body.dayOfMonth);
 
     const schedule = addSchedule({
       enabled: true,
@@ -115,6 +120,7 @@ export async function POST(request: NextRequest) {
       frequency: body.frequency,
       cronExpression,
       hour: body.hour,
+      minute,
       dayOfWeek: body.dayOfWeek,
       dayOfMonth: body.dayOfMonth,
       timezone: body.timezone || "UTC",
@@ -157,7 +163,7 @@ export async function DELETE(request: NextRequest) {
   }
 }
 
-/** PATCH: Update a schedule (enable/disable) */
+/** PATCH: Update a schedule (toggle enabled or full edit) */
 export async function PATCH(request: NextRequest) {
   const originError = validateOrigin(request);
   if (originError) return originError;
@@ -166,11 +172,44 @@ export async function PATCH(request: NextRequest) {
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const body = await request.json() as { id: string; enabled?: boolean };
+    const body = await request.json() as Partial<CreateScheduleBody> & { id: string; enabled?: boolean };
     if (!body.id) return Response.json({ error: "Missing schedule ID" }, { status: 400 });
 
+    // Rebuild cron expression if any time fields changed
+    const update: Record<string, unknown> = {};
+    if (body.enabled !== undefined) update.enabled = body.enabled;
+    if (body.reportType !== undefined) update.reportType = body.reportType;
+    if (body.reportTypes !== undefined) update.reportTypes = body.reportTypes;
+    if (body.frequency !== undefined) update.frequency = body.frequency;
+    if (body.hour !== undefined) update.hour = body.hour;
+    if (body.minute !== undefined) update.minute = body.minute;
+    if (body.dayOfWeek !== undefined) update.dayOfWeek = body.dayOfWeek;
+    if (body.dayOfMonth !== undefined) update.dayOfMonth = body.dayOfMonth;
+    if (body.timezone !== undefined) update.timezone = body.timezone;
+    if (body.recipients !== undefined) update.recipients = body.recipients;
+    if (body.zoneId !== undefined) update.zoneId = body.zoneId;
+    if (body.zoneName !== undefined) update.zoneName = body.zoneName;
+    if (body.accountId !== undefined) update.accountId = body.accountId;
+    if (body.accountName !== undefined) update.accountName = body.accountName;
+    if (body.timeRange !== undefined) update.timeRange = body.timeRange;
+    if (body.format !== undefined) update.format = body.format;
+    if (body.subject !== undefined) update.subject = body.subject;
+
+    // Rebuild cron if time fields are present
+    if (body.frequency !== undefined || body.hour !== undefined || body.minute !== undefined || body.dayOfWeek !== undefined || body.dayOfMonth !== undefined) {
+      const { getSchedules } = await import("@/lib/scheduler");
+      const existing = getSchedules().find((s) => s.id === body.id);
+      if (!existing) return Response.json({ error: "Schedule not found" }, { status: 404 });
+      const freq = (body.frequency ?? existing.frequency) as ScheduleFrequency;
+      const hr = body.hour ?? existing.hour;
+      const min = body.minute ?? existing.minute ?? 0;
+      const dow = body.dayOfWeek ?? existing.dayOfWeek;
+      const dom = body.dayOfMonth ?? existing.dayOfMonth;
+      update.cronExpression = buildCronExpression(freq, hr, min, dow, dom);
+    }
+
     const { updateSchedule } = await import("@/lib/scheduler");
-    const updated = updateSchedule(body.id, { enabled: body.enabled });
+    const updated = updateSchedule(body.id, update);
     if (!updated) return Response.json({ error: "Schedule not found" }, { status: 404 });
 
     return Response.json({ success: true, schedule: updated });

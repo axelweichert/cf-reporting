@@ -67,6 +67,7 @@ export interface ScheduleConfig {
   frequency: ScheduleFrequency;
   cronExpression: string; // Derived from frequency + hour/day settings
   hour: number; // Hour in the schedule's timezone (0-23)
+  minute: number; // Minute (0-59)
   dayOfWeek?: number; // 0=Sun, 1=Mon, ..., 6=Sat (for weekly)
   dayOfMonth?: number; // 1-31 (for monthly)
   timezone: string; // IANA timezone (e.g. "Europe/Vienna"), default "UTC"

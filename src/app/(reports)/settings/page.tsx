@@ -7,7 +7,7 @@ import { ACCOUNT_SCOPED_REPORTS } from "@/types/email";
 import {
   Mail, Clock, AlertTriangle, CheckCircle, Info,
   Trash2, ToggleLeft, ToggleRight, Plus, Send, RefreshCw,
-  Database, Play, HardDrive, Download, Upload, Cloud,
+  Database, Play, HardDrive, Download, Upload, Cloud, Pencil,
 } from "lucide-react";
 
 const REPORT_TYPES: Array<{ value: ReportType; label: string; group: string }> = [
@@ -75,6 +75,81 @@ const COMMON_TIMEZONES = [
   "Pacific/Auckland",
 ];
 
+function formatScheduleTime(s: ScheduleConfig): string {
+  const time = `${String(s.hour).padStart(2, "0")}:${String(s.minute ?? 0).padStart(2, "0")}`;
+  const tz = s.timezone && s.timezone !== "UTC" ? ` ${s.timezone.replace(/_/g, " ")}` : "";
+  switch (s.frequency) {
+    case "daily":
+      return `Daily at ${time}${tz}`;
+    case "weekly":
+      return `Weekly ${DAYS_OF_WEEK[s.dayOfWeek ?? 0]} at ${time}${tz}`;
+    case "monthly":
+      return `Monthly on the ${s.dayOfMonth ?? 1}${ordinalSuffix(s.dayOfMonth ?? 1)} at ${time}${tz}`;
+    default:
+      return `${time}${tz}`;
+  }
+}
+
+function ordinalSuffix(n: number): string {
+  if (n >= 11 && n <= 13) return "th";
+  switch (n % 10) {
+    case 1: return "st";
+    case 2: return "nd";
+    case 3: return "rd";
+    default: return "th";
+  }
+}
+
+function getReportLabel(rt: ReportType): string {
+  return REPORT_TYPES.find((r) => r.value === rt)?.label || rt;
+}
+
+interface ScheduleFormState {
+  reportTypes: ReportType[];
+  frequency: ScheduleFrequency;
+  hour: number;
+  minute: number;
+  dayOfWeek: number;
+  dayOfMonth: number;
+  timezone: string;
+  recipients: string;
+  zoneId: string;
+  timeRange: "1d" | "7d" | "30d";
+  format: ReportFormat;
+}
+
+function defaultFormState(): ScheduleFormState {
+  return {
+    reportTypes: ["executive"],
+    frequency: "weekly",
+    hour: 7,
+    minute: 0,
+    dayOfWeek: 1,
+    dayOfMonth: 1,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    recipients: "",
+    zoneId: "",
+    timeRange: "7d",
+    format: "html",
+  };
+}
+
+function scheduleToFormState(s: ScheduleConfig): ScheduleFormState {
+  return {
+    reportTypes: s.reportTypes && s.reportTypes.length > 0 ? s.reportTypes : [s.reportType],
+    frequency: s.frequency,
+    hour: s.hour,
+    minute: s.minute ?? 0,
+    dayOfWeek: s.dayOfWeek ?? 1,
+    dayOfMonth: s.dayOfMonth ?? 1,
+    timezone: s.timezone || "UTC",
+    recipients: s.recipients.join(", "),
+    zoneId: s.accountId || s.zoneId,
+    timeRange: s.timeRange,
+    format: s.format || "html",
+  };
+}
+
 export default function SettingsPage() {
   const { capabilities } = useAuth();
   const zones = capabilities?.zones || [];
@@ -97,20 +172,10 @@ export default function SettingsPage() {
   // Schedules
   const [schedules, setSchedules] = useState<ScheduleConfig[]>([]);
 
-  // New schedule form
-  const [showNewSchedule, setShowNewSchedule] = useState(false);
-  const [newSchedule, setNewSchedule] = useState({
-    reportTypes: ["executive"] as ReportType[],
-    frequency: "weekly" as ScheduleFrequency,
-    hour: 7,
-    dayOfWeek: 1,
-    dayOfMonth: 1,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-    recipients: "",
-    zoneId: "",
-    timeRange: "7d" as "1d" | "7d" | "30d",
-    format: "html" as ReportFormat,
-  });
+  // Schedule form (shared for create + edit)
+  const [showScheduleForm, setShowScheduleForm] = useState(false);
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
+  const [scheduleForm, setScheduleForm] = useState<ScheduleFormState>(defaultFormState());
   const [scheduleSaving, setScheduleSaving] = useState(false);
 
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -267,46 +332,69 @@ export default function SettingsPage() {
   };
 
   // All selected report types are account-scoped (ZT) or zone-scoped – don't allow mixing
-  const isAccountScopedReport = newSchedule.reportTypes.length > 0 && newSchedule.reportTypes.every((rt) => ACCOUNT_SCOPED_REPORTS.includes(rt));
-  const isZoneScopedReport = newSchedule.reportTypes.length > 0 && newSchedule.reportTypes.every((rt) => !ACCOUNT_SCOPED_REPORTS.includes(rt));
-  const hasMixedScopes = newSchedule.reportTypes.length > 0 && !isAccountScopedReport && !isZoneScopedReport;
+  const isAccountScopedReport = scheduleForm.reportTypes.length > 0 && scheduleForm.reportTypes.every((rt) => ACCOUNT_SCOPED_REPORTS.includes(rt));
+  const isZoneScopedReport = scheduleForm.reportTypes.length > 0 && scheduleForm.reportTypes.every((rt) => !ACCOUNT_SCOPED_REPORTS.includes(rt));
+  const hasMixedScopes = scheduleForm.reportTypes.length > 0 && !isAccountScopedReport && !isZoneScopedReport;
 
-  // Create schedule
-  const handleCreateSchedule = async () => {
+  // Open new schedule form
+  const handleNewSchedule = () => {
+    setEditingScheduleId(null);
+    setScheduleForm(defaultFormState());
+    setShowScheduleForm(true);
+    setFeedback(null);
+  };
+
+  // Open edit form for existing schedule
+  const handleEditSchedule = (s: ScheduleConfig) => {
+    setEditingScheduleId(s.id);
+    setScheduleForm(scheduleToFormState(s));
+    setShowScheduleForm(true);
+    setFeedback(null);
+  };
+
+  // Create or update schedule
+  const handleSaveSchedule = async () => {
     setScheduleSaving(true);
     setFeedback(null);
-    const zone = zones.find((z) => z.id === newSchedule.zoneId);
-    const account = accounts.find((a) => a.id === newSchedule.zoneId); // zoneId field doubles as accountId for account-scoped reports
+    const zone = zones.find((z) => z.id === scheduleForm.zoneId);
+    const account = accounts.find((a) => a.id === scheduleForm.zoneId);
+    const recipients = scheduleForm.recipients.split(",").map((e) => e.trim()).filter(Boolean);
+
+    const payload = {
+      reportType: scheduleForm.reportTypes[0],
+      reportTypes: scheduleForm.reportTypes,
+      frequency: scheduleForm.frequency,
+      hour: scheduleForm.hour,
+      minute: scheduleForm.minute,
+      dayOfWeek: scheduleForm.dayOfWeek,
+      dayOfMonth: scheduleForm.dayOfMonth,
+      timezone: scheduleForm.timezone,
+      timeRange: scheduleForm.timeRange,
+      format: scheduleForm.format,
+      recipients,
+      ...(isAccountScopedReport
+        ? { accountId: scheduleForm.zoneId, accountName: account?.name || scheduleForm.zoneId, zoneId: "", zoneName: "" }
+        : { zoneId: scheduleForm.zoneId, zoneName: zone?.name || scheduleForm.zoneId }),
+    };
+
     try {
+      const isEdit = !!editingScheduleId;
       const res = await fetch("/api/email/schedules", {
-        method: "POST",
+        method: isEdit ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          reportType: newSchedule.reportTypes[0],
-          reportTypes: newSchedule.reportTypes,
-          frequency: newSchedule.frequency,
-          hour: newSchedule.hour,
-          dayOfWeek: newSchedule.dayOfWeek,
-          dayOfMonth: newSchedule.dayOfMonth,
-          timezone: newSchedule.timezone,
-          timeRange: newSchedule.timeRange,
-          format: newSchedule.format,
-          recipients: newSchedule.recipients.split(",").map((e) => e.trim()).filter(Boolean),
-          ...(isAccountScopedReport
-            ? { accountId: newSchedule.zoneId, accountName: account?.name || newSchedule.zoneId, zoneId: "", zoneName: "" }
-            : { zoneName: zone?.name || newSchedule.zoneId }),
-        }),
+        body: JSON.stringify(isEdit ? { id: editingScheduleId, ...payload } : payload),
       });
       const data = await res.json();
       if (res.ok) {
-        setFeedback({ type: "success", text: "Schedule created" });
-        setShowNewSchedule(false);
+        setFeedback({ type: "success", text: isEdit ? "Schedule updated" : "Schedule created" });
+        setShowScheduleForm(false);
+        setEditingScheduleId(null);
         loadData();
       } else {
         setFeedback({ type: "error", text: data.error });
       }
     } catch {
-      setFeedback({ type: "error", text: "Failed to create schedule" });
+      setFeedback({ type: "error", text: "Failed to save schedule" });
     }
     setScheduleSaving(false);
   };
@@ -592,7 +680,7 @@ export default function SettingsPage() {
               <RefreshCw size={14} />
             </button>
             <button
-              onClick={() => setShowNewSchedule(true)}
+              onClick={handleNewSchedule}
               disabled={!status?.cfApiTokenSet || !status?.smtpEnvConfigured}
               className="flex items-center gap-2 rounded-lg bg-purple-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-purple-600 disabled:opacity-50"
             >
@@ -631,23 +719,22 @@ export default function SettingsPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium text-white">
-                      {s.reportTypes && s.reportTypes.length > 1
-                        ? s.reportTypes.join(", ")
-                        : s.reportType}
+                      {(s.reportTypes && s.reportTypes.length > 0 ? s.reportTypes : [s.reportType])
+                        .map(getReportLabel).join(", ")}
                     </span>
-                    <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">{s.frequency}</span>
-                    <span className="text-xs text-zinc-500">{s.cronExpression}</span>
-                    {s.timezone && s.timezone !== "UTC" && <span className="text-xs text-zinc-500">({s.timezone})</span>}
                     {s.format && s.format !== "html" && <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-orange-400">{s.format.toUpperCase()}</span>}
                     {s.lastRunStatus === "success" && <CheckCircle size={12} className="text-emerald-400" />}
                     {s.lastRunStatus === "error" && <span title={s.lastRunError}><AlertTriangle size={12} className="text-red-400" /></span>}
                   </div>
                   <div className="mt-1 text-xs text-zinc-500">
-                    {s.accountName || s.zoneName} · {s.timeRange} · {s.recipients.join(", ")}
+                    {formatScheduleTime(s)} · {s.accountName || s.zoneName} · {s.timeRange} · {s.recipients.join(", ")}
                     {s.lastRunAt && <span> · Last run: {new Date(s.lastRunAt).toLocaleString()}</span>}
                   </div>
                 </div>
                 <div className="ml-3 flex items-center gap-2">
+                  <button onClick={() => handleEditSchedule(s)} className="text-zinc-400 hover:text-white" title="Edit">
+                    <Pencil size={14} />
+                  </button>
                   <button onClick={() => handleToggleSchedule(s.id, s.enabled)} className="text-zinc-400 hover:text-white" title={s.enabled ? "Disable" : "Enable"}>
                     {s.enabled ? <ToggleRight size={20} className="text-emerald-400" /> : <ToggleLeft size={20} />}
                   </button>
@@ -660,10 +747,10 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* New schedule form */}
-        {showNewSchedule && (
+        {/* Schedule form (create or edit) */}
+        {showScheduleForm && (
           <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-800/50 p-4">
-            <h3 className="text-sm font-semibold text-white">New Schedule</h3>
+            <h3 className="text-sm font-semibold text-white">{editingScheduleId ? "Edit Schedule" : "New Schedule"}</h3>
 
             {/* Report type checkboxes grouped by category */}
             <div className="mt-3">
@@ -681,12 +768,12 @@ export default function SettingsPage() {
                       <label key={rt.value} className="flex items-center gap-2 py-0.5 text-sm text-zinc-300 hover:text-white cursor-pointer">
                         <input
                           type="checkbox"
-                          checked={newSchedule.reportTypes.includes(rt.value)}
+                          checked={scheduleForm.reportTypes.includes(rt.value)}
                           onChange={(e) => {
                             const updated = e.target.checked
-                              ? [...newSchedule.reportTypes, rt.value]
-                              : newSchedule.reportTypes.filter((v) => v !== rt.value);
-                            setNewSchedule({ ...newSchedule, reportTypes: updated, zoneId: "" });
+                              ? [...scheduleForm.reportTypes, rt.value]
+                              : scheduleForm.reportTypes.filter((v) => v !== rt.value);
+                            setScheduleForm({ ...scheduleForm, reportTypes: updated, zoneId: "" });
                           }}
                           className="rounded border-zinc-600 bg-zinc-700 text-orange-500 focus:ring-orange-500"
                         />
@@ -705,37 +792,48 @@ export default function SettingsPage() {
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <SelectField label="Frequency" value={newSchedule.frequency} options={FREQUENCIES} onChange={(v) => setNewSchedule({ ...newSchedule, frequency: v as ScheduleFrequency })} />
-              <SelectField label="Hour" value={String(newSchedule.hour)} options={Array.from({ length: 24 }, (_, i) => ({ value: String(i), label: `${String(i).padStart(2, "0")}:00` }))} onChange={(v) => setNewSchedule({ ...newSchedule, hour: parseInt(v, 10) })} />
+              <SelectField label="Frequency" value={scheduleForm.frequency} options={FREQUENCIES} onChange={(v) => setScheduleForm({ ...scheduleForm, frequency: v as ScheduleFrequency })} />
+              <div>
+                <label className="mb-1 block text-xs font-medium text-zinc-400">Time</label>
+                <input
+                  type="time"
+                  value={`${String(scheduleForm.hour).padStart(2, "0")}:${String(scheduleForm.minute).padStart(2, "0")}`}
+                  onChange={(e) => {
+                    const [h, m] = e.target.value.split(":").map(Number);
+                    setScheduleForm({ ...scheduleForm, hour: h, minute: m });
+                  }}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
+                />
+              </div>
               <SelectField
                 label="Timezone"
-                value={newSchedule.timezone}
+                value={scheduleForm.timezone}
                 options={COMMON_TIMEZONES.map((tz) => ({ value: tz, label: tz.replace(/_/g, " ") }))}
-                onChange={(v) => setNewSchedule({ ...newSchedule, timezone: v })}
+                onChange={(v) => setScheduleForm({ ...scheduleForm, timezone: v })}
               />
-              {newSchedule.frequency === "weekly" && (
-                <SelectField label="Day of Week" value={String(newSchedule.dayOfWeek)} options={DAYS_OF_WEEK.map((d, i) => ({ value: String(i), label: d }))} onChange={(v) => setNewSchedule({ ...newSchedule, dayOfWeek: parseInt(v, 10) })} />
+              {scheduleForm.frequency === "weekly" && (
+                <SelectField label="Day of Week" value={String(scheduleForm.dayOfWeek)} options={DAYS_OF_WEEK.map((d, i) => ({ value: String(i), label: d }))} onChange={(v) => setScheduleForm({ ...scheduleForm, dayOfWeek: parseInt(v, 10) })} />
               )}
-              {newSchedule.frequency === "monthly" && (
-                <SelectField label="Day of Month" value={String(newSchedule.dayOfMonth)} options={Array.from({ length: 28 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))} onChange={(v) => setNewSchedule({ ...newSchedule, dayOfMonth: parseInt(v, 10) })} />
+              {scheduleForm.frequency === "monthly" && (
+                <SelectField label="Day of Month" value={String(scheduleForm.dayOfMonth)} options={Array.from({ length: 28 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))} onChange={(v) => setScheduleForm({ ...scheduleForm, dayOfMonth: parseInt(v, 10) })} />
               )}
               {isAccountScopedReport
-                ? <SelectField label="Account" value={newSchedule.zoneId} options={accounts.map((a) => ({ value: a.id, label: a.name }))} onChange={(v) => setNewSchedule({ ...newSchedule, zoneId: v })} />
-                : <SelectField label="Zone" value={newSchedule.zoneId} options={zones.map((z) => ({ value: z.id, label: z.name }))} onChange={(v) => setNewSchedule({ ...newSchedule, zoneId: v })} />
+                ? <SelectField label="Account" value={scheduleForm.zoneId} options={accounts.map((a) => ({ value: a.id, label: a.name }))} onChange={(v) => setScheduleForm({ ...scheduleForm, zoneId: v })} />
+                : <SelectField label="Zone" value={scheduleForm.zoneId} options={zones.map((z) => ({ value: z.id, label: z.name }))} onChange={(v) => setScheduleForm({ ...scheduleForm, zoneId: v })} />
               }
-              <SelectField label="Time Range" value={newSchedule.timeRange} options={[{ value: "1d", label: "Last 24h" }, { value: "7d", label: "Last 7 days" }, { value: "30d", label: "Last 30 days" }]} onChange={(v) => setNewSchedule({ ...newSchedule, timeRange: v as "1d" | "7d" | "30d" })} />
+              <SelectField label="Time Range" value={scheduleForm.timeRange} options={[{ value: "1d", label: "Last 24h" }, { value: "7d", label: "Last 7 days" }, { value: "30d", label: "Last 30 days" }]} onChange={(v) => setScheduleForm({ ...scheduleForm, timeRange: v as "1d" | "7d" | "30d" })} />
               <SelectField
                 label="Format"
-                value={newSchedule.format}
+                value={scheduleForm.format}
                 options={[
                   { value: "html", label: "HTML Email" },
                   { value: "pdf", label: "PDF Attachment" },
                   { value: "both", label: "HTML + PDF Attachment" },
                 ]}
-                onChange={(v) => setNewSchedule({ ...newSchedule, format: v as ReportFormat })}
+                onChange={(v) => setScheduleForm({ ...scheduleForm, format: v as ReportFormat })}
               />
               <div className="sm:col-span-2">
-                <InputField label="Recipients (comma-separated)" value={newSchedule.recipients} onChange={(v) => setNewSchedule({ ...newSchedule, recipients: v })} placeholder="user1@example.com, user2@example.com" />
+                <InputField label="Recipients (comma-separated)" value={scheduleForm.recipients} onChange={(v) => setScheduleForm({ ...scheduleForm, recipients: v })} placeholder="user1@example.com, user2@example.com" />
               </div>
             </div>
 
@@ -746,10 +844,10 @@ export default function SettingsPage() {
             )}
 
             <div className="mt-4 flex gap-3">
-              <button onClick={handleCreateSchedule} disabled={scheduleSaving || !newSchedule.zoneId || !newSchedule.recipients || newSchedule.reportTypes.length === 0 || hasMixedScopes} className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50">
-                {scheduleSaving ? "Creating..." : "Create Schedule"}
+              <button onClick={handleSaveSchedule} disabled={scheduleSaving || !scheduleForm.zoneId || !scheduleForm.recipients || scheduleForm.reportTypes.length === 0 || hasMixedScopes} className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50">
+                {scheduleSaving ? "Saving..." : editingScheduleId ? "Update Schedule" : "Create Schedule"}
               </button>
-              <button onClick={() => setShowNewSchedule(false)} className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800">
+              <button onClick={() => { setShowScheduleForm(false); setEditingScheduleId(null); }} className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800">
                 Cancel
               </button>
             </div>
