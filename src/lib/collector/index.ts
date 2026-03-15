@@ -577,11 +577,9 @@ async function collectExtDatasets(
       const sinceMs = new Date(effectiveSince).getTime();
       const ageMs = nowMs - sinceMs;
       if (dsLimits.notOlderThan > 0 && ageMs > dsLimits.notOlderThan * 1000) {
-        // This time slice is beyond retention – skip without an API call
-        store.logCollectionItem(runId, scopeId, scopeName, def.key, "skipped", 0,
-          `Beyond retention (${Math.round(ageMs / 86400000)}d > ${Math.round(dsLimits.notOlderThan / 86400)}d)`);
-        skipped++;
-        continue;
+        // Clamp to the dataset's actual retention limit instead of skipping
+        const clampedSince = new Date(nowMs - dsLimits.notOlderThan * 1000).toISOString();
+        effectiveSince = clampedSince;
       }
     }
     // limits map may be empty if discovery failed – still try the dataset
