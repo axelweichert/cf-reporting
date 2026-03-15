@@ -41,8 +41,16 @@ import {
 import type { ScheduleConfig, ReportType } from "@/types/email";
 import { ACCOUNT_SCOPED_REPORTS } from "@/types/email";
 
-const activeTasks = new Map<string, ScheduledTask>();
-let _running = false;
+// Store scheduler state on globalThis so it survives Next.js module re-evaluation.
+// Without this, API route handlers get a different module instance than
+// instrumentation.ts, so reloadCronTasks() sees _running=false and exits.
+interface SchedulerGlobal {
+  __cfr_scheduler_running?: boolean;
+  __cfr_scheduler_tasks?: Map<string, ScheduledTask>;
+}
+const _g = globalThis as SchedulerGlobal;
+if (!_g.__cfr_scheduler_tasks) _g.__cfr_scheduler_tasks = new Map();
+const activeTasks = _g.__cfr_scheduler_tasks;
 
 const REPORT_LABELS: Record<ReportType, string> = {
   executive: "Executive Report",
@@ -64,7 +72,7 @@ const REPORT_LABELS: Record<ReportType, string> = {
 };
 
 export function isSchedulerRunning(): boolean {
-  return _running;
+  return !!_g.__cfr_scheduler_running;
 }
 
 export function getSchedules(): ScheduleConfig[] {
@@ -108,7 +116,7 @@ function getEnvToken(): string | undefined {
 }
 
 export function initScheduler(): void {
-  if (_running) return;
+  if (_g.__cfr_scheduler_running) return;
 
   const token = getEnvToken();
   if (!token) {
@@ -121,7 +129,7 @@ export function initScheduler(): void {
     // Don't return – SMTP might be configured later. We'll check on each run.
   }
 
-  _running = true;
+  _g.__cfr_scheduler_running = true;
   console.log("[scheduler] Starting email report scheduler");
   reloadCronTasks();
 }
@@ -137,7 +145,7 @@ function reloadCronTasks(): void {
     activeTasks.delete(id);
   }
 
-  if (!_running) return;
+  if (!_g.__cfr_scheduler_running) return;
 
   const schedules = getSchedulesFromDb();
   let loaded = 0;
