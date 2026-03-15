@@ -113,5 +113,32 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  return NextResponse.json({ error: "Invalid action – use 'r2' or 'status'" }, { status: 400 });
+  if (action === "wipe") {
+    const dbPath = getDbFilePath();
+    if (!dbPath) {
+      return NextResponse.json({ error: "Database not available" }, { status: 404 });
+    }
+
+    try {
+      // Close current connection, delete the file, re-initialize
+      const { closeDb, getDb: reopenDb } = await import("@/lib/db");
+      closeDb();
+      fs.unlinkSync(dbPath);
+      // Remove WAL/SHM files if present
+      try { fs.unlinkSync(dbPath + "-wal"); } catch { /* ignore */ }
+      try { fs.unlinkSync(dbPath + "-shm"); } catch { /* ignore */ }
+      // Re-open triggers migration from scratch
+      reopenDb();
+      // Reload scheduler cron tasks (schedules are gone)
+      try {
+        const { reloadSchedules } = await import("@/lib/scheduler");
+        reloadSchedules();
+      } catch { /* ignore */ }
+      return NextResponse.json({ success: true, message: "Database wiped and re-initialized" });
+    } catch (err) {
+      return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    }
+  }
+
+  return NextResponse.json({ error: "Invalid action – use 'r2', 'status', or 'wipe'" }, { status: 400 });
 }

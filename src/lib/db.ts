@@ -974,10 +974,11 @@ function runMigrations(db: Database.Database): void {
   }
 }
 
-/** Gracefully close the database connection (for tests / shutdown). */
+/** Gracefully close the database connection (for tests / shutdown / wipe). */
 export function closeDb(): void {
   if (_db) {
     _db.close();
     _db = null;
   }
+  _initFailed = false;
 }

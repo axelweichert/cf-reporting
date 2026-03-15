@@ -7,7 +7,7 @@ import { ACCOUNT_SCOPED_REPORTS } from "@/types/email";
 import {
   Mail, Clock, AlertTriangle, CheckCircle, Info,
   Trash2, ToggleLeft, ToggleRight, Plus, Send, RefreshCw,
-  Database, Play, HardDrive, Download, Upload, Cloud, Pencil,
+  Database, Play, HardDrive, Download, Upload, Cloud, Pencil, XCircle,
 } from "lucide-react";
 
 const REPORT_TYPES: Array<{ value: ReportType; label: string; group: string }> = [
@@ -219,6 +219,8 @@ export default function SettingsPage() {
   const [backupMessage, setBackupMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [backupLoading, setBackupLoading] = useState<string | null>(null);
   const restoreInputRef = useRef<HTMLInputElement>(null);
+  const [showWipeConfirm, setShowWipeConfirm] = useState(false);
+  const [wipeLoading, setWipeLoading] = useState(false);
 
   // Load data
   const loadData = useCallback(async () => {
@@ -480,6 +482,29 @@ export default function SettingsPage() {
     }
     setBackupLoading(null);
     if (restoreInputRef.current) restoreInputRef.current.value = "";
+  };
+
+  const handleWipeDatabase = async () => {
+    setWipeLoading(true);
+    setBackupMessage(null);
+    try {
+      const res = await fetch("/api/backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "wipe" }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setBackupMessage({ type: "success", text: data.message });
+        setShowWipeConfirm(false);
+        loadData();
+      } else {
+        setBackupMessage({ type: "error", text: data.error });
+      }
+    } catch {
+      setBackupMessage({ type: "error", text: "Failed to wipe database" });
+    }
+    setWipeLoading(false);
   };
 
   return (
@@ -931,6 +956,46 @@ export default function SettingsPage() {
               {backupLoading === "restore" ? "Restoring..." : "Restore from JSON"}
             </button>
             <span className="text-xs text-zinc-500">Replaces all existing schedules</span>
+          </div>
+        </div>
+
+        {/* Reset Database */}
+        <div className="mt-4">
+          <h3 className="text-sm font-medium text-zinc-300">Danger Zone</h3>
+          <div className="mt-2">
+            {!showWipeConfirm ? (
+              <button
+                onClick={() => setShowWipeConfirm(true)}
+                disabled={!backupStatus?.databaseAvailable}
+                className="flex items-center gap-2 rounded-lg border border-red-500/30 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+              >
+                <XCircle size={14} />
+                Reset Database
+              </button>
+            ) : (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3">
+                <p className="text-sm font-medium text-red-400">Are you sure?</p>
+                <p className="mt-1 text-xs text-zinc-400">
+                  This will permanently delete all collected data, schedules, and collection history. This action cannot be undone.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={handleWipeDatabase}
+                    disabled={wipeLoading}
+                    className="flex items-center gap-2 rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600 disabled:opacity-50"
+                  >
+                    <XCircle size={14} />
+                    {wipeLoading ? "Wiping..." : "Yes, wipe everything"}
+                  </button>
+                  <button
+                    onClick={() => setShowWipeConfirm(false)}
+                    className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
