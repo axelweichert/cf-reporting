@@ -256,14 +256,26 @@ export async function generateHtml(opts: RenderOptions): Promise<Buffer> {
 
     await preparePage(page, opts);
 
-    // Capture the fully-rendered page as standalone HTML
+    // Capture the fully-rendered page as standalone HTML.
+    // Keep SVGs and chart elements exactly as Playwright rendered them –
+    // the fixed pixel widths from the A4 viewport are correct.
     const htmlContent = await page.evaluate(() => {
+      // Ensure only light theme is active
+      document.documentElement.classList.remove("dark");
+
+      // Ensure all SVGs have xmlns for standalone rendering
+      document.querySelectorAll("svg").forEach((svg) => {
+        svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      });
+
       // Collect all stylesheets into inline <style> blocks
       const styles: string[] = [];
       for (const sheet of document.styleSheets) {
         try {
           const rules = Array.from(sheet.cssRules)
             .map((r) => r.cssText)
+            // Strip @font-face rules with relative URLs that won't resolve
+            .filter((r) => !r.startsWith("@font-face"))
             .join("\n");
           styles.push(rules);
         } catch {
@@ -277,14 +289,17 @@ export async function generateHtml(opts: RenderOptions): Promise<Buffer> {
       // Remove existing <link rel="stylesheet"> since we inlined them
       document.querySelectorAll('link[rel="stylesheet"]').forEach((el) => el.remove());
 
-      // Inject inlined styles
+      // Inject inlined styles + system font fallback
       const styleEl = document.createElement("style");
-      styleEl.textContent = styles.join("\n");
+      styleEl.textContent = `
+        :root { --font-geist-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; --font-geist-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+        ${styles.join("\n")}
+      `;
       document.head.appendChild(styleEl);
 
       // Add export footer
       const footer = document.createElement("div");
-      footer.style.cssText = "margin-top:3rem;padding-top:1rem;border-top:1px solid #27272a;font-size:0.75rem;color:#71717a;text-align:center;";
+      footer.style.cssText = "margin-top:3rem;padding-top:1rem;border-top:1px solid #e4e4e7;font-size:0.75rem;color:#71717a;text-align:center;";
       footer.textContent = `Exported from cf-reporting on ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
       document.body.appendChild(footer);
 
