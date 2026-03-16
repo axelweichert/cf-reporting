@@ -7,7 +7,7 @@ test.describe("Setup page", () => {
     // Authenticate via API to get site session cookie
     const loginResp = await context.request.post(`${BASE}/api/auth/login`, {
       headers: { "Content-Type": "application/json", "Origin": BASE },
-      data: { password: "test123" },
+      data: { password: process.env.APP_PASSWORD || "test123" },
     });
     expect(loginResp.ok()).toBeTruthy();
 
