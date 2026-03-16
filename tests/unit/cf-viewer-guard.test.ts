@@ -2,11 +2,13 @@ import { describe, it, expect } from "vitest";
 import { validateViewerGraphQL, validateViewerRestPath } from "@/lib/cf-viewer-guard";
 
 // ---------------------------------------------------------------------------
-// GraphQL validation
+// GraphQL – AST-based validation
 // ---------------------------------------------------------------------------
 
 describe("validateViewerGraphQL", () => {
-  it("allows a valid httpRequestsAdaptiveGroups query", () => {
+  // ---- Valid queries ----
+
+  it("allows a standard zone-scoped analytics query", () => {
     const query = `{
       viewer {
         zones(filter: { zoneTag: "abc123def456abc123def456abc123de" }) {
@@ -25,13 +27,26 @@ describe("validateViewerGraphQL", () => {
     expect(validateViewerGraphQL(query)).toBeNull();
   });
 
-  it("allows a valid account-scoped gateway query", () => {
+  it("allows a named query operation", () => {
+    const query = `query TrafficTimeSeries {
+      viewer {
+        zones(filter: { zoneTag: "abc" }) {
+          httpRequestsAdaptiveGroups(limit: 100) {
+            count
+          }
+        }
+      }
+    }`;
+    expect(validateViewerGraphQL(query)).toBeNull();
+  });
+
+  it("allows an account-scoped gateway query", () => {
     const query = `{
       viewer {
         accounts(filter: { accountTag: "abc123def456abc123def456abc123de" }) {
           gatewayResolverQueriesAdaptiveGroups(
             limit: 1000
-            filter: { datetime_geq: "2024-01-01T00:00:00Z", datetime_lt: "2024-01-02T00:00:00Z" }
+            filter: { datetime_geq: "2024-01-01T00:00:00Z" }
           ) {
             count
             dimensions { datetimeHour }
@@ -42,14 +57,14 @@ describe("validateViewerGraphQL", () => {
     expect(validateViewerGraphQL(query)).toBeNull();
   });
 
-  it("allows multi-dataset queries (batched)", () => {
+  it("allows batched (aliased) dataset queries under one zone", () => {
     const query = `{
       viewer {
         zones(filter: { zoneTag: "abc123" }) {
-          threats: firewallEventsAdaptiveGroups(limit: 100 filter: { action: "block" }) {
+          threats: firewallEventsAdaptiveGroups(limit: 100, filter: { action: "block" }) {
             count
           }
-          ddos: firewallEventsAdaptiveGroups(limit: 100 filter: { source: "l7ddos" }) {
+          ddos: firewallEventsAdaptiveGroups(limit: 100, filter: { source: "l7ddos" }) {
             count
           }
         }
@@ -80,30 +95,178 @@ describe("validateViewerGraphQL", () => {
     }
   });
 
+  it("allows deeply nested result sub-fields (depth >= 3 is free)", () => {
+    const query = `{
+      viewer {
+        zones(filter: { zoneTag: "x" }) {
+          httpRequestsAdaptiveGroups(limit: 10) {
+            count
+            dimensions {
+              datetimeHour
+              cacheStatus
+              clientCountryName
+            }
+            sum {
+              edgeResponseBytes
+            }
+            avg {
+              edgeTimeToFirstByteMs
+            }
+            quantiles {
+              edgeTimeToFirstByteMsP50
+              edgeTimeToFirstByteMsP95
+            }
+          }
+        }
+      }
+    }`;
+    expect(validateViewerGraphQL(query)).toBeNull();
+  });
+
+  // ---- Blocked: operation types ----
+
   it("rejects mutations", () => {
     const query = `mutation { deleteZone(id: "abc") { success } }`;
-    expect(validateViewerGraphQL(query)).toBe("Mutations are not allowed");
+    expect(validateViewerGraphQL(query)).toBe('Operation type "mutation" is not allowed');
   });
 
-  it("rejects introspection via __schema", () => {
+  it("rejects subscriptions", () => {
+    const query = `subscription { viewer { zones { httpRequestsAdaptiveGroups { count } } } }`;
+    expect(validateViewerGraphQL(query)).toBe('Operation type "subscription" is not allowed');
+  });
+
+  it("rejects multiple operations", () => {
+    const query = `
+      query A { viewer { zones(filter: {zoneTag: "x"}) { httpRequestsAdaptiveGroups(limit:1) { count } } } }
+      query B { viewer { zones(filter: {zoneTag: "y"}) { httpRequestsAdaptiveGroups(limit:1) { count } } } }
+    `;
+    expect(validateViewerGraphQL(query)).toBe("Only a single operation is allowed");
+  });
+
+  // ---- Blocked: introspection ----
+
+  it("rejects __schema at root (caught by structural check)", () => {
     const query = `{ __schema { types { name } } }`;
+    // Structural check catches it before introspection sweep: __schema is not "viewer"
+    expect(validateViewerGraphQL(query)).toBe('Root field "__schema" is not allowed (must be "viewer")');
+  });
+
+  it("rejects __type under viewer (caught by scope check)", () => {
+    const query = `{
+      viewer {
+        __type(name: "Zone") {
+          fields { name }
+        }
+      }
+    }`;
+    // Structural check: __type is not "zones" or "accounts"
+    expect(validateViewerGraphQL(query)).toBe('Field "__type" under viewer is not allowed (use "zones" or "accounts")');
+  });
+
+  it("rejects __schema hidden under an alias (caught by structural check)", () => {
+    const query = `{ safe: __schema { types { name } } }`;
+    // AST uses the real field name, not the alias
+    expect(validateViewerGraphQL(query)).toBe('Root field "__schema" is not allowed (must be "viewer")');
+  });
+
+  it("rejects __schema deeply nested (caught by introspection sweep)", () => {
+    // Even if someone tries to sneak introspection at depth ≥ 3 (where fields are free),
+    // the global introspection sweep catches it
+    const query = `{
+      viewer {
+        zones(filter: { zoneTag: "x" }) {
+          httpRequestsAdaptiveGroups(limit: 1) {
+            __schema { types { name } }
+          }
+        }
+      }
+    }`;
     expect(validateViewerGraphQL(query)).toBe("Introspection queries are not allowed");
   });
 
-  it("rejects introspection via __type", () => {
-    const query = `{ viewer { __type(name: "Zone") { fields { name } } } }`;
-    expect(validateViewerGraphQL(query)).toBe("Introspection queries are not allowed");
+  // ---- Blocked: fragments ----
+
+  it("rejects fragment definitions", () => {
+    const query = `
+      fragment Leak on Zone { __schema { types { name } } }
+      { viewer { zones(filter:{zoneTag:"x"}) { httpRequestsAdaptiveGroups(limit:1) { count } } } }
+    `;
+    expect(validateViewerGraphQL(query)).toBe("Fragment definitions are not allowed");
   });
 
-  it("rejects unknown datasets", () => {
-    const query = `{ viewer { zones(filter: { zoneTag: "x" }) { someUnknownDataset(limit: 10) { count } } } }`;
-    expect(validateViewerGraphQL(query)).toBe("Dataset not allowed: someUnknownDataset");
+  it("rejects inline fragments", () => {
+    const query = `{
+      viewer {
+        ... on Query {
+          zones { httpRequestsAdaptiveGroups(limit:1) { count } }
+        }
+      }
+    }`;
+    expect(validateViewerGraphQL(query)).toBe("Inline fragments are not allowed");
   });
+
+  it("rejects fragment spreads", () => {
+    // This should fail at parse + fragment definition check
+    const query = `
+      fragment ZoneData on Zone { httpRequestsAdaptiveGroups(limit:1) { count } }
+      { viewer { zones(filter:{zoneTag:"x"}) { ...ZoneData } } }
+    `;
+    expect(validateViewerGraphQL(query)).toBe("Fragment definitions are not allowed");
+  });
+
+  // ---- Blocked: structural violations ----
 
   it("rejects queries without viewer root", () => {
     const query = `{ zones { httpRequestsAdaptiveGroups(limit: 10) { count } } }`;
-    expect(validateViewerGraphQL(query)).toBe("Query must target the viewer root");
+    expect(validateViewerGraphQL(query)).toBe('Root field "zones" is not allowed (must be "viewer")');
   });
+
+  it("rejects non-scope fields under viewer", () => {
+    const query = `{ viewer { users { name } } }`;
+    expect(validateViewerGraphQL(query)).toBe('Field "users" under viewer is not allowed (use "zones" or "accounts")');
+  });
+
+  it("rejects unknown datasets under zones", () => {
+    const query = `{
+      viewer {
+        zones(filter: { zoneTag: "x" }) {
+          someUnknownDataset(limit: 10) { count }
+        }
+      }
+    }`;
+    expect(validateViewerGraphQL(query)).toBe('Dataset "someUnknownDataset" is not allowed');
+  });
+
+  it("rejects unknown datasets hidden with aliases", () => {
+    // The alias is "safe" but the actual field is "dangerousDataset"
+    const query = `{
+      viewer {
+        zones(filter: { zoneTag: "x" }) {
+          safe: dangerousDataset(limit: 10) { count }
+        }
+      }
+    }`;
+    expect(validateViewerGraphQL(query)).toBe('Dataset "dangerousDataset" is not allowed');
+  });
+
+  it("rejects multiple root fields (extra fields alongside viewer)", () => {
+    // GraphQL allows multiple root fields – we should reject anything besides viewer
+    const query = `{
+      viewer {
+        zones(filter: { zoneTag: "x" }) {
+          httpRequestsAdaptiveGroups(limit: 1) { count }
+        }
+      }
+      other {
+        secretData
+      }
+    }`;
+    // "other" is not valid GraphQL field syntax that parses, but if it does parse,
+    // it should be rejected. Let's test a realistic case:
+    expect(validateViewerGraphQL(query)).not.toBeNull();
+  });
+
+  // ---- Blocked: size / format ----
 
   it("rejects oversized queries", () => {
     const query = "{ viewer { " + "x".repeat(4100) + " } }";
@@ -115,14 +278,15 @@ describe("validateViewerGraphQL", () => {
     expect(validateViewerGraphQL(null as unknown as string)).toBe("Missing query");
   });
 
-  it("rejects queries with no datasets", () => {
-    const query = `{ viewer { zones(filter: { zoneTag: "x" }) { } } }`;
-    expect(validateViewerGraphQL(query)).toBe("No recognized datasets in query");
+  it("rejects syntactically invalid GraphQL", () => {
+    const query = "{ viewer { zones { unclosed";
+    const result = validateViewerGraphQL(query);
+    expect(result).toMatch(/^Invalid GraphQL:/);
   });
 });
 
 // ---------------------------------------------------------------------------
-// REST path validation
+// REST path validation (unchanged from previous)
 // ---------------------------------------------------------------------------
 
 describe("validateViewerRestPath", () => {

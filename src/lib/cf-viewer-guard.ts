@@ -3,14 +3,25 @@
  *
  * Operators get unrestricted proxy access.
  * Viewers are restricted to:
- *   - GraphQL: only allowlisted read-only analytics datasets, no mutations/introspection
- *   - REST GET: only allowlisted path patterns (report-relevant endpoints)
+ *   - GraphQL: AST-parsed, only read-only queries targeting allowlisted
+ *     analytics datasets via viewer → zones/accounts → dataset path.
+ *     Mutations, subscriptions, introspection, and fragments are rejected.
+ *   - REST GET: only allowlisted path patterns (report-relevant endpoints).
  */
 
+import { parse, Kind, visit } from "graphql";
+import type {
+  DocumentNode,
+  OperationDefinitionNode,
+  FieldNode,
+  SelectionSetNode,
+} from "graphql";
+
 // ---------------------------------------------------------------------------
-// GraphQL dataset allowlist
+// GraphQL – AST-based validation
 // ---------------------------------------------------------------------------
 
+/** Analytics datasets the report UI queries. */
 const ALLOWED_DATASETS: ReadonlySet<string> = new Set([
   // Web / App Security
   "httpRequestsAdaptiveGroups",
@@ -29,77 +40,145 @@ const ALLOWED_DATASETS: ReadonlySet<string> = new Set([
   "accessLoginRequestsAdaptiveGroups",
 ]);
 
-/** Extract dataset names referenced in a GraphQL query string. */
-function extractDatasets(query: string): string[] {
-  // Match identifiers immediately followed by "(" that look like dataset calls.
-  // Dataset names are camelCase identifiers used as field selectors with arguments.
-  const re = /\b([a-zA-Z][a-zA-Z0-9]+)\s*\(/g;
-  const names: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(query)) !== null) {
-    const name = match[1];
-    // Skip known GraphQL structural keywords and CF wrapper fields
-    if (!STRUCTURAL_KEYWORDS.has(name)) {
-      names.push(name);
-    }
-  }
-  return names;
-}
-
-const STRUCTURAL_KEYWORDS: ReadonlySet<string> = new Set([
-  "query", "mutation", "subscription", "fragment",
-  "viewer", "zones", "accounts", "filter", "orderBy",
+/** Scope containers directly under `viewer`. */
+const ALLOWED_SCOPE_FIELDS: ReadonlySet<string> = new Set([
+  "zones",
+  "accounts",
 ]);
 
 /**
- * Validate a GraphQL query for viewer safety.
+ * Validate a GraphQL query for viewer safety using AST parsing.
  * Returns null if valid, or an error message string.
+ *
+ * Enforced rules:
+ *  1. Query must parse as valid GraphQL.
+ *  2. Only a single anonymous or named `query` operation is allowed
+ *     (no mutations, subscriptions).
+ *  3. No fragment definitions (prevents hiding disallowed fields).
+ *  4. No introspection fields (__schema, __type, __typename at root).
+ *  5. The operation's top-level field must be `viewer`.
+ *  6. Under `viewer`, only `zones` or `accounts` fields are allowed.
+ *  7. Under `zones`/`accounts`, only fields in the ALLOWED_DATASETS set.
+ *  8. Size limit (4 KB) as a DoS guard before parsing.
  */
 export function validateViewerGraphQL(query: string): string | null {
   if (!query || typeof query !== "string") {
     return "Missing query";
   }
 
-  // Size limit – no legitimate report query exceeds 4 KB
   if (query.length > 4096) {
     return "Query too large";
   }
 
-  // Block mutations
-  if (/\bmutation\b/i.test(query)) {
-    return "Mutations are not allowed";
+  // --- Parse ---
+  let doc: DocumentNode;
+  try {
+    doc = parse(query);
+  } catch (e) {
+    return `Invalid GraphQL: ${(e as Error).message}`;
   }
 
-  // Block introspection
-  if (/__schema\b|__type\b|__typename\b.*\{/i.test(query)) {
+  // --- Reject fragments ---
+  for (const def of doc.definitions) {
+    if (def.kind === Kind.FRAGMENT_DEFINITION) {
+      return "Fragment definitions are not allowed";
+    }
+  }
+
+  // --- Collect operations ---
+  const ops = doc.definitions.filter(
+    (d): d is OperationDefinitionNode => d.kind === Kind.OPERATION_DEFINITION,
+  );
+
+  if (ops.length === 0) {
+    return "No operation found";
+  }
+  if (ops.length > 1) {
+    return "Only a single operation is allowed";
+  }
+
+  const op = ops[0];
+
+  // --- Only queries ---
+  if (op.operation !== "query") {
+    return `Operation type "${op.operation}" is not allowed`;
+  }
+
+  // --- Walk the AST with depth-based rules ---
+  // depth 0 = operation root selections  → must be exactly `viewer`
+  // depth 1 = viewer children             → must be `zones` or `accounts`
+  // depth 2 = scope children              → must be allowlisted datasets
+  // depth 3+ = free (result field selections)
+
+  const err = validateSelections(op.selectionSet, 0);
+  if (err) return err;
+
+  // --- Global introspection sweep (catches any depth) ---
+  let introspectionField: string | null = null;
+  visit(doc, {
+    Field(node: FieldNode) {
+      const name = node.name.value;
+      if (name === "__schema" || name === "__type") {
+        introspectionField = name;
+      }
+    },
+  });
+  if (introspectionField) {
     return "Introspection queries are not allowed";
   }
 
-  // Must target the viewer root (all CF analytics queries do)
-  if (!/\bviewer\s*\{/.test(query)) {
-    return "Query must target the viewer root";
-  }
+  return null;
+}
 
-  // Extract and validate all dataset references
-  const datasets = extractDatasets(query);
-  if (datasets.length === 0) {
-    return "No recognized datasets in query";
-  }
+function validateSelections(
+  selectionSet: SelectionSetNode | undefined,
+  depth: number,
+): string | null {
+  if (!selectionSet) return null;
 
-  for (const ds of datasets) {
-    if (!ALLOWED_DATASETS.has(ds)) {
-      return `Dataset not allowed: ${ds}`;
+  for (const sel of selectionSet.selections) {
+    // Inline fragments and fragment spreads are not allowed
+    if (sel.kind === Kind.INLINE_FRAGMENT) {
+      return "Inline fragments are not allowed";
     }
+    if (sel.kind === Kind.FRAGMENT_SPREAD) {
+      return "Fragment spreads are not allowed";
+    }
+
+    // It's a field
+    const field = sel as FieldNode;
+    const name = field.name.value;
+
+    if (depth === 0) {
+      // Operation root – only `viewer`
+      if (name !== "viewer") {
+        return `Root field "${name}" is not allowed (must be "viewer")`;
+      }
+    } else if (depth === 1) {
+      // Under viewer – only zones / accounts
+      if (!ALLOWED_SCOPE_FIELDS.has(name)) {
+        return `Field "${name}" under viewer is not allowed (use "zones" or "accounts")`;
+      }
+    } else if (depth === 2) {
+      // Under zones/accounts – only allowlisted datasets
+      if (!ALLOWED_DATASETS.has(name)) {
+        return `Dataset "${name}" is not allowed`;
+      }
+    }
+    // depth >= 3: result sub-fields – allowed freely
+
+    // Recurse into children (enforce structure at depth < 3, free after)
+    const childErr = validateSelections(field.selectionSet, depth + 1);
+    if (childErr) return childErr;
   }
 
   return null;
 }
 
 // ---------------------------------------------------------------------------
-// REST path allowlist
+// REST – path pattern allowlist  (unchanged, already structural)
 // ---------------------------------------------------------------------------
 
-// Hex string pattern for Cloudflare zone/account IDs (32-char hex)
 const HEX_ID = /^[0-9a-f]{32}$/;
 
 interface PathPattern {
@@ -126,7 +205,6 @@ const ALLOWED_REST_PATTERNS: PathPattern[] = [
   { segments: ["accounts", "ACCOUNT_ID", "access", "apps"] },
 ];
 
-// Allowed values for wildcard segments (settings keys, ruleset phases)
 const ALLOWED_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   "ssl", "min_tls_version", "tls_1_3", "always_use_https",
   "automatic_https_rewrites", "opportunistic_encryption",
@@ -142,11 +220,9 @@ const ALLOWED_RULESET_PHASES: ReadonlySet<string> = new Set([
 
 /**
  * Validate a REST path for viewer safety.
- * @param cfPath – path without leading slash, e.g. "zones/abc123/dns_records"
  * Returns null if valid, or an error message string.
  */
 export function validateViewerRestPath(cfPath: string): string | null {
-  // Strip leading slash and query string
   const pathOnly = cfPath.replace(/^\//, "").split("?")[0];
   const parts = pathOnly.split("/").filter(Boolean);
 
@@ -167,7 +243,6 @@ function matchPattern(parts: string[], pattern: PathPattern): boolean {
     if (seg === "ZONE_ID" || seg === "ACCOUNT_ID") {
       if (!HEX_ID.test(part)) return false;
     } else if (seg === "WILDCARD") {
-      // Validate wildcard values contextually
       if (!validateWildcard(parts, i, part)) return false;
     } else {
       if (part !== seg) return false;
@@ -178,11 +253,9 @@ function matchPattern(parts: string[], pattern: PathPattern): boolean {
 }
 
 function validateWildcard(parts: string[], index: number, value: string): boolean {
-  // settings/{key}
   if (index >= 2 && parts[index - 1] === "settings") {
     return ALLOWED_SETTINGS_KEYS.has(value);
   }
-  // rulesets/phases/{phase}/entrypoint
   if (index >= 2 && parts[index - 1] === "phases") {
     return ALLOWED_RULESET_PHASES.has(value);
   }
