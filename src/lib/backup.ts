@@ -12,6 +12,7 @@ import path from "path";
 import { getDb } from "@/lib/db";
 import { getSchedulesFromDb, saveScheduleToDb, deleteScheduleFromDb } from "@/lib/data-store";
 import type { ScheduleConfig } from "@/types/email";
+import { VALID_REPORT_TYPES } from "@/types/email";
 
 // =============================================================================
 // Types
@@ -133,6 +134,13 @@ export function restoreConfigFromJson(data: BackupData, merge: boolean = false):
 function validateSchedule(s: ScheduleConfig): void {
   if (!s.id || typeof s.id !== "string") throw new Error("missing or invalid id");
   if (!s.reportType || typeof s.reportType !== "string") throw new Error("missing reportType");
+  if (!VALID_REPORT_TYPES.has(s.reportType)) throw new Error(`invalid reportType: ${s.reportType}`);
+  if (s.reportTypes) {
+    if (!Array.isArray(s.reportTypes)) throw new Error("reportTypes must be an array");
+    for (const rt of s.reportTypes) {
+      if (!VALID_REPORT_TYPES.has(rt)) throw new Error(`invalid reportType in reportTypes: ${rt}`);
+    }
+  }
   if (!s.cronExpression || typeof s.cronExpression !== "string") throw new Error("missing cronExpression");
   if (!Array.isArray(s.recipients) || s.recipients.length === 0) throw new Error("missing recipients");
   if (!s.zoneId || typeof s.zoneId !== "string") throw new Error("missing zoneId");

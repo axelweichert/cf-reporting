@@ -1,6 +1,6 @@
 import { getAuthenticatedSession, validateOrigin, requireOperator } from "@/lib/auth-helpers";
 import type { ScheduleFrequency, ReportType, ReportFormat } from "@/types/email";
-import { ACCOUNT_SCOPED_REPORTS } from "@/types/email";
+import { ACCOUNT_SCOPED_REPORTS, VALID_REPORT_TYPES } from "@/types/email";
 import { NextRequest } from "next/server";
 
 function buildCronExpression(frequency: ScheduleFrequency, hour: number, minute: number, dayOfWeek?: number, dayOfMonth?: number): string {
@@ -71,6 +71,17 @@ export async function POST(request: NextRequest) {
 
     if (!body.reportType || !body.frequency || body.hour == null || !body.recipients?.length) {
       return Response.json({ error: "Missing required fields" }, { status: 400 });
+    }
+
+    if (!VALID_REPORT_TYPES.has(body.reportType)) {
+      return Response.json({ error: `Invalid report type: ${body.reportType}` }, { status: 400 });
+    }
+    if (body.reportTypes) {
+      for (const rt of body.reportTypes) {
+        if (!VALID_REPORT_TYPES.has(rt)) {
+          return Response.json({ error: `Invalid report type: ${rt}` }, { status: 400 });
+        }
+      }
     }
 
     const isAccountScoped = ACCOUNT_SCOPED_REPORTS.includes(body.reportType);
@@ -183,6 +194,17 @@ export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json() as Partial<CreateScheduleBody> & { id: string; enabled?: boolean };
     if (!body.id) return Response.json({ error: "Missing schedule ID" }, { status: 400 });
+
+    if (body.reportType !== undefined && !VALID_REPORT_TYPES.has(body.reportType)) {
+      return Response.json({ error: `Invalid report type: ${body.reportType}` }, { status: 400 });
+    }
+    if (body.reportTypes) {
+      for (const rt of body.reportTypes) {
+        if (!VALID_REPORT_TYPES.has(rt)) {
+          return Response.json({ error: `Invalid report type: ${rt}` }, { status: 400 });
+        }
+      }
+    }
 
     // Rebuild cron expression if any time fields changed
     const update: Record<string, unknown> = {};
