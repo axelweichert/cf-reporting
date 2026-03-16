@@ -23,6 +23,7 @@ services:
       - SMTP_FROM=${SMTP_FROM:-}
       - SMTP_SECURITY=${SMTP_SECURITY:-starttls}
       - APP_PASSWORD=${APP_PASSWORD:-}
+      - VIEWER_PASSWORD=${VIEWER_PASSWORD:-}
       - SECURE_COOKIES=true
       - TRUSTED_PROXY=true
       # Data collection settings (optional)

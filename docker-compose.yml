@@ -18,6 +18,8 @@ services:
       - SMTP_SECURITY=${SMTP_SECURITY:-starttls}
       # Optional: protect the site with a password (required when env tokens are set)
       - APP_PASSWORD=${APP_PASSWORD:-}
+      # Optional: separate read-only viewer password (shows role selector on login)
+      - VIEWER_PASSWORD=${VIEWER_PASSWORD:-}
       # Set to "true" when behind a trusted reverse proxy
       - TRUSTED_PROXY=${TRUSTED_PROXY:-}
       # Set to "true" for HTTPS deployments
