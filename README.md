@@ -13,10 +13,11 @@ Open-source, self-hosted reporting dashboard for Cloudflare. Authenticate with y
 - **Data History** – Browse collected data, view collection run logs, and toggle between live API data and stored history with a freshness indicator
 - **Backup & Restore** – Export/import schedules as JSON, download the full SQLite database, or push backups to Cloudflare R2
 - **Two Operating Modes** – Explore (browser token, no persistence) and Managed (env token, persistent schedules, startup validation)
+- **Role-Based Access Control** – Optional Viewer role with a separate password. Viewers can browse dashboards and export reports but cannot manage schedules, trigger collection, or access backup/restore
 - **Graceful Degradation** – Adapts to your token's permissions; unavailable reports show which permissions are needed
 - **Privacy First** – API tokens are stored in encrypted httpOnly cookies, never persisted to disk or logged
 - **Dark / Light Mode** – Dark by default (matches Cloudflare dashboard aesthetic), toggle with one click
-- **Security Hardened** – CSRF protection, rate-limited login, constant-time password comparison, encrypted session cookies, security headers (X-Frame-Options, HSTS, Referrer-Policy)
+- **Security Hardened** – CSRF protection, rate-limited login, constant-time password comparison, encrypted session cookies, security headers, AST-validated GraphQL proxy, allowlisted REST paths
 
 ## Quick Start
 
@@ -68,6 +69,33 @@ No env token set. Users enter their own token in the browser. No persistence, no
 
 Managed mode enables persistent email schedules, background data collection, and scheduled report delivery.
 
+## Roles
+
+In managed mode, cf-reporting supports two roles with separate passwords:
+
+| Role | Password | Access |
+|---|---|---|
+| **Operator** | `APP_PASSWORD` | Full access – dashboards, settings, schedules, data collection, backup/restore |
+| **Viewer** | `VIEWER_PASSWORD` | Read-only – browse dashboards, export PDF/HTML, view live and historic data |
+
+When `VIEWER_PASSWORD` is set, the login page shows a role selector dropdown. When it is not set, the login page works as before with a single password field (operator role assumed).
+
+### What viewers can do
+
+- Browse all 15 report pages and the executive report
+- Export reports as PDF or HTML
+- Toggle between live and historic data
+- Switch accounts, zones, and time ranges
+
+### What viewers cannot do
+
+- Access Settings, Data History, or Backup & Restore
+- Create, edit, or delete email schedules
+- Trigger data collection runs
+- Send test emails or test SMTP connections
+- Download or wipe the database
+- Query arbitrary Cloudflare API endpoints – the proxy validates viewer requests against an AST-parsed GraphQL allowlist and a REST path allowlist
+
 ## Reports
 
 | Category | Report | Permission | Description |
@@ -98,7 +126,7 @@ The built-in background collector periodically fetches data from the Cloudflare 
 - **Schedule** – Configurable via `COLLECTION_SCHEDULE` (default: every 6 hours)
 - **Retention** – Configurable via `DATA_RETENTION_DAYS` (default: 365 days)
 - **Storage** – Mount `/app/data` as a Docker volume for persistence
-- **Manual trigger** – Start a collection run on demand from the Settings page
+- **Manual trigger** – Start a collection run on demand from the Settings page (operator only)
 - **Run history** – View success/error/skipped counts per scope and report type
 - **Data freshness** – When viewing historic data, the filter bar shows how recently data was collected (e.g. "Updated 5m ago")
 
@@ -109,26 +137,43 @@ Toggle between live API data and stored historical data on any report page.
 Send reports automatically via email on a daily, weekly, or monthly schedule.
 
 1. Configure SMTP via environment variables (SMTP_HOST, SMTP_USER, SMTP_PASS)
-2. Create schedules in the Settings page – pick a report type, time range, frequency, and up to 10 recipients
+2. Create schedules in the Settings page (operator only) – pick a report type, time range, frequency, and up to 10 recipients
 3. Reports are rendered server-side and delivered as styled HTML emails
 4. Schedules are persisted in SQLite and survive container restarts
 
 The Settings UI supports one-shot SMTP testing but scheduled delivery always uses the SMTP_* env vars. Both `CF_API_TOKEN` and `CF_ACCOUNT_TOKEN` are supported for scheduled delivery.
 
-All 16 report types are supported for email scheduling, including zone-scoped reports (Traffic, Security, DDoS, Bots, Performance, DNS, SSL/TLS, API Shield, Origin Health, Executive) and account-scoped Zero Trust reports (ZT Summary, Gateway DNS & HTTP, Gateway Network, Access Audit, Shadow IT, Devices & Users). Up to 20 active schedules per instance.
+All 16 report types are supported for email scheduling, including zone-scoped reports (Traffic, Security, DDoS, Bots, Performance, DNS, SSL/TLS, API Shield, Origin Health, Executive) and account-scoped Zero Trust reports (ZT Summary, Gateway DNS & HTTP, Gateway Network, Access Audit, Shadow IT, Devices & Users). Up to 20 active schedules per instance. Report types are whitelist-validated on create, update, and restore.
 
 ## Backup & Restore
 
-Export and restore your configuration from the Settings page:
+Export and restore your configuration from the Settings page (operator only):
 
 - **Config export** – Download schedules and metadata as a JSON file
 - **Database export** – Download the full SQLite database (includes collected data)
 - **Config restore** – Upload a previously exported JSON file to restore schedules
 - **R2 backup** – Push config or database backups directly to a Cloudflare R2 bucket (requires R2_* env vars)
 
-## Security Headers
+## Security
 
-All responses include the following headers:
+### Authentication & Authorization
+
+- **Site password** – Required in managed mode. Constant-time comparison, rate-limited (10 attempts per 15 minutes per IP)
+- **Role-based access** – Operator and Viewer roles with separate passwords and server-side enforcement
+- **Session cookies** – Encrypted via iron-session, httpOnly, SameSite=lax, optional Secure flag
+- **CSRF protection** – Origin header validation on all mutating requests
+
+### Cloudflare API Proxy
+
+The Cloudflare API proxy restricts viewer access:
+
+- **GraphQL** – Queries are parsed into an AST using the `graphql` package. Only `query` operations targeting `viewer` → `zones`/`accounts` → allowlisted analytics datasets are permitted. Mutations, subscriptions, introspection, and fragments are rejected
+- **REST** – GET requests are validated against a path pattern allowlist covering the exact endpoints the report UI uses, with hex-ID and settings-key validation
+- **Operators** – Unrestricted proxy access (current behavior)
+
+### Response Headers
+
+All responses include:
 
 - `X-Content-Type-Options: nosniff`
 - `X-Frame-Options: DENY`
@@ -213,7 +258,8 @@ Both **User API tokens** (`CF_API_TOKEN`) and **Account API tokens** (`CF_ACCOUN
 |---|---|---|
 | `CF_API_TOKEN` | Pre-configured Cloudflare User API token | – |
 | `CF_ACCOUNT_TOKEN` | Pre-configured Cloudflare Account API token (alternative) | – |
-| `APP_PASSWORD` | Site password – **required** in managed mode (when either token env var is set) | – |
+| `APP_PASSWORD` | Operator password – **required** in managed mode | – |
+| `VIEWER_PASSWORD` | Viewer password – enables read-only role with role selector on login | – |
 | `SESSION_SECRET` | 32+ char secret for encrypting session cookies – **required** in managed mode | Auto-generated dev secret |
 | `TRUSTED_PROXY` | Set to `true` when behind a reverse proxy to trust `X-Forwarded-For` | `false` |
 | `SECURE_COOKIES` | Set to `true` for HTTPS deployments (marks cookies as Secure, enables HSTS) | `false` |
@@ -236,7 +282,9 @@ Both **User API tokens** (`CF_API_TOKEN`) and **Account API tokens** (`CF_ACCOUN
 | `SMTP_USER` | SMTP authentication username | – |
 | `SMTP_PASS` | SMTP authentication password | – |
 | `SMTP_FROM` | From address for outgoing emails | – |
-| `SMTP_SECURE` | Use TLS/SSL | `true` |
+| `SMTP_SECURITY` | Connection security: `starttls` (port 587), `tls` (port 465), or `none` | `starttls` |
+
+Legacy `SMTP_SECURE=true/false` is still supported for backward compatibility (`true` maps to `tls`, `false` maps to `starttls`).
 
 The Settings UI supports one-shot SMTP testing but scheduled delivery always uses the SMTP_* env vars.
 
@@ -267,9 +315,10 @@ The Settings UI supports one-shot SMTP testing but scheduled delivery always use
 - [Recharts 3](https://recharts.org/) – time-series, donut, bar charts
 - [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) – local data storage
 - [iron-session](https://github.com/vvo/iron-session) – encrypted session cookies
+- [graphql](https://github.com/graphql/graphql-js) – AST parsing for viewer proxy validation
 - [Playwright](https://playwright.dev/) – server-side PDF rendering
 - [nodemailer](https://nodemailer.com/) – email delivery
-- [node-cron](https://github.com/node-cron/node-cron) – scheduled collection & email
+- [croner](https://github.com/Hexagon/croner) – scheduled collection & email
 - [@aws-sdk/client-s3](https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/) – R2 backup (S3-compatible)
 - [Lucide React](https://lucide.dev/) – icons
 
@@ -281,12 +330,12 @@ Browser → Next.js API Routes → Cloudflare API
             httpOnly cookie)
                   ↓
             SQLite (collected data + schedules)
-            node-cron (scheduler + collector)
+            croner (scheduler + collector)
             Playwright (PDF export)
             R2 (optional backup)
 ```
 
-Browser-initiated Cloudflare API calls are proxied through server-side API routes – the token is read from the encrypted session cookie and never included in client-side responses. Server-side features (data collector, email scheduler, token verification) call the Cloudflare API directly. In Explore mode, the user enters their token in the browser once; it is sent to the server via POST and stored in an encrypted httpOnly cookie for the session. No external database – the app runs as a single container with SQLite for optional data persistence.
+Browser-initiated Cloudflare API calls are proxied through server-side API routes – the token is read from the encrypted session cookie and never included in client-side responses. For viewers, the proxy validates GraphQL queries against an AST-parsed dataset allowlist and REST requests against a path pattern allowlist. Server-side features (data collector, email scheduler, token verification) call the Cloudflare API directly. In Explore mode, the user enters their token in the browser once; it is sent to the server via POST and stored in an encrypted httpOnly cookie for the session. No external database – the app runs as a single container with SQLite for optional data persistence.
 
 ## License
 
