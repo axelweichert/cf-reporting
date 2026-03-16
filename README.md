@@ -52,11 +52,13 @@ Open `http://localhost:3000`.
 
 ## Operating Modes
 
-cf-reporting has two operating modes, determined automatically by whether a Cloudflare API token environment variable is set.
+cf-reporting has two operating modes, determined by whether a Cloudflare API token environment variable is set. `APP_PASSWORD` can be used independently in either mode to protect the instance.
 
 ### Explore mode
 
-No env token set. Users enter their own token in the browser. No persistence, no site password, no startup validation. Ideal for quick ad-hoc reporting.
+No env token set. Users enter their own token in the browser. No persistence, no startup validation. Ideal for quick ad-hoc reporting.
+
+`APP_PASSWORD` is optional in Explore mode but still enforced if set – useful for restricting who can access the instance even without a pre-configured token. When `VIEWER_PASSWORD` is also set, the role selector appears on the login page.
 
 ### Managed mode
 
@@ -137,13 +139,13 @@ Toggle between live API data and stored historical data on any report page.
 Send reports automatically via email on a daily, weekly, or monthly schedule.
 
 1. Configure SMTP via environment variables (SMTP_HOST, SMTP_USER, SMTP_PASS)
-2. Create schedules in the Settings page (operator only) – pick a report type, time range, frequency, and up to 10 recipients
-3. Reports are rendered server-side and delivered as styled HTML emails
+2. Create schedules in the Settings page (operator only) – pick report types, time range, frequency, format, and up to 10 recipients
+3. Reports are rendered server-side and sent as email attachments in the chosen format: HTML, PDF, or both
 4. Schedules are persisted in SQLite and survive container restarts
 
 The Settings UI supports one-shot SMTP testing but scheduled delivery always uses the SMTP_* env vars. Both `CF_API_TOKEN` and `CF_ACCOUNT_TOKEN` are supported for scheduled delivery.
 
-All 16 report types are supported for email scheduling, including zone-scoped reports (Traffic, Security, DDoS, Bots, Performance, DNS, SSL/TLS, API Shield, Origin Health, Executive) and account-scoped Zero Trust reports (ZT Summary, Gateway DNS & HTTP, Gateway Network, Access Audit, Shadow IT, Devices & Users). Up to 20 active schedules per instance. Report types are whitelist-validated on create, update, and restore.
+All 16 report types are supported for email scheduling, including zone-scoped reports (Traffic, Security, DDoS, Bots, Performance, DNS, SSL/TLS, API Shield, Origin Health, Executive) and account-scoped Zero Trust reports (ZT Summary, Gateway DNS & HTTP, Gateway Network, Access Audit, Shadow IT, Devices & Users). Up to 20 schedules per instance. Report types are whitelist-validated on create, update, and restore.
 
 ## Backup & Restore
 
