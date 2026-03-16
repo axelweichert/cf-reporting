@@ -86,7 +86,7 @@ const navGroups: NavGroup[] = [
   {
     label: "System",
     items: [
-      { label: "Data History", href: "/history", icon: <Database size={18} /> },
+      { label: "Data History", href: "/history", icon: <Database size={18} />, operatorOnly: true },
       { label: "Settings", href: "/settings", icon: <Settings size={18} />, operatorOnly: true },
     ],
   },

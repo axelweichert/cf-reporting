@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-helpers";
+import { requireAuth, requireOperator } from "@/lib/auth-helpers";
 import {
   getDataAvailability,
   getAggregateStats,
@@ -19,6 +19,9 @@ export async function GET(request: NextRequest) {
   if (!auth) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const operatorError = await requireOperator();
+  if (operatorError) return operatorError;
 
   const { searchParams } = request.nextUrl;
   const scopeId = searchParams.get("scopeId");

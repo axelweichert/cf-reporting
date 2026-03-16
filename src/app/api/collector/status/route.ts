@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-helpers";
+import { requireAuth, requireOperator } from "@/lib/auth-helpers";
 import { getCollectorStatus } from "@/lib/collector";
 import {
   getRecentCollectionRuns,
@@ -11,6 +11,9 @@ export async function GET() {
   if (!auth) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const operatorError = await requireOperator();
+  if (operatorError) return operatorError;
 
   const status = getCollectorStatus();
   const recentRuns = getRecentCollectionRuns(10);

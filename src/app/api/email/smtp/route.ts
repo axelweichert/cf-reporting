@@ -1,10 +1,13 @@
-import { getAuthenticatedSession } from "@/lib/auth-helpers";
+import { getAuthenticatedSession, requireOperator } from "@/lib/auth-helpers";
 import { getSmtpFromEnv } from "@/lib/email/smtp-client";
 
 /** GET: Return env SMTP status (no secrets exposed, no session SMTP) */
 export async function GET() {
   const session = await getAuthenticatedSession();
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  const operatorError = await requireOperator();
+  if (operatorError) return operatorError;
 
   const env = getSmtpFromEnv();
 

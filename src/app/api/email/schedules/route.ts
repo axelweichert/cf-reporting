@@ -21,6 +21,9 @@ export async function GET() {
   const session = await getAuthenticatedSession();
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
+  const operatorError = await requireOperator();
+  if (operatorError) return operatorError;
+
   try {
     const { getSchedules } = await import("@/lib/scheduler");
     return Response.json({ schedules: getSchedules() });

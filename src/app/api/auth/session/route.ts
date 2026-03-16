@@ -53,6 +53,15 @@ export async function POST(request: NextRequest) {
   const originError = validateOrigin(request);
   if (originError) return originError;
 
+  // Enforce site-auth gate: in password-protected deployments, callers must
+  // have passed the APP_PASSWORD login before submitting a CF token.
+  const preSession = await getIronSession<SessionData>(await cookies(), sessionOptions);
+  const hasEnvToken = !!(process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN);
+  const requireSiteAuth = !!(process.env.APP_PASSWORD || hasEnvToken);
+  if (requireSiteAuth && !preSession.siteAuthenticated) {
+    return Response.json({ error: "Site authentication required" }, { status: 401 });
+  }
+
   const { token, tokenType = "user" } = await request.json();
 
   if (!token || typeof token !== "string") {
