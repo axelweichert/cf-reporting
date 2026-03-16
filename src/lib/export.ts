@@ -73,8 +73,8 @@ export async function exportPDF(params: PdfExportParams): Promise<void> {
 }
 
 /**
- * Generate and download an HTML file via the server-side SingleFile endpoint.
- * Uses the same Playwright + SingleFile pipeline as scheduled email attachments.
+ * Generate and download a self-contained HTML file via the server-side export endpoint.
+ * Uses the same Playwright-based inliner as scheduled email attachments.
  */
 export async function exportHTML(params: PdfExportParams): Promise<void> {
   const controller = new AbortController();

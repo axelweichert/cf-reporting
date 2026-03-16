@@ -270,32 +270,9 @@ export async function generateHtml(opts: RenderOptions): Promise<Buffer> {
 
     await preparePage(page, opts, { forceLight: false, resizeToA4: false });
 
-    // Use SingleFile to capture a faithful self-contained HTML snapshot.
-    // SingleFile inlines all CSS, images (as data URIs), and fonts,
-    // producing a single HTML file that renders identically cross-browser.
-    const { script } = await import("@/lib/pdf/single-file-bundle.js");
-    await page.addScriptTag({ content: script });
-
-    const htmlContent = await page.evaluate(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sf = (window as any).singlefile;
-      const data = await sf.getPageData({
-        removeHiddenElements: false,
-        removeUnusedStyles: true,
-        removeUnusedFonts: true,
-        removeImports: true,
-        blockScripts: true,
-        blockVideos: true,
-        blockAudios: true,
-        compressHTML: false,
-        removeAlternativeFonts: true,
-        removeAlternativeMedias: true,
-        removeAlternativeImages: true,
-        groupDuplicateImages: true,
-        insertSingleFileComment: false,
-      });
-      return data.content as string;
-    });
+    // Capture self-contained HTML with all resources inlined as data URIs.
+    const { captureInlinedHtml } = await import("@/lib/pdf/html-inliner");
+    const htmlContent = await captureInlinedHtml(page);
 
     return Buffer.from(htmlContent, "utf-8");
   });
