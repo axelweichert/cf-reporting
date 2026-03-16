@@ -25,13 +25,14 @@ import {
   Database,
 } from "lucide-react";
 import { useState } from "react";
-import type { Permission } from "@/types/cloudflare";
+import type { Permission, UserRole } from "@/types/cloudflare";
 
 interface NavItem {
   label: string;
   href: string;
   icon: React.ReactNode;
   requiredPermission?: Permission;
+  operatorOnly?: boolean;
 }
 
 interface NavGroup {
@@ -86,7 +87,7 @@ const navGroups: NavGroup[] = [
     label: "System",
     items: [
       { label: "Data History", href: "/history", icon: <Database size={18} /> },
-      { label: "Settings", href: "/settings", icon: <Settings size={18} /> },
+      { label: "Settings", href: "/settings", icon: <Settings size={18} />, operatorOnly: true },
     ],
   },
 ];
@@ -94,9 +95,10 @@ const navGroups: NavGroup[] = [
 interface SidebarProps {
   collapsed: boolean;
   permissions: Permission[];
+  role: UserRole;
 }
 
-export default function Sidebar({ collapsed, permissions }: SidebarProps) {
+export default function Sidebar({ collapsed, permissions, role }: SidebarProps) {
   const pathname = usePathname();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
     new Set(navGroups.map((g) => g.label))
@@ -112,6 +114,7 @@ export default function Sidebar({ collapsed, permissions }: SidebarProps) {
   };
 
   const isVisible = (item: NavItem) => {
+    if (item.operatorOnly && role === "viewer") return false;
     if (!item.requiredPermission) return true;
     return permissions.includes(item.requiredPermission);
   };

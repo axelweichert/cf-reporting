@@ -17,7 +17,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
-import type { CloudflareAccount, CloudflareZone } from "@/types/cloudflare";
+import type { CloudflareAccount, CloudflareZone, UserRole } from "@/types/cloudflare";
 import { useState, useRef, useEffect } from "react";
 
 interface FilterBarProps {
@@ -25,6 +25,7 @@ interface FilterBarProps {
   zones: CloudflareZone[];
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
+  role: UserRole;
 }
 
 function formatAge(epochSeconds: number): string {
@@ -48,6 +49,7 @@ export default function FilterBar({
   zones,
   sidebarCollapsed,
   onToggleSidebar,
+  role,
 }: FilterBarProps) {
   const {
     selectedAccount,
@@ -379,6 +381,13 @@ export default function FilterBar({
 
         {/* Divider */}
         <div className="mx-1 h-6 w-px bg-zinc-700" />
+
+        {/* Role badge */}
+        {role === "viewer" && (
+          <span className="rounded-md bg-blue-500/10 px-2 py-1 text-xs font-medium text-blue-400 border border-blue-500/20">
+            Viewer
+          </span>
+        )}
 
         {/* Logout */}
         <button

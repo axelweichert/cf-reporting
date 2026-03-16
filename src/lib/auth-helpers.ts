@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { sessionOptions } from "@/lib/session";
-import type { SessionData } from "@/types/cloudflare";
+import type { SessionData, UserRole } from "@/types/cloudflare";
 import { NextRequest } from "next/server";
 
 /**
@@ -31,6 +31,11 @@ export function validateOrigin(request: NextRequest): Response | null {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
   return null;
+}
+
+/** Resolve the effective role from a session (defaults to "operator" for backward compat). */
+export function getSessionRole(session: SessionData): UserRole {
+  return session.role === "viewer" ? "viewer" : "operator";
 }
 
 /**
@@ -69,4 +74,16 @@ export async function requireAuth(): Promise<{ session: SessionData; token: stri
   if (!token) return null;
 
   return { session, token };
+}
+
+/**
+ * Require the "operator" role. Returns a 403 response if the session belongs to a viewer.
+ * Call this after requireAuth() or getAuthenticatedSession() on admin-only endpoints.
+ */
+export async function requireOperator(): Promise<Response | null> {
+  const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
+  if (getSessionRole(session) !== "operator") {
+    return Response.json({ error: "Forbidden: operator access required" }, { status: 403 });
+  }
+  return null;
 }

@@ -1,4 +1,4 @@
-import { getAuthenticatedSession, validateOrigin } from "@/lib/auth-helpers";
+import { getAuthenticatedSession, validateOrigin, requireOperator } from "@/lib/auth-helpers";
 import type { ScheduleFrequency, ReportType, ReportFormat } from "@/types/email";
 import { ACCOUNT_SCOPED_REPORTS } from "@/types/email";
 import { NextRequest } from "next/server";
@@ -55,6 +55,9 @@ export async function POST(request: NextRequest) {
 
   const session = await getAuthenticatedSession();
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  const operatorError = await requireOperator();
+  if (operatorError) return operatorError;
 
   if (!process.env.CF_API_TOKEN && !process.env.CF_ACCOUNT_TOKEN) {
     return Response.json(
@@ -149,6 +152,9 @@ export async function DELETE(request: NextRequest) {
   const session = await getAuthenticatedSession();
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
+  const operatorError = await requireOperator();
+  if (operatorError) return operatorError;
+
   const url = new URL(request.url);
   const id = url.searchParams.get("id");
   if (!id) return Response.json({ error: "Missing schedule ID" }, { status: 400 });
@@ -170,6 +176,9 @@ export async function PATCH(request: NextRequest) {
 
   const session = await getAuthenticatedSession();
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  const operatorError = await requireOperator();
+  if (operatorError) return operatorError;
 
   try {
     const body = await request.json() as Partial<CreateScheduleBody> & { id: string; enabled?: boolean };

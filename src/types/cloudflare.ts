@@ -61,6 +61,8 @@ export interface SessionCapabilities {
 
 export type TokenType = "user" | "account";
 
+export type UserRole = "operator" | "viewer";
+
 export interface SessionData {
   token?: string;
   tokenType?: TokenType;
@@ -68,4 +70,6 @@ export interface SessionData {
   tokenSource?: "env" | "browser";
   /** Set to true when the user has authenticated via APP_PASSWORD */
   siteAuthenticated?: boolean;
+  /** Role assigned at login – defaults to "operator" for backward compatibility */
+  role?: UserRole;
 }

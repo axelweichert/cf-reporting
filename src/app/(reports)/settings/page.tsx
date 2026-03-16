@@ -151,7 +151,7 @@ function scheduleToFormState(s: ScheduleConfig): ScheduleFormState {
 }
 
 export default function SettingsPage() {
-  const { capabilities } = useAuth();
+  const { capabilities, role } = useAuth();
   const zones = capabilities?.zones || [];
   const accounts = capabilities?.accounts || [];
 
@@ -506,6 +506,15 @@ export default function SettingsPage() {
     }
     setWipeLoading(false);
   };
+
+  if (role === "viewer") {
+    return (
+      <div className="mx-auto max-w-4xl py-12 text-center">
+        <h1 className="text-2xl font-bold text-white">Settings</h1>
+        <p className="mt-2 text-zinc-400">Settings are only available to operators.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">

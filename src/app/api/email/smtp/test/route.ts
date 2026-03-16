@@ -1,4 +1,4 @@
-import { getAuthenticatedSession, validateOrigin } from "@/lib/auth-helpers";
+import { getAuthenticatedSession, validateOrigin, requireOperator } from "@/lib/auth-helpers";
 import { testSmtpConnection, sendTestEmail, getSmtpFromEnv } from "@/lib/email/smtp-client";
 import type { InlineSmtpConfig } from "@/types/email";
 import { NextRequest } from "next/server";
@@ -10,6 +10,9 @@ export async function POST(request: NextRequest) {
 
   const session = await getAuthenticatedSession();
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  const operatorError = await requireOperator();
+  if (operatorError) return operatorError;
 
   try {
     const body = await request.json() as { to?: string; smtp?: InlineSmtpConfig };

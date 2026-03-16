@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { requireAuth, validateOrigin } from "@/lib/auth-helpers";
+import { requireAuth, validateOrigin, requireOperator } from "@/lib/auth-helpers";
 import {
   exportConfigAsJson,
   getDbFilePath,
@@ -19,6 +19,9 @@ import fs from "fs";
 export async function GET(request: NextRequest) {
   const auth = await requireAuth();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const operatorError = await requireOperator();
+  if (operatorError) return operatorError;
 
   const type = request.nextUrl.searchParams.get("type") || "config";
 
@@ -71,6 +74,9 @@ export async function POST(request: NextRequest) {
 
   const auth = await requireAuth();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const operatorError = await requireOperator();
+  if (operatorError) return operatorError;
 
   const body = await request.json();
   const { action, type = "config" } = body as { action: string; type?: string };

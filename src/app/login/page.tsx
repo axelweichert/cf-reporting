@@ -1,17 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Shield, Loader2, AlertCircle, Eye, EyeOff, Sun, Moon } from "lucide-react";
 import { useTheme } from "@/lib/theme";
+import type { UserRole } from "@/types/cloudflare";
 
 export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [role, setRole] = useState<UserRole>("operator");
+  const [viewerEnabled, setViewerEnabled] = useState(false);
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
+
+  // Check if viewer role is available
+  useEffect(() => {
+    fetch("/api/auth/login")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.viewerEnabled) setViewerEnabled(true);
+      })
+      .catch(() => {});
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -24,7 +37,7 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ password, role }),
       });
 
       const data = await res.json();
@@ -67,6 +80,25 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Role selector – only shown when VIEWER_PASSWORD is configured */}
+          {viewerEnabled && (
+            <div>
+              <label htmlFor="role" className="mb-1.5 block text-sm font-semibold text-zinc-100">
+                Sign in as
+              </label>
+              <select
+                id="role"
+                value={role}
+                onChange={(e) => setRole(e.target.value as UserRole)}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-base text-zinc-100 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                disabled={loading}
+              >
+                <option value="operator">Operator – Full access</option>
+                <option value="viewer">Viewer – Read-only</option>
+              </select>
+            </div>
+          )}
+
           <div>
             <label htmlFor="password" className="mb-1.5 block text-sm font-semibold text-zinc-100">
               Password
@@ -77,7 +109,7 @@ export default function LoginPage() {
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter site password"
+                placeholder={viewerEnabled && role === "viewer" ? "Enter viewer password" : "Enter site password"}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 pr-10 text-base text-zinc-100 placeholder:text-zinc-500 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
                 disabled={loading}
                 autoFocus

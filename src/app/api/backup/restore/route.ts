@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { requireAuth, validateOrigin } from "@/lib/auth-helpers";
+import { requireAuth, validateOrigin, requireOperator } from "@/lib/auth-helpers";
 import { restoreConfigFromJson } from "@/lib/backup";
 import type { BackupData } from "@/lib/backup";
 
@@ -17,6 +17,9 @@ export async function POST(request: NextRequest) {
 
   const auth = await requireAuth();
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const operatorError = await requireOperator();
+  if (operatorError) return operatorError;
 
   let body: { data?: BackupData; merge?: boolean };
   try {

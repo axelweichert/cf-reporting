@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, validateOrigin } from "@/lib/auth-helpers";
+import { requireAuth, validateOrigin, requireOperator } from "@/lib/auth-helpers";
 import { runCollection, getCollectorStatus } from "@/lib/collector";
 
 export async function POST(request: NextRequest) {
@@ -10,6 +10,9 @@ export async function POST(request: NextRequest) {
   if (!auth) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const operatorError = await requireOperator();
+  if (operatorError) return operatorError;
 
   const status = getCollectorStatus();
   if (!status.enabled) {

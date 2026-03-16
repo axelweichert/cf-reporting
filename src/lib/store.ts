@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback, useEffect, createElement, type ReactNode } from "react";
-import type { Permission, CloudflareAccount, CloudflareZone, TokenCapabilities } from "@/types/cloudflare";
+import type { Permission, CloudflareAccount, CloudflareZone, TokenCapabilities, UserRole } from "@/types/cloudflare";
 
 // ---- Session storage helpers ----
 const STORAGE_KEY = "cf-reporting-filters";
@@ -149,8 +149,9 @@ export function FilterProvider({ children }: { children: ReactNode }) {
 interface AuthState {
   authenticated: boolean;
   capabilities: TokenCapabilities | null;
+  role: UserRole;
   loading: boolean;
-  setAuth: (auth: boolean, capabilities: TokenCapabilities | null) => void;
+  setAuth: (auth: boolean, capabilities: TokenCapabilities | null, role?: UserRole) => void;
   setLoading: (loading: boolean) => void;
   logout: () => Promise<void>;
 }
@@ -166,21 +167,24 @@ export function useAuth(): AuthState {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [authenticated, setAuthenticated] = useState(false);
   const [capabilities, setCapabilities] = useState<TokenCapabilities | null>(null);
+  const [role, setRole] = useState<UserRole>("operator");
   const [loading, setLoading] = useState(true);
 
-  const setAuth = useCallback((auth: boolean, caps: TokenCapabilities | null) => {
+  const setAuth = useCallback((auth: boolean, caps: TokenCapabilities | null, r?: UserRole) => {
     setAuthenticated(auth);
     setCapabilities(caps);
+    if (r) setRole(r);
   }, []);
 
   const logout = useCallback(async () => {
     await fetch("/api/auth/session", { method: "DELETE" });
     setAuthenticated(false);
     setCapabilities(null);
+    setRole("operator");
   }, []);
 
   return createElement(AuthContext.Provider, {
-    value: { authenticated, capabilities, loading, setAuth, setLoading, logout },
+    value: { authenticated, capabilities, role, loading, setAuth, setLoading, logout },
   }, children);
 }
 

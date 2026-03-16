@@ -45,6 +45,7 @@ export async function GET() {
     authenticated: true,
     tokenSource: session.tokenSource || "browser",
     capabilities: session.capabilities || null,
+    role: session.role || "operator",
   });
 }
 

@@ -1,4 +1,4 @@
-import { requireAuth, validateOrigin } from "@/lib/auth-helpers";
+import { requireAuth, validateOrigin, requireOperator } from "@/lib/auth-helpers";
 import type { ReportType, InlineSmtpConfig } from "@/types/email";
 import { ACCOUNT_SCOPED_REPORTS } from "@/types/email";
 import { sendReportEmail, getSmtpFromEnv } from "@/lib/email/smtp-client";
@@ -43,6 +43,9 @@ export async function POST(request: NextRequest) {
 
   const auth = await requireAuth();
   if (!auth) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  const operatorError = await requireOperator();
+  if (operatorError) return operatorError;
 
   const { token } = auth;
 

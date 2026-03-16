@@ -1,13 +1,13 @@
 import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { sessionOptions } from "@/lib/session";
-import type { SessionData } from "@/types/cloudflare";
+import type { SessionData, UserRole } from "@/types/cloudflare";
 import { validateOrigin } from "@/lib/auth-helpers";
 import { NextRequest } from "next/server";
 import { timingSafeEqual, createHash } from "crypto";
 
 /**
- * APP_PASSWORD login endpoint.
+ * APP_PASSWORD / VIEWER_PASSWORD login endpoint.
  *
  * Security measures:
  * - Constant-time password comparison (prevents timing attacks)
@@ -81,11 +81,12 @@ function secureCompare(input: string, expected: string): boolean {
 /** GET: Check if APP_PASSWORD is required and if user is authenticated */
 export async function GET() {
   const appPassword = process.env.APP_PASSWORD;
+  const viewerPassword = process.env.VIEWER_PASSWORD;
   const hasEnvToken = !!(process.env.CF_API_TOKEN || process.env.CF_ACCOUNT_TOKEN);
 
   // Require site auth when APP_PASSWORD is set OR env tokens are present
   if (!appPassword && !hasEnvToken) {
-    return Response.json({ required: false, authenticated: true });
+    return Response.json({ required: false, authenticated: true, viewerEnabled: false });
   }
 
   if (!appPassword && hasEnvToken) {
@@ -94,6 +95,7 @@ export async function GET() {
       required: true,
       authenticated: false,
       misconfigured: true,
+      viewerEnabled: false,
       error: "APP_PASSWORD must be set when using CF_API_TOKEN or CF_ACCOUNT_TOKEN environment variables.",
     });
   }
@@ -102,10 +104,12 @@ export async function GET() {
   return Response.json({
     required: true,
     authenticated: session.siteAuthenticated === true,
+    viewerEnabled: !!viewerPassword,
+    role: session.role || "operator",
   });
 }
 
-/** POST: Authenticate with APP_PASSWORD */
+/** POST: Authenticate with APP_PASSWORD or VIEWER_PASSWORD */
 export async function POST(request: NextRequest) {
   const originError = validateOrigin(request);
   if (originError) return originError;
@@ -115,6 +119,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "APP_PASSWORD must be configured when using environment tokens" }, { status: 400 });
   }
 
+  const viewerPassword = process.env.VIEWER_PASSWORD;
   const ip = getClientIp(request);
 
   // Check rate limit
@@ -128,21 +133,31 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const password = body?.password;
+    const requestedRole: UserRole = body?.role === "viewer" ? "viewer" : "operator";
 
     if (!password || typeof password !== "string") {
       return Response.json({ error: "Password is required" }, { status: 400 });
     }
 
-    if (!secureCompare(password, appPassword)) {
+    // Validate password against the correct env var for the requested role
+    let authenticated = false;
+    if (requestedRole === "viewer" && viewerPassword) {
+      authenticated = secureCompare(password, viewerPassword);
+    } else if (requestedRole === "operator") {
+      authenticated = secureCompare(password, appPassword);
+    }
+
+    if (!authenticated) {
       return Response.json({ error: "Invalid password" }, { status: 401 });
     }
 
     // Success – set session flag (don't reset rate limit to prevent abuse)
     const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
     session.siteAuthenticated = true;
+    session.role = requestedRole;
     await session.save();
 
-    return Response.json({ success: true });
+    return Response.json({ success: true, role: requestedRole });
   } catch {
     return Response.json({ error: "Invalid request" }, { status: 400 });
   }
