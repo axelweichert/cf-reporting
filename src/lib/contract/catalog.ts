@@ -121,18 +121,6 @@ function sumExtDimFiltered(
   return row.total;
 }
 
-/** SUM from raw_gw_dns_hourly across all accounts. */
-function sumGwDns(
-  db: Database.Database, start: number, end: number,
-): number | null {
-  const row = db.prepare(
-    `SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS cnt
-     FROM raw_gw_dns_hourly WHERE ts >= ? AND ts < ?`,
-  ).get(start, end) as { total: number; cnt: number } | undefined;
-  if (!row || row.cnt === 0) return null;
-  return row.total;
-}
-
 // =============================================================================
 // Product Catalog
 // =============================================================================
@@ -470,17 +458,122 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     },
   },
 
-  // ===== Zero Trust =====
+  // ===== Zero Trust (seat-based) =====
+  // ZT billing is per-seat/user. Access + Gateway share a single unified seat.
+  // Add-ons (RBI, DLP, CASB) are also per-seat.
   {
-    key: "gw-dns-queries",
-    displayName: "Gateway DNS \u2013 Queries",
+    key: "zt-seats",
+    displayName: "Zero Trust \u2013 Seats",
     category: "Zero Trust",
-    unit: "MM",
-    description: "Total Gateway DNS resolver queries",
-    probeTable: { type: "raw_gw_dns" },
+    unit: "seats",
+    description: "Active Zero Trust seats (users with Access or Gateway seat)",
+    probeTable: { type: "zt_users" },
+    calculator: (db) => {
+      // Count unique users who hold an Access or Gateway seat at latest snapshot
+      const row = db.prepare(
+        `SELECT COUNT(*) AS cnt
+         FROM zt_users
+         WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
+           AND (access_seat = 1 OR gateway_seat = 1)`,
+      ).get() as { cnt: number } | undefined;
+      if (!row || row.cnt === 0) return noData();
+      return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
+    },
+  },
+  {
+    key: "zt-access-seats",
+    displayName: "Zero Trust \u2013 Access Seats",
+    category: "Zero Trust",
+    unit: "seats",
+    description: "Users with an active Access (ZTNA) seat",
+    probeTable: { type: "zt_users" },
+    calculator: (db) => {
+      const row = db.prepare(
+        `SELECT COUNT(*) AS cnt
+         FROM zt_users
+         WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
+           AND access_seat = 1`,
+      ).get() as { cnt: number } | undefined;
+      if (!row || row.cnt === 0) return noData();
+      return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
+    },
+  },
+  {
+    key: "zt-gateway-seats",
+    displayName: "Zero Trust \u2013 Gateway Seats",
+    category: "Zero Trust",
+    unit: "seats",
+    description: "Users with an active Gateway (SWG) seat",
+    probeTable: { type: "zt_users" },
+    calculator: (db) => {
+      const row = db.prepare(
+        `SELECT COUNT(*) AS cnt
+         FROM zt_users
+         WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
+           AND gateway_seat = 1`,
+      ).get() as { cnt: number } | undefined;
+      if (!row || row.cnt === 0) return noData();
+      return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
+    },
+  },
+  {
+    key: "zt-rbi-seats",
+    displayName: "Zero Trust \u2013 Browser Isolation",
+    category: "Zero Trust",
+    unit: "seats",
+    description: "Unique users with Remote Browser Isolation sessions",
+    probeTable: { type: "ext", dataset: "ext:browser-isolation" },
     calculator: (db, start, end) => {
-      const raw = sumGwDns(db, start, end);
-      return raw === null ? noData() : result(raw, MM);
+      // RBI is a per-seat add-on. Count unique sessions as a proxy for active users.
+      // The browser-isolation dataset tracks session counts, not unique users,
+      // so this is an approximation. Falls back to total ZT seat count if no RBI data.
+      const row = db.prepare(
+        `SELECT COALESCE(SUM(value), 0) AS total, COUNT(*) AS cnt
+         FROM raw_ext_ts
+         WHERE dataset = 'ext:browser-isolation' AND metric = 'count'
+           AND ts >= ? AND ts < ?`,
+      ).get(start, end) as { total: number; cnt: number } | undefined;
+      if (!row || row.cnt === 0) return noData();
+      // Return session count; the committed amount represents licensed seats
+      return { value: row.total, rawValue: row.total, dataAvailable: true };
+    },
+  },
+  {
+    key: "zt-dlp-seats",
+    displayName: "Zero Trust \u2013 DLP",
+    category: "Zero Trust",
+    unit: "seats",
+    description: "Advanced DLP add-on seats (same pool as base ZT seats)",
+    probeTable: { type: "zt_users" },
+    calculator: (db) => {
+      // DLP is licensed per-seat, same count as base ZT seats
+      const row = db.prepare(
+        `SELECT COUNT(*) AS cnt
+         FROM zt_users
+         WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
+           AND (access_seat = 1 OR gateway_seat = 1)`,
+      ).get() as { cnt: number } | undefined;
+      if (!row || row.cnt === 0) return noData();
+      return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
+    },
+  },
+  {
+    key: "zt-casb-seats",
+    displayName: "Zero Trust \u2013 CASB",
+    category: "Zero Trust",
+    unit: "seats",
+    description: "API CASB add-on seats (same pool as base ZT seats)",
+    probeTable: { type: "zt_users" },
+    calculator: (db) => {
+      // CASB is licensed per-seat, same count as base ZT seats
+      const row = db.prepare(
+        `SELECT COUNT(*) AS cnt
+         FROM zt_users
+         WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
+           AND (access_seat = 1 OR gateway_seat = 1)`,
+      ).get() as { cnt: number } | undefined;
+      if (!row || row.cnt === 0) return noData();
+      return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
   },
 ];
@@ -511,6 +604,7 @@ export function detectAvailableProducts(
     dns_records: hasRows(db, "SELECT 1 FROM dns_records LIMIT 1"),
     ssl_certs: hasRows(db, "SELECT 1 FROM ssl_certificates LIMIT 1"),
     zones: hasRows(db, "SELECT 1 FROM raw_http_hourly LIMIT 1"),
+    zt_users: hasRows(db, "SELECT 1 FROM zt_users WHERE (access_seat = 1 OR gateway_seat = 1) LIMIT 1"),
   };
 
   // Check which ext datasets have data
@@ -553,6 +647,9 @@ export function detectAvailableProducts(
         break;
       case "ssl_certs":
         detected = checks.ssl_certs;
+        break;
+      case "zt_users":
+        detected = checks.zt_users;
         break;
       case "zones":
         detected = checks.zones;

@@ -138,6 +138,7 @@ export type ProbeTarget =
   | { type: "ext_dim"; dataset: string }
   | { type: "zones" }
   | { type: "ssl_certs" }
+  | { type: "zt_users" }
   | { type: "always" }; // Always available (e.g., WAF = same as CDN)
 
 // =============================================================================
