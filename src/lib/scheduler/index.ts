@@ -51,6 +51,7 @@ const REPORT_LABELS: Record<ReportType, string> = {
   "access-audit": "Access Audit Report",
   "shadow-it": "Shadow IT Report",
   "devices-users": "Devices & Users Report",
+  "contract-usage": "Contract Usage Report",
 };
 
 export function isSchedulerRunning(): boolean {

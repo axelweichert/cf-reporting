@@ -23,6 +23,7 @@ import {
   HeartPulse,
   Settings,
   Database,
+  Scale,
 } from "lucide-react";
 import { useState } from "react";
 import type { Permission, UserRole } from "@/types/cloudflare";
@@ -81,6 +82,12 @@ const navGroups: NavGroup[] = [
     label: "Reports",
     items: [
       { label: "Executive Report", href: "/executive", icon: <FileText size={18} /> },
+    ],
+  },
+  {
+    label: "License",
+    items: [
+      { label: "Contract Usage", href: "/contract-usage", icon: <Scale size={18} /> },
     ],
   },
   {

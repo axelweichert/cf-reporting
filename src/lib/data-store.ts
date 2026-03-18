@@ -795,3 +795,92 @@ export function updateScheduleRunStatusInDb(id: string, status: string, error?: 
     "UPDATE email_schedules SET last_run_at = ?, last_run_status = ?, last_run_error = ? WHERE id = ?",
   ).run(new Date().toISOString(), status, error ?? null, id);
 }
+
+// =============================================================================
+// Contract line items (contract_line_items table)
+// =============================================================================
+
+import type {
+  ContractLineItem,
+  ContractLineItemRow,
+  CreateLineItemRequest,
+  UpdateLineItemRequest,
+} from "@/lib/contract/types";
+import { CATALOG_BY_KEY } from "@/lib/contract/catalog";
+
+function rowToLineItem(r: ContractLineItemRow): ContractLineItem {
+  return {
+    id: r.id,
+    productKey: r.product_key,
+    displayName: r.display_name,
+    category: r.category,
+    unit: r.unit,
+    committedAmount: r.committed_amount,
+    warningThreshold: r.warning_threshold,
+    enabled: r.enabled === 1,
+    sortOrder: r.sort_order,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export function getContractLineItems(): ContractLineItem[] {
+  const db = getDb();
+  if (!db) return [];
+
+  const rows = db.prepare(
+    "SELECT * FROM contract_line_items ORDER BY sort_order ASC, category ASC, display_name ASC",
+  ).all() as ContractLineItemRow[];
+  return rows.map(rowToLineItem);
+}
+
+export function addContractLineItem(req: CreateLineItemRequest): ContractLineItem | null {
+  const db = getDb();
+  if (!db) return null;
+
+  const catalog = CATALOG_BY_KEY.get(req.productKey);
+  if (!catalog) return null;
+
+  const info = db.prepare(
+    `INSERT INTO contract_line_items (product_key, display_name, category, unit, committed_amount, warning_threshold)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    req.productKey,
+    catalog.displayName,
+    catalog.category,
+    catalog.unit,
+    req.committedAmount,
+    req.warningThreshold ?? 0.8,
+  );
+
+  const row = db.prepare("SELECT * FROM contract_line_items WHERE id = ?").get(info.lastInsertRowid) as ContractLineItemRow;
+  return rowToLineItem(row);
+}
+
+export function updateContractLineItem(req: UpdateLineItemRequest): boolean {
+  const db = getDb();
+  if (!db) return false;
+
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+
+  if (req.committedAmount !== undefined) { sets.push("committed_amount = ?"); vals.push(req.committedAmount); }
+  if (req.warningThreshold !== undefined) { sets.push("warning_threshold = ?"); vals.push(req.warningThreshold); }
+  if (req.enabled !== undefined) { sets.push("enabled = ?"); vals.push(req.enabled ? 1 : 0); }
+  if (req.sortOrder !== undefined) { sets.push("sort_order = ?"); vals.push(req.sortOrder); }
+
+  if (sets.length === 0) return false;
+
+  sets.push("updated_at = datetime('now')");
+  vals.push(req.id);
+  const result = db.prepare(`UPDATE contract_line_items SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+  return result.changes > 0;
+}
+
+export function deleteContractLineItem(id: number): boolean {
+  const db = getDb();
+  if (!db) return false;
+
+  const result = db.prepare("DELETE FROM contract_line_items WHERE id = ?").run(id);
+  return result.changes > 0;
+}

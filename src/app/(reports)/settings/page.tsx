@@ -27,6 +27,7 @@ const REPORT_TYPES: Array<{ value: ReportType; label: string; group: string }> =
   { value: "access-audit", label: "Access Audit", group: "Zero Trust" },
   { value: "shadow-it", label: "Shadow IT", group: "Zero Trust" },
   { value: "devices-users", label: "Devices & Users", group: "Zero Trust" },
+  { value: "contract-usage", label: "Contract Usage", group: "License" },
 ];
 
 const FREQUENCIES: Array<{ value: ScheduleFrequency; label: string }> = [
@@ -890,6 +891,9 @@ export default function SettingsPage() {
         )}
       </div>
 
+      {/* Contract Line Items */}
+      <ContractSettingsSection />
+
       {/* Backup & Restore */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
         <h2 className="flex items-center gap-2 text-base font-semibold text-white">
@@ -1072,5 +1076,441 @@ function SelectField({ label, value, options, onChange }: {
         ))}
       </select>
     </div>
+  );
+}
+
+// =============================================================================
+// Contract Settings Section
+// =============================================================================
+
+interface DetectedProduct {
+  key: string;
+  displayName: string;
+  category: string;
+  unit: string;
+  description: string;
+  detected: boolean;
+}
+
+interface ContractItem {
+  id: number;
+  productKey: string;
+  displayName: string;
+  category: string;
+  unit: string;
+  committedAmount: number;
+  warningThreshold: number;
+  enabled: boolean;
+}
+
+function ContractSettingsSection() {
+  const [items, setItems] = useState<ContractItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [detecting, setDetecting] = useState(false);
+  const [detected, setDetected] = useState<DetectedProduct[] | null>(null);
+  const [catalog, setCatalog] = useState<DetectedProduct[]>([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addKey, setAddKey] = useState("");
+  const [addAmount, setAddAmount] = useState("");
+  const [addThreshold, setAddThreshold] = useState("0.8");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // Batch add state (from detection)
+  const [selectedDetected, setSelectedDetected] = useState<Set<string>>(new Set());
+  const [batchAmounts, setBatchAmounts] = useState<Record<string, string>>({});
+
+  const loadItems = useCallback(async () => {
+    try {
+      const res = await fetch("/api/contract/line-items");
+      if (res.ok) {
+        const data = await res.json();
+        setItems(data.items);
+      }
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, []);
+
+  const loadCatalog = useCallback(async () => {
+    try {
+      const res = await fetch("/api/contract/catalog");
+      if (res.ok) {
+        const data = await res.json();
+        setCatalog(data.catalog);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    loadItems();
+    loadCatalog();
+  }, [loadItems, loadCatalog]);
+
+  const handleDetect = async () => {
+    setDetecting(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/contract/detect", { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        const products = data.products as DetectedProduct[];
+        setDetected(products);
+        // Pre-select detected items that aren't already configured
+        const existingKeys = new Set(items.map((i) => i.productKey));
+        const preSelected = new Set(
+          products.filter((p) => p.detected && !existingKeys.has(p.key)).map((p) => p.key),
+        );
+        setSelectedDetected(preSelected);
+        setBatchAmounts({});
+      }
+    } catch (err) {
+      setMessage({ type: "error", text: (err as Error).message });
+    }
+    setDetecting(false);
+  };
+
+  const handleBatchAdd = async () => {
+    const toAdd = Array.from(selectedDetected)
+      .filter((key) => {
+        const amt = parseFloat(batchAmounts[key] || "");
+        return !isNaN(amt) && amt > 0;
+      })
+      .map((key) => ({
+        productKey: key,
+        committedAmount: parseFloat(batchAmounts[key]),
+      }));
+
+    if (toAdd.length === 0) {
+      setMessage({ type: "error", text: "Enter committed amounts for selected items" });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await fetch("/api/contract/line-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: toAdd }),
+      });
+      const data = await res.json();
+      if (data.created?.length > 0) {
+        setMessage({ type: "success", text: `Added ${data.created.length} line item(s)` });
+        setDetected(null);
+        await loadItems();
+      }
+      if (data.errors?.length > 0) {
+        setMessage({ type: "error", text: data.errors.map((e: { error: string }) => e.error).join(", ") });
+      }
+    } catch (err) {
+      setMessage({ type: "error", text: (err as Error).message });
+    }
+    setSaving(false);
+  };
+
+  const handleAddSingle = async () => {
+    if (!addKey || !addAmount) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/contract/line-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          item: {
+            productKey: addKey,
+            committedAmount: parseFloat(addAmount),
+            warningThreshold: parseFloat(addThreshold) || 0.8,
+          },
+        }),
+      });
+      if (res.ok) {
+        setMessage({ type: "success", text: "Line item added" });
+        setShowAddForm(false);
+        setAddKey("");
+        setAddAmount("");
+        setAddThreshold("0.8");
+        await loadItems();
+      } else {
+        const data = await res.json();
+        setMessage({ type: "error", text: data.errors?.[0]?.error || "Failed to add" });
+      }
+    } catch (err) {
+      setMessage({ type: "error", text: (err as Error).message });
+    }
+    setSaving(false);
+  };
+
+  const handleUpdate = async (id: number, field: string, value: number | boolean) => {
+    await fetch("/api/contract/line-items", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, [field]: value }),
+    });
+    await loadItems();
+  };
+
+  const handleDelete = async (id: number) => {
+    await fetch(`/api/contract/line-items?id=${id}`, { method: "DELETE" });
+    await loadItems();
+  };
+
+  const existingKeys = new Set(items.map((i) => i.productKey));
+  const availableCatalog = catalog.filter((c) => !existingKeys.has(c.key));
+
+  // Group catalog by category for the dropdown
+  const catalogByCategory = new Map<string, DetectedProduct[]>();
+  for (const c of availableCatalog) {
+    const arr = catalogByCategory.get(c.category) || [];
+    arr.push(c);
+    catalogByCategory.set(c.category, arr);
+  }
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+      <h2 className="flex items-center gap-2 text-base font-semibold text-white">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-orange-400">
+          <path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" /><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" /><path d="M7 21h10" /><path d="M12 3v18" /><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2" />
+        </svg>
+        Contract Line Items
+      </h2>
+      <p className="mt-1 text-xs text-zinc-500">
+        Configure your Cloudflare contract entitlements to track usage against committed amounts.
+      </p>
+
+      {/* Actions */}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          onClick={handleDetect}
+          disabled={detecting}
+          className="flex items-center gap-1.5 rounded-md bg-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-600 disabled:opacity-50"
+        >
+          {detecting ? "Detecting..." : "Detect Available Products"}
+        </button>
+        <button
+          onClick={() => setShowAddForm(!showAddForm)}
+          className="flex items-center gap-1.5 rounded-md bg-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-600"
+        >
+          <Plus size={14} />
+          Add from Catalog
+        </button>
+      </div>
+
+      {/* Detection results */}
+      {detected && (
+        <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-800 p-4">
+          <h3 className="text-sm font-medium text-zinc-300">Detected Products</h3>
+          <p className="mt-1 text-xs text-zinc-500">Select products and enter committed amounts.</p>
+          <div className="mt-3 max-h-80 space-y-2 overflow-y-auto">
+            {detected.filter((p) => !existingKeys.has(p.key)).map((product) => (
+              <div key={product.key} className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={selectedDetected.has(product.key)}
+                  onChange={(e) => {
+                    const next = new Set(selectedDetected);
+                    if (e.target.checked) next.add(product.key);
+                    else next.delete(product.key);
+                    setSelectedDetected(next);
+                  }}
+                  className="rounded border-zinc-600"
+                />
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm text-zinc-200">{product.displayName}</span>
+                  {product.detected && <span className="ml-2 rounded bg-emerald-500/20 px-1.5 py-0.5 text-xs text-emerald-400">detected</span>}
+                </div>
+                <span className="text-xs text-zinc-500 w-12 text-right">{product.unit}</span>
+                <input
+                  type="number"
+                  placeholder="Amount"
+                  value={batchAmounts[product.key] || ""}
+                  onChange={(e) => setBatchAmounts({ ...batchAmounts, [product.key]: e.target.value })}
+                  disabled={!selectedDetected.has(product.key)}
+                  className="w-24 rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-sm text-white placeholder-zinc-600 disabled:opacity-40"
+                />
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={handleBatchAdd}
+              disabled={saving || selectedDetected.size === 0}
+              className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50"
+            >
+              {saving ? "Adding..." : `Add ${selectedDetected.size} Selected`}
+            </button>
+            <button
+              onClick={() => setDetected(null)}
+              className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Add from catalog form */}
+      {showAddForm && !detected && (
+        <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-800 p-4">
+          <h3 className="text-sm font-medium text-zinc-300">Add Line Item</h3>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-xs font-medium text-zinc-400">Product</label>
+              <select
+                value={addKey}
+                onChange={(e) => setAddKey(e.target.value)}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
+              >
+                <option value="">Select product...</option>
+                {Array.from(catalogByCategory.entries()).map(([cat, products]) => (
+                  <optgroup key={cat} label={cat}>
+                    {products.map((p) => (
+                      <option key={p.key} value={p.key}>{p.displayName} ({p.unit})</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-zinc-400">Committed Amount</label>
+              <input
+                type="number"
+                step="0.01"
+                value={addAmount}
+                onChange={(e) => setAddAmount(e.target.value)}
+                placeholder="e.g. 40"
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-orange-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-zinc-400">Warning at (%)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                max="1"
+                value={addThreshold}
+                onChange={(e) => setAddThreshold(e.target.value)}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
+              />
+            </div>
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={handleAddSingle}
+              disabled={saving || !addKey || !addAmount}
+              className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50"
+            >
+              {saving ? "Adding..." : "Add"}
+            </button>
+            <button
+              onClick={() => setShowAddForm(false)}
+              className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Line items table */}
+      {loading ? (
+        <div className="mt-4 text-sm text-zinc-500">Loading...</div>
+      ) : items.length > 0 ? (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-zinc-800 text-xs text-zinc-500">
+                <th className="px-2 py-2 text-left">Product</th>
+                <th className="px-2 py-2 text-left">Category</th>
+                <th className="px-2 py-2 text-right">Committed</th>
+                <th className="px-2 py-2 text-right">Unit</th>
+                <th className="px-2 py-2 text-right">Warning %</th>
+                <th className="px-2 py-2 text-center">Enabled</th>
+                <th className="px-2 py-2 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <ContractItemRow
+                  key={item.id}
+                  item={item}
+                  onUpdate={handleUpdate}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="mt-4 text-sm text-zinc-500">No contract line items configured. Use &quot;Detect Available Products&quot; or &quot;Add from Catalog&quot; to get started.</p>
+      )}
+
+      {message && (
+        <div className={`mt-3 rounded-md px-3 py-2 text-xs ${message.type === "success" ? "border border-emerald-500/20 bg-emerald-500/5 text-emerald-400" : "border border-red-500/20 bg-red-500/5 text-red-400"}`}>
+          {message.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ContractItemRow({ item, onUpdate, onDelete }: {
+  item: ContractItem;
+  onUpdate: (id: number, field: string, value: number | boolean) => void;
+  onDelete: (id: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [amount, setAmount] = useState(String(item.committedAmount));
+  const [threshold, setThreshold] = useState(String(item.warningThreshold));
+
+  const handleSave = () => {
+    const newAmount = parseFloat(amount);
+    const newThreshold = parseFloat(threshold);
+    if (!isNaN(newAmount) && newAmount > 0) onUpdate(item.id, "committedAmount", newAmount);
+    if (!isNaN(newThreshold) && newThreshold > 0 && newThreshold <= 1) onUpdate(item.id, "warningThreshold", newThreshold);
+    setEditing(false);
+  };
+
+  return (
+    <tr className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
+      <td className="px-2 py-2 text-zinc-200">{item.displayName}</td>
+      <td className="px-2 py-2 text-zinc-400">{item.category}</td>
+      <td className="px-2 py-2 text-right font-mono text-zinc-200">
+        {editing ? (
+          <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)}
+            className="w-20 rounded border border-zinc-600 bg-zinc-900 px-1 py-0.5 text-right text-sm text-white" />
+        ) : item.committedAmount}
+      </td>
+      <td className="px-2 py-2 text-right text-zinc-500">{item.unit}</td>
+      <td className="px-2 py-2 text-right font-mono text-zinc-400">
+        {editing ? (
+          <input type="number" step="0.01" min="0.01" max="1" value={threshold} onChange={(e) => setThreshold(e.target.value)}
+            className="w-16 rounded border border-zinc-600 bg-zinc-900 px-1 py-0.5 text-right text-sm text-white" />
+        ) : `${(item.warningThreshold * 100).toFixed(0)}%`}
+      </td>
+      <td className="px-2 py-2 text-center">
+        <button onClick={() => onUpdate(item.id, "enabled", !item.enabled)} className="text-zinc-400 hover:text-white">
+          {item.enabled ? <ToggleRight size={18} className="text-emerald-400" /> : <ToggleLeft size={18} />}
+        </button>
+      </td>
+      <td className="px-2 py-2 text-center">
+        <div className="flex items-center justify-center gap-1">
+          {editing ? (
+            <>
+              <button onClick={handleSave} className="rounded bg-orange-500/20 px-2 py-0.5 text-xs text-orange-400 hover:bg-orange-500/30">Save</button>
+              <button onClick={() => setEditing(false)} className="rounded bg-zinc-700 px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-600">Cancel</button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => setEditing(true)} className="text-zinc-500 hover:text-zinc-300">
+                <Pencil size={14} />
+              </button>
+              <button onClick={() => onDelete(item.id)} className="text-zinc-500 hover:text-red-400">
+                <Trash2 size={14} />
+              </button>
+            </>
+          )}
+        </div>
+      </td>
+    </tr>
   );
 }

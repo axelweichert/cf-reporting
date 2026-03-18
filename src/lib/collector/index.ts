@@ -143,6 +143,25 @@ function getReportDataZt() {
   return require("@/lib/email/report-data-zt") as typeof import("@/lib/email/report-data-zt");
 }
 
+/** Lazy-load contract usage calculator. Returns null if no line items configured. */
+function getContractCalculator() {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getDb } = require("@/lib/db") as typeof import("@/lib/db");
+    const db = getDb();
+    if (!db) return null;
+
+    // Quick check: any enabled line items?
+    const row = db.prepare("SELECT 1 FROM contract_line_items WHERE enabled = 1 LIMIT 1").get();
+    if (!row) return null;
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require("@/lib/contract/usage-calculator") as typeof import("@/lib/contract/usage-calculator");
+  } catch {
+    return null;
+  }
+}
+
 /** Lazy-load zone-scoped REST snapshot fetchers (report-data). */
 function getReportData() {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -322,6 +341,32 @@ export async function runCollection(): Promise<void> {
     }
 
     _lastRunStatus = errorCount === 0 ? "success" : "partial";
+
+    // Post-collection: recalculate contract usage for current month
+    try {
+      const calcModule = getContractCalculator();
+      if (calcModule) {
+        const period = calcModule.currentPeriod();
+        const results = calcModule.calculateAllForPeriod(
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          (require("@/lib/db") as typeof import("@/lib/db")).getDb()!,
+          period,
+        );
+        if (results.length > 0) {
+          console.log(`[collector] Contract usage: calculated ${results.length} line item(s) for ${period}`);
+          const crossings = calcModule.detectNewCrossings(
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            (require("@/lib/db") as typeof import("@/lib/db")).getDb()!,
+            results,
+          );
+          if (crossings.length > 0) {
+            console.log(`[collector] Contract alerts: ${crossings.length} new threshold crossing(s)`);
+          }
+        }
+      }
+    } catch (calcErr) {
+      console.warn("[collector] Contract usage calculation failed:", (calcErr as Error).message);
+    }
   } catch (err) {
     console.error("[collector] Collection run failed:", err instanceof Error ? err.message : err);
     _lastRunStatus = "error";
