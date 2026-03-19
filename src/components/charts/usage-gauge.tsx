@@ -8,6 +8,8 @@ interface UsageGaugeProps {
   usagePct: number;
   warningThreshold: number;
   dataAvailable: boolean;
+  /** True for integer counts (seats, zones) */
+  snapshot?: boolean;
 }
 
 export default function UsageGauge({
@@ -18,6 +20,7 @@ export default function UsageGauge({
   usagePct,
   warningThreshold,
   dataAvailable,
+  snapshot = false,
 }: UsageGaugeProps) {
   const clampedPct = Math.min(usagePct, 150); // Visual cap at 150%
   const fillWidth = Math.min((clampedPct / 100) * 100, 100); // Bar max at 100%
@@ -27,8 +30,16 @@ export default function UsageGauge({
   if (usagePct >= 100) barColor = "#ef4444"; // red
   else if (usagePct >= thresholdPos) barColor = "#eab308"; // amber
 
-  const fmt = (v: number) =>
-    v >= 1000 ? `${(v / 1000).toFixed(1)}K` : v >= 1 ? v.toFixed(2) : v.toFixed(3);
+  const fmt = (v: number) => {
+    if (snapshot) {
+      if (v >= 1000) return `${(v / 1000).toFixed(1)}K`;
+      return Math.round(v).toLocaleString();
+    }
+    if (v >= 1000) return `${(v / 1000).toFixed(1)}K`;
+    if (v >= 1) return v.toFixed(2);
+    if (v > 0) return v.toFixed(3);
+    return "0";
+  };
 
   return (
     <div className="group">

@@ -243,6 +243,7 @@ export default function ContractUsagePage() {
                     usagePct={entry.usagePct}
                     warningThreshold={entry.warningThreshold}
                     dataAvailable={entry.dataAvailable}
+                    snapshot={entry.snapshot}
                   />
                 ))}
               </div>
@@ -271,7 +272,7 @@ export default function ContractUsagePage() {
                         {isExpanded ? "Hide zones" : "Show zones"}
                       </button>
                     </div>
-                    <MonthlyUsageChart months={filteredMonths} unit={history.unit} />
+                    <MonthlyUsageChart months={filteredMonths} unit={history.unit} snapshot={history.snapshot} />
                     {/* Zone drill-down */}
                     {isExpanded && breakdownLoading && (
                       <div className="mt-4 text-sm text-zinc-500">Loading zone breakdown...</div>

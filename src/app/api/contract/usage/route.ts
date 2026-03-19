@@ -63,6 +63,7 @@ export async function GET(request: NextRequest) {
       const rows = getUsageHistory(db, li.id, 13);
       const catalog = CATALOG_BY_KEY.get(li.productKey);
 
+      const isSnapshot = catalog?.snapshot ?? false;
       const months: ContractUsageHistoryMonth[] = rows.map((r) => {
         const month: ContractUsageHistoryMonth = {
           period: r.period,
@@ -70,8 +71,8 @@ export async function GET(request: NextRequest) {
           committedAmount: r.committed_amount,
           usagePct: r.usage_pct,
         };
-        // Add projected value for current partial month
-        if (r.period === currentMonth && dayOfMonth < daysInMonth && dayOfMonth > 0) {
+        // Add projected value for current partial month (skip for snapshot/count metrics)
+        if (!isSnapshot && r.period === currentMonth && dayOfMonth < daysInMonth && dayOfMonth > 0) {
           month.projected = Math.round(
             (r.usage_value / dayOfMonth) * daysInMonth * 100,
           ) / 100;
@@ -83,6 +84,7 @@ export async function GET(request: NextRequest) {
         productKey: li.productKey,
         displayName: catalog?.displayName ?? li.displayName,
         unit: catalog?.unit ?? li.unit,
+        snapshot: isSnapshot || undefined,
         months,
       };
     });
@@ -105,10 +107,12 @@ export async function GET(request: NextRequest) {
     const dayOfMonth = now.getUTCDate();
     const daysInMonth = new Date(now.getUTCFullYear(), now.getUTCMonth() + 1, 0).getUTCDate();
 
+    const isSnapshot = catalog?.snapshot ?? false;
     const history: ContractUsageHistory = {
       productKey: historyKey,
       displayName: catalog?.displayName ?? item.displayName,
       unit: catalog?.unit ?? item.unit,
+      snapshot: isSnapshot || undefined,
       months: rows.map((r) => {
         const month: ContractUsageHistoryMonth = {
           period: r.period,
@@ -116,7 +120,7 @@ export async function GET(request: NextRequest) {
           committedAmount: r.committed_amount,
           usagePct: r.usage_pct,
         };
-        if (r.period === currentMonth && dayOfMonth < daysInMonth && dayOfMonth > 0) {
+        if (!isSnapshot && r.period === currentMonth && dayOfMonth < daysInMonth && dayOfMonth > 0) {
           month.projected = Math.round(
             (r.usage_value / dayOfMonth) * daysInMonth * 100,
           ) / 100;
@@ -151,6 +155,7 @@ export async function GET(request: NextRequest) {
         usagePct: usage?.usage_pct ?? 0,
         dataAvailable: usage !== undefined,
         calculatedAt: usage?.calculated_at ?? "",
+        snapshot: catalog?.snapshot,
       };
     });
 

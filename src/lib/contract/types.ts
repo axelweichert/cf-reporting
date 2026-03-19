@@ -72,6 +72,8 @@ export interface ContractUsageEntry {
   usagePct: number;
   dataAvailable: boolean;
   calculatedAt: string;
+  /** True for point-in-time counts (seats, zones) – display as integers, no projection */
+  snapshot?: boolean;
 }
 
 export interface ContractUsageMonthly {
@@ -97,6 +99,7 @@ export interface ContractUsageHistory {
   productKey: string;
   displayName: string;
   unit: string;
+  snapshot?: boolean;
   months: ContractUsageHistoryMonth[];
 }
 
@@ -155,6 +158,8 @@ export interface ProductCatalogEntry {
   probeTable: ProbeTarget;
   /** Whether this is zone-scoped (true) or account-scoped (false, e.g. Workers, R2, ZT) */
   zoneScoped: boolean;
+  /** True for point-in-time counts (seats, zones, records) – shown as integers, no projection */
+  snapshot?: boolean;
   /** Function to calculate usage from raw SQLite data */
   calculator: UsageCalculatorFn;
   /** Optional: per-zone breakdown for zone-scoped products */

@@ -20,6 +20,8 @@ interface MonthlyUsageChartProps {
   months: ContractUsageHistoryMonth[];
   unit: string;
   height?: number;
+  /** True for integer counts (seats, zones) – no decimals */
+  snapshot?: boolean;
 }
 
 /** Format a period "YYYY-MM" to "Mon YYYY" for the X axis. */
@@ -30,7 +32,12 @@ function formatPeriodLabel(period: string): string {
 }
 
 /** Smart value formatting: 595.38M, 52.86M, 1.96K, 9.25, etc. */
-function formatValue(v: number): string {
+function formatValue(v: number, integer = false): string {
+  if (integer) {
+    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+    if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+    return Math.round(v).toLocaleString();
+  }
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
   if (v >= 1_000) return `${(v / 1_000).toFixed(2)}K`;
   if (v >= 100) return v.toFixed(1);
@@ -39,10 +46,10 @@ function formatValue(v: number): string {
   return "0";
 }
 
-function formatAxis(v: number): string {
+function formatAxis(v: number, integer = false): string {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(0)}M`;
   if (v >= 1_000) return `${(v / 1_000).toFixed(0)}K`;
-  if (v >= 100) return v.toFixed(0);
+  if (integer || v >= 100) return v.toFixed(0);
   return v.toFixed(2);
 }
 
@@ -59,11 +66,13 @@ function UsageTooltip({
   payload,
   label,
   unit,
+  integer,
 }: {
   active?: boolean;
   payload?: Array<{ dataKey: string; value: number; color: string; name: string }>;
   label?: string;
   unit: string;
+  integer?: boolean;
 }) {
   if (!active || !payload?.length) return null;
   return (
@@ -74,7 +83,7 @@ function UsageTooltip({
       <p className="text-xs mb-1" style={{ color: CHART_COLORS.tooltip.label }}>{label}</p>
       {payload.map((p) => (
         <p key={p.dataKey} className="text-sm" style={{ color: p.color }}>
-          {p.name}: {formatValue(p.value)} {unit}
+          {p.name}: {formatValue(p.value, integer)} {unit}
         </p>
       ))}
     </div>
@@ -83,9 +92,9 @@ function UsageTooltip({
 
 /** Custom bar label that shows the value above each bar. */
 function BarLabel(props: {
-  x?: number; y?: number; width?: number; value?: number;
+  x?: number; y?: number; width?: number; value?: number; integer?: boolean;
 }) {
-  const { x = 0, y = 0, width = 0, value } = props;
+  const { x = 0, y = 0, width = 0, value, integer } = props;
   if (!value || value === 0) return null;
   return (
     <text
@@ -96,7 +105,7 @@ function BarLabel(props: {
       fontSize={10}
       fontWeight={500}
     >
-      {formatValue(value)}
+      {formatValue(value, integer)}
     </text>
   );
 }
@@ -105,9 +114,13 @@ export default function MonthlyUsageChart({
   months,
   unit,
   height = 260,
+  snapshot = false,
 }: MonthlyUsageChartProps) {
   const isPdf = typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("_pdf") === "true";
+
+  const fmt = (v: number) => formatValue(v, snapshot);
+  const fmtAxis = (v: number) => formatAxis(v, snapshot);
 
   // Sort months chronologically and build chart data
   const sorted = [...months].sort((a, b) => a.period.localeCompare(b.period));
@@ -156,11 +169,11 @@ export default function MonthlyUsageChart({
           tick={{ fontSize: 11 }}
           tickLine={false}
           axisLine={false}
-          tickFormatter={formatAxis}
+          tickFormatter={fmtAxis}
           width={55}
           domain={[0, yMax]}
         />
-        <Tooltip content={<UsageTooltip unit={unit} />} />
+        <Tooltip content={<UsageTooltip unit={unit} integer={snapshot} />} />
         <Legend
           wrapperStyle={{ fontSize: 12, color: CHART_COLORS.axis }}
           iconType="circle"
@@ -175,7 +188,7 @@ export default function MonthlyUsageChart({
           radius={[3, 3, 0, 0]}
           maxBarSize={48}
           isAnimationActive={!isPdf}
-          label={<BarLabel />}
+          label={<BarLabel integer={snapshot} />}
         >
           {data.map((d, i) => {
             // Color red if over committed, orange otherwise
@@ -192,7 +205,7 @@ export default function MonthlyUsageChart({
           radius={[3, 3, 0, 0]}
           maxBarSize={48}
           isAnimationActive={!isPdf}
-          label={<BarLabel />}
+          label={<BarLabel integer={snapshot} />}
         />
 
         {/* Committed / purchased threshold line */}
@@ -215,7 +228,7 @@ export default function MonthlyUsageChart({
               strokeWidth={2}
               strokeDasharray="6 3"
               label={{
-                value: `Purchased: ${formatValue(committedValues[0])} ${unit}`,
+                value: `Purchased: ${fmt(committedValues[0])} ${unit}`,
                 position: "insideTopRight",
                 fill: "#991b1b",
                 fontSize: 11,

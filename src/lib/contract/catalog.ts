@@ -280,6 +280,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "10K records",
     description: "Total DNS records across enterprise zones (latest snapshot)",
     probeTable: { type: "dns_records" },
+    snapshot: true,
     zoneScoped: true,
     calculator: (db, _start, _end, accountId) => {
       const filter = enterpriseZoneFilter(accountId);
@@ -505,6 +506,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "zones",
     description: "Number of enterprise zones in the account",
     probeTable: { type: "zones" },
+    snapshot: true,
     zoneScoped: true,
     calculator: (db, _start, _end, accountId) => {
       const acctFilter = accountId ? " AND account_id = ?" : "";
@@ -523,6 +525,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "zones",
     description: "Number of zones with Advanced Certificate Manager",
     probeTable: { type: "ssl_certs" },
+    snapshot: true,
     zoneScoped: true,
     calculator: (db, _start, _end, accountId) => {
       const filter = enterpriseZoneFilter(accountId);
@@ -536,7 +539,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     },
   },
 
-  // ===== Zero Trust (account-scoped, seat-based) =====
+  // ===== Zero Trust (account-scoped, seat-based, snapshot counts) =====
   {
     key: "zt-seats",
     displayName: "Zero Trust \u2013 Seats",
@@ -545,6 +548,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     description: "Active Zero Trust seats (users with Access or Gateway seat)",
     probeTable: { type: "zt_users" },
     zoneScoped: false,
+    snapshot: true,
     calculator: (db, _start, _end, accountId) => {
       const row = ztSeatCount(db, "(access_seat = 1 OR gateway_seat = 1)", accountId);
       if (!row || row.cnt === 0) return noData();
@@ -559,6 +563,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     description: "Users with an active Access (ZTNA) seat",
     probeTable: { type: "zt_users" },
     zoneScoped: false,
+    snapshot: true,
     calculator: (db, _start, _end, accountId) => {
       const row = ztSeatCount(db, "access_seat = 1", accountId);
       if (!row || row.cnt === 0) return noData();
@@ -573,6 +578,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     description: "Users with an active Gateway (SWG) seat",
     probeTable: { type: "zt_users" },
     zoneScoped: false,
+    snapshot: true,
     calculator: (db, _start, _end, accountId) => {
       const row = ztSeatCount(db, "gateway_seat = 1", accountId);
       if (!row || row.cnt === 0) return noData();
@@ -601,6 +607,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     description: "Advanced DLP add-on seats (same pool as base ZT seats)",
     probeTable: { type: "zt_users" },
     zoneScoped: false,
+    snapshot: true,
     calculator: (db, _start, _end, accountId) => {
       const row = ztSeatCount(db, "(access_seat = 1 OR gateway_seat = 1)", accountId);
       if (!row || row.cnt === 0) return noData();
@@ -615,6 +622,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     description: "API CASB add-on seats (same pool as base ZT seats)",
     probeTable: { type: "zt_users" },
     zoneScoped: false,
+    snapshot: true,
     calculator: (db, _start, _end, accountId) => {
       const row = ztSeatCount(db, "(access_seat = 1 OR gateway_seat = 1)", accountId);
       if (!row || row.cnt === 0) return noData();
