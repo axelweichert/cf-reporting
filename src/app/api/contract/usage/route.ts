@@ -8,7 +8,7 @@ import {
   getUsageForPeriod,
   getUsageHistory,
 } from "@/lib/contract/usage-calculator";
-import type { ContractUsageEntry, ContractUsageMonthly, ContractUsageHistory } from "@/lib/contract/types";
+import type { ContractUsageEntry, ContractUsageMonthly, ContractUsageHistory, ContractUsageAllHistories, ContractUsageHistoryMonth } from "@/lib/contract/types";
 
 /** GET /api/contract/usage?period=2026-03&history=cdn-data-transfer */
 export async function GET(request: NextRequest) {
@@ -26,6 +26,47 @@ export async function GET(request: NextRequest) {
     return Response.json({ error: "Invalid period format (expected YYYY-MM)" }, { status: 400 });
   }
 
+  // If requesting all histories (for chart view)
+  const historiesParam = searchParams.get("histories");
+  if (historiesParam === "all") {
+    const lineItems = getContractLineItems().filter((li) => li.enabled);
+    const now = new Date();
+    const currentMonth = currentPeriod();
+    const dayOfMonth = now.getUTCDate();
+    const daysInMonth = new Date(now.getUTCFullYear(), now.getUTCMonth() + 1, 0).getUTCDate();
+
+    const histories: ContractUsageHistory[] = lineItems.map((li) => {
+      const rows = getUsageHistory(db, li.id, 13);
+      const catalog = CATALOG_BY_KEY.get(li.productKey);
+
+      const months: ContractUsageHistoryMonth[] = rows.map((r) => {
+        const month: ContractUsageHistoryMonth = {
+          period: r.period,
+          usageValue: r.usage_value,
+          committedAmount: r.committed_amount,
+          usagePct: r.usage_pct,
+        };
+        // Add projected value for current partial month
+        if (r.period === currentMonth && dayOfMonth < daysInMonth && dayOfMonth > 0) {
+          month.projected = Math.round(
+            (r.usage_value / dayOfMonth) * daysInMonth * 100,
+          ) / 100;
+        }
+        return month;
+      });
+
+      return {
+        productKey: li.productKey,
+        displayName: catalog?.displayName ?? li.displayName,
+        unit: catalog?.unit ?? li.unit,
+        months,
+      };
+    });
+
+    const result: ContractUsageAllHistories = { histories };
+    return Response.json(result);
+  }
+
   // If requesting history for a specific product
   const historyKey = searchParams.get("history");
   if (historyKey) {
@@ -33,15 +74,31 @@ export async function GET(request: NextRequest) {
     const item = lineItems.find((li) => li.productKey === historyKey);
     if (!item) return Response.json({ error: "Line item not found" }, { status: 404 });
 
-    const rows = getUsageHistory(db, item.id, 12);
+    const rows = getUsageHistory(db, item.id, 13);
+    const catalog = CATALOG_BY_KEY.get(historyKey);
+    const now = new Date();
+    const currentMonth = currentPeriod();
+    const dayOfMonth = now.getUTCDate();
+    const daysInMonth = new Date(now.getUTCFullYear(), now.getUTCMonth() + 1, 0).getUTCDate();
+
     const history: ContractUsageHistory = {
       productKey: historyKey,
-      months: rows.map((r) => ({
-        period: r.period,
-        usageValue: r.usage_value,
-        committedAmount: r.committed_amount,
-        usagePct: r.usage_pct,
-      })),
+      displayName: catalog?.displayName ?? item.displayName,
+      unit: catalog?.unit ?? item.unit,
+      months: rows.map((r) => {
+        const month: ContractUsageHistoryMonth = {
+          period: r.period,
+          usageValue: r.usage_value,
+          committedAmount: r.committed_amount,
+          usagePct: r.usage_pct,
+        };
+        if (r.period === currentMonth && dayOfMonth < daysInMonth && dayOfMonth > 0) {
+          month.projected = Math.round(
+            (r.usage_value / dayOfMonth) * daysInMonth * 100,
+          ) / 100;
+        }
+        return month;
+      }),
     };
     return Response.json(history);
   }

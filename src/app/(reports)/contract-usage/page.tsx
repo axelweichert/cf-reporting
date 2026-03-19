@@ -6,9 +6,14 @@ import StatCard from "@/components/ui/stat-card";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import ErrorMessage from "@/components/ui/error-message";
 import UsageGauge from "@/components/charts/usage-gauge";
-import { HorizontalBarChart } from "@/components/charts/bar-chart";
+import MonthlyUsageChart from "@/components/charts/monthly-usage-chart";
 import { AlertTriangle, CheckCircle, RefreshCw, XCircle } from "lucide-react";
-import type { ContractUsageMonthly, ContractUsageEntry, ContractUsageHistory } from "@/lib/contract/types";
+import type {
+  ContractUsageMonthly,
+  ContractUsageEntry,
+  ContractUsageHistory,
+  ContractUsageAllHistories,
+} from "@/lib/contract/types";
 
 function buildPeriodOptions(): Array<{ label: string; value: string }> {
   const options: Array<{ label: string; value: string }> = [];
@@ -41,8 +46,10 @@ export default function ContractUsagePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [recalculating, setRecalculating] = useState(false);
-  const [selectedHistory, setSelectedHistory] = useState<ContractUsageHistory | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(false);
+
+  // All histories for chart rendering
+  const [histories, setHistories] = useState<Map<string, ContractUsageHistory>>(new Map());
+  const [historiesLoading, setHistoriesLoading] = useState(false);
 
   const periodOptions = buildPeriodOptions();
 
@@ -64,9 +71,31 @@ export default function ContractUsagePage() {
     }
   }, []);
 
+  const fetchHistories = useCallback(async () => {
+    setHistoriesLoading(true);
+    try {
+      const res = await fetch("/api/contract/usage?histories=all");
+      if (res.ok) {
+        const result = await res.json() as ContractUsageAllHistories;
+        const map = new Map<string, ContractUsageHistory>();
+        for (const h of result.histories) {
+          map.set(h.productKey, h);
+        }
+        setHistories(map);
+      }
+    } catch {
+      // Non-critical – gauges still work without charts
+    } finally {
+      setHistoriesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (period) fetchData(period);
-  }, [period, fetchData]);
+    if (period) {
+      fetchData(period);
+      fetchHistories();
+    }
+  }, [period, fetchData, fetchHistories]);
 
   const handleRecalculate = async () => {
     setRecalculating(true);
@@ -76,26 +105,9 @@ export default function ContractUsagePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ period }),
       });
-      await fetchData(period);
+      await Promise.all([fetchData(period), fetchHistories()]);
     } finally {
       setRecalculating(false);
-    }
-  };
-
-  const handleHistoryClick = async (productKey: string) => {
-    if (selectedHistory?.productKey === productKey) {
-      setSelectedHistory(null);
-      return;
-    }
-    setHistoryLoading(true);
-    try {
-      const res = await fetch(`/api/contract/usage?history=${productKey}`);
-      if (res.ok) {
-        const result = await res.json() as ContractUsageHistory;
-        setSelectedHistory(result);
-      }
-    } finally {
-      setHistoryLoading(false);
     }
   };
 
@@ -177,7 +189,7 @@ export default function ContractUsagePage() {
             />
           </div>
 
-          {/* Category sections */}
+          {/* Category sections with gauges */}
           {Array.from(categories.entries()).map(([category, items]) => (
             <div key={category} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
               <h3 className="mb-4 text-sm font-semibold text-zinc-300 uppercase tracking-wider">
@@ -185,45 +197,50 @@ export default function ContractUsagePage() {
               </h3>
               <div className="space-y-3">
                 {items.map((entry) => (
-                  <div
+                  <UsageGauge
                     key={entry.productKey}
-                    className="cursor-pointer hover:opacity-90"
-                    onClick={() => handleHistoryClick(entry.productKey)}
-                  >
-                    <UsageGauge
-                      label={entry.displayName}
-                      usageValue={entry.usageValue}
-                      committedAmount={entry.committedAmount}
-                      unit={entry.unit}
-                      usagePct={entry.usagePct}
-                      warningThreshold={entry.warningThreshold}
-                      dataAvailable={entry.dataAvailable}
-                    />
-                  </div>
+                    label={entry.displayName}
+                    usageValue={entry.usageValue}
+                    committedAmount={entry.committedAmount}
+                    unit={entry.unit}
+                    usagePct={entry.usagePct}
+                    warningThreshold={entry.warningThreshold}
+                    dataAvailable={entry.dataAvailable}
+                  />
                 ))}
               </div>
             </div>
           ))}
 
-          {/* Historical chart (shown when a line item is clicked) */}
-          {historyLoading && (
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
-              <CardSkeleton />
+          {/* Monthly usage charts – one per line item */}
+          {!historiesLoading && histories.size > 0 && (
+            <div className="space-y-6">
+              {entries.filter((e) => e.dataAvailable && histories.has(e.productKey)).map((entry) => {
+                const history = histories.get(entry.productKey)!;
+                if (history.months.length === 0) return null;
+                return (
+                  <div key={entry.productKey} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+                    <h3 className="mb-2 text-sm font-semibold text-zinc-300">
+                      {history.displayName}
+                      <span className="ml-2 text-xs font-normal text-zinc-500">({history.unit})</span>
+                    </h3>
+                    <MonthlyUsageChart
+                      months={history.months}
+                      unit={history.unit}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
-          {selectedHistory && !historyLoading && selectedHistory.months.length > 0 && (
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
-              <h3 className="mb-4 text-sm font-semibold text-zinc-300">
-                Monthly Usage History: {entries.find((e) => e.productKey === selectedHistory.productKey)?.displayName || selectedHistory.productKey}
-              </h3>
-              <HorizontalBarChart
-                data={[...selectedHistory.months].reverse().map((m) => ({
-                  name: m.period,
-                  value: Math.round(m.usagePct * 10) / 10,
-                }))}
-                valueFormatter={(v) => `${v}%`}
-                barColor="#f97316"
-              />
+
+          {historiesLoading && (
+            <div className="space-y-6">
+              {[1, 2].map((i) => (
+                <div key={i} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+                  <CardSkeleton />
+                </div>
+              ))}
             </div>
           )}
         </>

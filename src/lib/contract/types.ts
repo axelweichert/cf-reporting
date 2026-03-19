@@ -83,14 +83,24 @@ export interface ContractUsageMonthly {
   };
 }
 
+export interface ContractUsageHistoryMonth {
+  period: string;
+  usageValue: number;
+  committedAmount: number;
+  usagePct: number;
+  projected?: number; // Extrapolated full-month value for the current partial month
+}
+
 export interface ContractUsageHistory {
   productKey: string;
-  months: Array<{
-    period: string;
-    usageValue: number;
-    committedAmount: number;
-    usagePct: number;
-  }>;
+  displayName: string;
+  unit: string;
+  months: ContractUsageHistoryMonth[];
+}
+
+/** All histories in one response (for the chart view). */
+export interface ContractUsageAllHistories {
+  histories: ContractUsageHistory[];
 }
 
 // =============================================================================
