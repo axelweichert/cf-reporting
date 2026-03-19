@@ -1106,7 +1106,7 @@ interface ContractItem {
 
 interface AccountInfo {
   account_id: string;
-  sample_zone: string;
+  account_name: string;
   total_zones: number;
   enterprise_zones: number;
 }
@@ -1121,7 +1121,7 @@ function ContractSettingsSection() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [addKey, setAddKey] = useState("");
   const [addAmount, setAddAmount] = useState("");
-  const [addThreshold, setAddThreshold] = useState("0.8");
+  const [addThreshold, setAddThreshold] = useState("80");
   const [addAccountId, setAddAccountId] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -1240,7 +1240,7 @@ function ContractSettingsSection() {
           item: {
             productKey: addKey,
             committedAmount: parseFloat(addAmount),
-            warningThreshold: parseFloat(addThreshold) || 0.8,
+            warningThreshold: (parseFloat(addThreshold) || 80) / 100,
             accountId: addAccountId || undefined,
           },
         }),
@@ -1250,7 +1250,7 @@ function ContractSettingsSection() {
         setShowAddForm(false);
         setAddKey("");
         setAddAmount("");
-        setAddThreshold("0.8");
+        setAddThreshold("80");
         await loadItems();
       } else {
         const data = await res.json();
@@ -1280,6 +1280,11 @@ function ContractSettingsSection() {
   const availableCatalog = catalog.filter((c) => !existingKeys.has(c.key));
 
   // Group catalog by category for the dropdown
+  // Account name lookup for display
+  const accountNameMap = new Map<string, string>(
+    accounts.map((a) => [a.account_id, a.account_name || a.account_id.slice(0, 12)]),
+  );
+
   const catalogByCategory = new Map<string, DetectedProduct[]>();
   for (const c of availableCatalog) {
     const arr = catalogByCategory.get(c.category) || [];
@@ -1385,7 +1390,7 @@ function ContractSettingsSection() {
                 <option value="">All accounts</option>
                 {accounts.map((a) => (
                   <option key={a.account_id} value={a.account_id}>
-                    {a.account_id.slice(0, 8)}... ({a.enterprise_zones} enterprise / {a.total_zones} total zones)
+                    {a.account_name || a.account_id.slice(0, 12)} ({a.enterprise_zones} enterprise / {a.total_zones} total zones)
                   </option>
                 ))}
               </select>
@@ -1421,12 +1426,12 @@ function ContractSettingsSection() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-400">Warning at (%)</label>
+              <label className="mb-1 block text-xs font-medium text-zinc-400">Warning at %</label>
               <input
                 type="number"
-                step="0.01"
-                min="0.01"
-                max="1"
+                step="1"
+                min="1"
+                max="100"
                 value={addThreshold}
                 onChange={(e) => setAddThreshold(e.target.value)}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
@@ -1474,6 +1479,7 @@ function ContractSettingsSection() {
                 <ContractItemRow
                   key={item.id}
                   item={item}
+                  accountNames={accountNameMap}
                   onUpdate={handleUpdate}
                   onDelete={handleDelete}
                 />
@@ -1494,20 +1500,21 @@ function ContractSettingsSection() {
   );
 }
 
-function ContractItemRow({ item, onUpdate, onDelete }: {
+function ContractItemRow({ item, accountNames, onUpdate, onDelete }: {
   item: ContractItem;
+  accountNames: Map<string, string>;
   onUpdate: (id: number, field: string, value: number | boolean) => void;
   onDelete: (id: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [amount, setAmount] = useState(String(item.committedAmount));
-  const [threshold, setThreshold] = useState(String(item.warningThreshold));
+  const [threshold, setThreshold] = useState(String(Math.round(item.warningThreshold * 100)));
 
   const handleSave = () => {
     const newAmount = parseFloat(amount);
     const newThreshold = parseFloat(threshold);
     if (!isNaN(newAmount) && newAmount > 0) onUpdate(item.id, "committedAmount", newAmount);
-    if (!isNaN(newThreshold) && newThreshold > 0 && newThreshold <= 1) onUpdate(item.id, "warningThreshold", newThreshold);
+    if (!isNaN(newThreshold) && newThreshold >= 1 && newThreshold <= 100) onUpdate(item.id, "warningThreshold", newThreshold / 100);
     setEditing(false);
   };
 
@@ -1515,7 +1522,7 @@ function ContractItemRow({ item, onUpdate, onDelete }: {
     <tr className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
       <td className="px-2 py-2 text-zinc-200">{item.displayName}</td>
       <td className="px-2 py-2 text-zinc-400">{item.category}</td>
-      <td className="px-2 py-2 text-zinc-500 text-xs font-mono">{item.accountId ? `${item.accountId.slice(0, 8)}...` : "All"}</td>
+      <td className="px-2 py-2 text-zinc-500 text-xs">{item.accountId ? (accountNames.get(item.accountId) || item.accountId.slice(0, 12)) : "All"}</td>
       <td className="px-2 py-2 text-right font-mono text-zinc-200">
         {editing ? (
           <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)}
@@ -1525,7 +1532,7 @@ function ContractItemRow({ item, onUpdate, onDelete }: {
       <td className="px-2 py-2 text-right text-zinc-500">{item.unit}</td>
       <td className="px-2 py-2 text-right font-mono text-zinc-400">
         {editing ? (
-          <input type="number" step="0.01" min="0.01" max="1" value={threshold} onChange={(e) => setThreshold(e.target.value)}
+          <input type="number" step="1" min="1" max="100" value={threshold} onChange={(e) => setThreshold(e.target.value)}
             className="w-16 rounded border border-zinc-600 bg-zinc-900 px-1 py-0.5 text-right text-sm text-white" />
         ) : `${(item.warningThreshold * 100).toFixed(0)}%`}
       </td>

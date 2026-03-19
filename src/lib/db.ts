@@ -12,7 +12,7 @@ let _db: Database.Database | null = null;
 let _initFailed = false;
 
 const DB_PATH = process.env.DB_PATH || "/app/data/cf-reporting.db";
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 
 export function getDb(): Database.Database | null {
   if (_initFailed) return null;
@@ -1049,6 +1049,12 @@ function runMigrations(db: Database.Database): void {
     `);
 
     console.log("[db] Migration v12: zone_accounts mapping, account scoping, zone breakdown");
+  }
+
+  if (currentVersion < 13) {
+    // v13: Add account_name to zone_accounts for display purposes.
+    db.exec(`ALTER TABLE zone_accounts ADD COLUMN account_name TEXT DEFAULT ''`);
+    console.log("[db] Migration v13: added account_name to zone_accounts");
   }
 
   // Upsert schema version
