@@ -125,13 +125,13 @@ export default function ContractUsagePage() {
     }
   };
 
-  const handleRecalculate = async () => {
+  const handleRecalculate = async (backfill = false) => {
     setRecalculating(true);
     try {
       await fetch("/api/contract/usage/recalculate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ period }),
+        body: JSON.stringify(backfill ? { backfill: true } : { period }),
       });
       await Promise.all([fetchData(period), fetchHistories()]);
     } finally {
@@ -180,14 +180,25 @@ export default function ContractUsagePage() {
           ))}
         </select>
         {isOperator && (
-          <button
-            onClick={handleRecalculate}
-            disabled={recalculating}
-            className="flex items-center gap-1.5 rounded-md bg-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-600 disabled:opacity-50"
-          >
-            <RefreshCw size={14} className={recalculating ? "animate-spin" : ""} />
-            {recalculating ? "Calculating..." : "Recalculate"}
-          </button>
+          <>
+            <button
+              onClick={() => handleRecalculate(false)}
+              disabled={recalculating}
+              className="flex items-center gap-1.5 rounded-md bg-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-600 disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={recalculating ? "animate-spin" : ""} />
+              {recalculating ? "Calculating..." : "Recalculate"}
+            </button>
+            {histories.size === 0 || Array.from(histories.values()).some((h) => h.months.length < 2) ? (
+              <button
+                onClick={() => handleRecalculate(true)}
+                disabled={recalculating}
+                className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
+              >
+                {recalculating ? "Backfilling..." : "Backfill History"}
+              </button>
+            ) : null}
+          </>
         )}
       </div>
 

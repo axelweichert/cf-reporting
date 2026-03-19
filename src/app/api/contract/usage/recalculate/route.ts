@@ -3,6 +3,7 @@ import { validateOrigin, getAuthenticatedSession, requireOperator } from "@/lib/
 import { getDb } from "@/lib/db";
 import {
   calculateAllForPeriod,
+  backCalculateHistory,
   currentPeriod,
   detectNewCrossings,
 } from "@/lib/contract/usage-calculator";
@@ -21,11 +22,17 @@ export async function POST(request: NextRequest) {
   const db = getDb();
   if (!db) return Response.json({ error: "Database unavailable" }, { status: 503 });
 
-  const body = await request.json().catch(() => ({})) as { period?: string };
+  const body = await request.json().catch(() => ({})) as { period?: string; backfill?: boolean };
   const period = body.period || currentPeriod();
 
   if (!/^\d{4}-\d{2}$/.test(period)) {
     return Response.json({ error: "Invalid period format (expected YYYY-MM)" }, { status: 400 });
+  }
+
+  // If backfill requested (or no historical data exists), calculate all available months
+  if (body.backfill) {
+    backCalculateHistory(db);
+    return Response.json({ period, backfilled: true, message: "Back-calculated up to 12 months of history" });
   }
 
   const results = calculateAllForPeriod(db, period);

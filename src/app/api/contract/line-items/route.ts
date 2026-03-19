@@ -63,6 +63,18 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Back-calculate historical months for newly added items
+  if (created.length > 0) {
+    try {
+      const { getDb } = await import("@/lib/db");
+      const { backCalculateHistory } = await import("@/lib/contract/usage-calculator");
+      const db = getDb();
+      if (db) backCalculateHistory(db);
+    } catch {
+      // Non-critical – current month data is still available
+    }
+  }
+
   return Response.json({ created, errors }, { status: created.length > 0 ? 201 : 400 });
 }
 
