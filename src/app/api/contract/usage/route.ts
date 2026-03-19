@@ -7,8 +7,9 @@ import {
   currentPeriod,
   getUsageForPeriod,
   getUsageHistory,
+  getZoneBreakdown,
 } from "@/lib/contract/usage-calculator";
-import type { ContractUsageEntry, ContractUsageMonthly, ContractUsageHistory, ContractUsageAllHistories, ContractUsageHistoryMonth } from "@/lib/contract/types";
+import type { ContractUsageEntry, ContractUsageMonthly, ContractUsageHistory, ContractUsageAllHistories, ContractUsageHistoryMonth, ContractUsageZoneBreakdown } from "@/lib/contract/types";
 
 /** GET /api/contract/usage?period=2026-03&history=cdn-data-transfer */
 export async function GET(request: NextRequest) {
@@ -24,6 +25,29 @@ export async function GET(request: NextRequest) {
   // Validate period format
   if (!/^\d{4}-\d{2}$/.test(period)) {
     return Response.json({ error: "Invalid period format (expected YYYY-MM)" }, { status: 400 });
+  }
+
+  // If requesting zone breakdown for a specific line item
+  const breakdownKey = searchParams.get("breakdown");
+  if (breakdownKey) {
+    const lineItems = getContractLineItems();
+    const item = lineItems.find((li) => li.productKey === breakdownKey);
+    if (!item) return Response.json({ error: "Line item not found" }, { status: 404 });
+
+    const catalog = CATALOG_BY_KEY.get(breakdownKey);
+    const zones = getZoneBreakdown(db, item.id, period);
+    const result: ContractUsageZoneBreakdown = {
+      lineItemId: item.id,
+      productKey: breakdownKey,
+      period,
+      zones: zones.map((z) => ({
+        zoneId: z.zone_id,
+        zoneName: z.zone_name,
+        usageValue: z.usage_value,
+        unit: catalog?.unit ?? item.unit,
+      })),
+    };
+    return Response.json(result);
   }
 
   // If requesting all histories (for chart view)

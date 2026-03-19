@@ -86,7 +86,7 @@ export function calculateLineItem(
 
   const start = periodStart(period);
   const end = periodEnd(period);
-  const result = catalog.calculator(db, start, end);
+  const result = catalog.calculator(db, start, end, item.account_id ?? undefined);
 
   const pct = item.committed_amount > 0
     ? Math.round((result.value / item.committed_amount) * 10000) / 100
@@ -129,6 +129,15 @@ export function calculateAllForPeriod(
        calculated_at = excluded.calculated_at`,
   );
 
+  const upsertZone = db.prepare(
+    `INSERT INTO contract_usage_zone_breakdown (line_item_id, period, zone_id, zone_name, usage_value, calculated_at)
+     VALUES (?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(line_item_id, period, zone_id) DO UPDATE SET
+       zone_name = excluded.zone_name,
+       usage_value = excluded.usage_value,
+       calculated_at = excluded.calculated_at`,
+  );
+
   const tx = db.transaction(() => {
     for (const item of items) {
       const calc = calculateLineItem(db, item, period);
@@ -142,6 +151,17 @@ export function calculateAllForPeriod(
           calc.committedAmount,
           calc.usagePct,
         );
+
+        // Store per-zone breakdown for zone-scoped products
+        const catalog = CATALOG_BY_KEY.get(item.product_key);
+        if (catalog?.zoneBreakdown) {
+          const start = periodStart(period);
+          const end = periodEnd(period);
+          const breakdown = catalog.zoneBreakdown(db, start, end, item.account_id ?? undefined);
+          for (const z of breakdown) {
+            upsertZone.run(calc.lineItemId, period, z.zoneId, z.zoneName, z.usageValue);
+          }
+        }
       }
     }
   });
@@ -266,6 +286,22 @@ export function getUsageForPeriod(
   return db.prepare(
     `SELECT * FROM contract_usage_monthly WHERE period = ? ORDER BY line_item_id`,
   ).all(period) as ContractUsageMonthlyRow[];
+}
+
+/**
+ * Get per-zone usage breakdown for a line item in a specific period.
+ */
+export function getZoneBreakdown(
+  db: Database.Database,
+  lineItemId: number,
+  period: string,
+): Array<{ zone_id: string; zone_name: string; usage_value: number }> {
+  return db.prepare(
+    `SELECT zone_id, zone_name, usage_value
+     FROM contract_usage_zone_breakdown
+     WHERE line_item_id = ? AND period = ?
+     ORDER BY usage_value DESC`,
+  ).all(lineItemId, period) as Array<{ zone_id: string; zone_name: string; usage_value: number }>;
 }
 
 /**

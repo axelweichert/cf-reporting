@@ -5,9 +5,14 @@
  * - display metadata (name, category, unit, description)
  * - a probe target for auto-detection
  * - a calculator function that derives monthly usage from raw SQLite tables
+ * - an optional zone-breakdown function for drill-down
  *
- * All calculator functions receive (db, monthStart, monthEnd) where timestamps
- * are unix epoch seconds in UTC. They return { value, rawValue, dataAvailable }.
+ * All calculator functions receive (db, monthStart, monthEnd, accountId?)
+ * where timestamps are unix epoch seconds in UTC.
+ *
+ * Zone-scoped calculators join zone_accounts to filter by account_id
+ * and plan_name = 'Enterprise' (free/pro/business are unmetered).
+ * Account-scoped calculators filter by scope_id = accountId directly.
  */
 
 import type Database from "better-sqlite3";
@@ -36,65 +41,117 @@ function result(rawValue: number, divisor: number): UsageResult {
   };
 }
 
-/** SUM a single column from raw_http_hourly across all zones for a month. */
+/**
+ * Enterprise zone filter clause.
+ * Joins zone_accounts to restrict to enterprise zones for a given account.
+ * Returns " AND zone_id IN (SELECT zone_id FROM zone_accounts WHERE ...)"
+ */
+function enterpriseZoneFilter(accountId?: string): string {
+  if (!accountId) return "";
+  return ` AND zone_id IN (SELECT zone_id FROM zone_accounts WHERE account_id = '${accountId}' AND plan_name = 'Enterprise')`;
+}
+
+/** List of enterprise zone_ids for a given account. */
+function getEnterpriseZoneIds(db: Database.Database, accountId?: string): Array<{ zone_id: string; zone_name: string }> {
+  if (!accountId) {
+    return db.prepare("SELECT zone_id, zone_name FROM zone_accounts WHERE plan_name = 'Enterprise'").all() as Array<{ zone_id: string; zone_name: string }>;
+  }
+  return db.prepare(
+    "SELECT zone_id, zone_name FROM zone_accounts WHERE account_id = ? AND plan_name = 'Enterprise'",
+  ).all(accountId) as Array<{ zone_id: string; zone_name: string }>;
+}
+
+/** SUM a column from raw_http_hourly for enterprise zones of an account. */
 function sumHttpColumn(
-  db: Database.Database, column: string, start: number, end: number,
+  db: Database.Database, column: string, start: number, end: number, accountId?: string,
 ): number | null {
+  const filter = enterpriseZoneFilter(accountId);
   const row = db.prepare(
     `SELECT COALESCE(SUM(${column}), 0) AS total, COUNT(*) AS cnt
-     FROM raw_http_hourly WHERE ts >= ? AND ts < ?`,
+     FROM raw_http_hourly WHERE ts >= ? AND ts < ?${filter}`,
   ).get(start, end) as { total: number; cnt: number } | undefined;
   if (!row || row.cnt === 0) return null;
   return row.total;
 }
 
-/** SUM queries from raw_dns_hourly across all zones for a month. */
+/** Per-zone breakdown of an HTTP column for enterprise zones. */
+function breakdownHttpColumn(
+  db: Database.Database, column: string, start: number, end: number, accountId?: string,
+): Array<{ zoneId: string; zoneName: string; usageValue: number }> {
+  const zones = getEnterpriseZoneIds(db, accountId);
+  if (zones.length === 0) return [];
+
+  return zones.map((z) => {
+    const row = db.prepare(
+      `SELECT COALESCE(SUM(${column}), 0) AS total
+       FROM raw_http_hourly WHERE zone_id = ? AND ts >= ? AND ts < ?`,
+    ).get(z.zone_id, start, end) as { total: number };
+    return { zoneId: z.zone_id, zoneName: z.zone_name, usageValue: row.total };
+  }).filter((r) => r.usageValue > 0);
+}
+
+/** SUM queries from raw_dns_hourly for enterprise zones. */
 function sumDnsQueries(
-  db: Database.Database, start: number, end: number,
+  db: Database.Database, start: number, end: number, accountId?: string,
 ): number | null {
+  const filter = enterpriseZoneFilter(accountId);
   const row = db.prepare(
     `SELECT COALESCE(SUM(queries), 0) AS total, COUNT(*) AS cnt
-     FROM raw_dns_hourly WHERE ts >= ? AND ts < ?`,
+     FROM raw_dns_hourly WHERE ts >= ? AND ts < ?${filter}`,
   ).get(start, end) as { total: number; cnt: number } | undefined;
   if (!row || row.cnt === 0) return null;
   return row.total;
 }
 
-/** SUM a metric from raw_ext_ts for a given dataset key. */
+/** Per-zone DNS breakdown. */
+function breakdownDnsQueries(
+  db: Database.Database, start: number, end: number, accountId?: string,
+): Array<{ zoneId: string; zoneName: string; usageValue: number }> {
+  const zones = getEnterpriseZoneIds(db, accountId);
+  return zones.map((z) => {
+    const row = db.prepare(
+      `SELECT COALESCE(SUM(queries), 0) AS total
+       FROM raw_dns_hourly WHERE zone_id = ? AND ts >= ? AND ts < ?`,
+    ).get(z.zone_id, start, end) as { total: number };
+    return { zoneId: z.zone_id, zoneName: z.zone_name, usageValue: row.total };
+  }).filter((r) => r.usageValue > 0);
+}
+
+/** SUM a metric from raw_ext_ts for a given dataset, filtered by account. */
 function sumExtTs(
-  db: Database.Database, dataset: string, metric: string, start: number, end: number,
+  db: Database.Database, dataset: string, metric: string, start: number, end: number, accountId?: string,
 ): number | null {
+  const acctFilter = accountId ? ` AND scope_id = '${accountId}'` : "";
   const row = db.prepare(
     `SELECT COALESCE(SUM(value), 0) AS total, COUNT(*) AS cnt
-     FROM raw_ext_ts WHERE dataset = ? AND metric = ? AND ts >= ? AND ts < ?`,
+     FROM raw_ext_ts WHERE dataset = ? AND metric = ? AND ts >= ? AND ts < ?${acctFilter}`,
   ).get(dataset, metric, start, end) as { total: number; cnt: number } | undefined;
   if (!row || row.cnt === 0) return null;
   return row.total;
 }
 
-/** MAX of a metric from raw_ext_ts (for storage metrics). */
+/** MAX of a metric from raw_ext_ts. */
 function maxExtTs(
-  db: Database.Database, dataset: string, metric: string, start: number, end: number,
+  db: Database.Database, dataset: string, metric: string, start: number, end: number, accountId?: string,
 ): number | null {
+  const acctFilter = accountId ? ` AND scope_id = '${accountId}'` : "";
   const row = db.prepare(
     `SELECT COALESCE(MAX(value), 0) AS peak, COUNT(*) AS cnt
-     FROM raw_ext_ts WHERE dataset = ? AND metric = ? AND ts >= ? AND ts < ?`,
+     FROM raw_ext_ts WHERE dataset = ? AND metric = ? AND ts >= ? AND ts < ?${acctFilter}`,
   ).get(dataset, metric, start, end) as { peak: number; cnt: number } | undefined;
   if (!row || row.cnt === 0) return null;
   return row.peak;
 }
 
-/**
- * Average of daily MAX values for a storage metric (mimics CF billing for R2).
- * Groups by day, takes MAX per day, then averages across days.
- */
+/** Average of daily MAX values for a storage metric. */
 function avgDailyMaxExtTs(
-  db: Database.Database, dataset: string, metric: string, start: number, end: number,
+  db: Database.Database, dataset: string, metric: string, start: number, end: number, accountId?: string,
 ): number | null {
+  const acctFilter = accountId ? ` AND scope_id = '${accountId}'` : "";
   const rows = db.prepare(
     `SELECT MAX(value) AS daily_max
      FROM raw_ext_ts
-     WHERE dataset = ? AND metric = ? AND ts >= ? AND ts < ?
+     WHERE dataset = ? AND metric = ? AND ts >= ? AND ts < ?${acctFilter}
      GROUP BY (ts / 86400)`,
   ).all(dataset, metric, start, end) as Array<{ daily_max: number }>;
   if (rows.length === 0) return null;
@@ -102,20 +159,18 @@ function avgDailyMaxExtTs(
   return sum / rows.length;
 }
 
-/**
- * SUM of a metric from raw_ext_dim filtered by dimension key values.
- * Used for R2 Class A/B ops and KV read/write separation.
- */
+/** SUM from raw_ext_dim filtered by dimension key values. */
 function sumExtDimFiltered(
   db: Database.Database, dataset: string, dimName: string,
-  keys: string[], metric: string, start: number, end: number,
+  keys: string[], metric: string, start: number, end: number, accountId?: string,
 ): number | null {
   const placeholders = keys.map(() => "?").join(",");
+  const acctFilter = accountId ? ` AND scope_id = '${accountId}'` : "";
   const row = db.prepare(
     `SELECT COALESCE(SUM(value), 0) AS total, COUNT(*) AS cnt
      FROM raw_ext_dim
      WHERE dataset = ? AND dim = ? AND key IN (${placeholders})
-       AND metric = ? AND ts >= ? AND ts < ?`,
+       AND metric = ? AND ts >= ? AND ts < ?${acctFilter}`,
   ).get(dataset, dimName, ...keys, metric, start, end) as { total: number; cnt: number } | undefined;
   if (!row || row.cnt === 0) return null;
   return row.total;
@@ -125,98 +180,56 @@ function sumExtDimFiltered(
 // Product Catalog
 // =============================================================================
 
-// R2 Class A action types (mutate operations)
 const R2_CLASS_A_ACTIONS = [
   "PutObject", "CopyObject", "ListBucket", "ListMultipartUploads",
   "CreateMultipartUpload", "CompleteMultipartUpload", "AbortMultipartUpload",
   "UploadPart", "UploadPartCopy", "DeleteObject", "DeleteObjects",
 ];
 
-// R2 Class B action types (read operations)
 const R2_CLASS_B_ACTIONS = [
   "GetObject", "HeadObject", "HeadBucket",
 ];
 
+// Helper to build HTTP-based entries (CDN, WAF, Bot, RL all share the same data)
+function httpEntry(
+  key: string, displayName: string, category: string, unit: string, description: string,
+  column: string, divisor: number, probeAlways = false,
+): ProductCatalogEntry {
+  return {
+    key, displayName, category, unit, description,
+    probeTable: probeAlways ? { type: "always" as const } : { type: "raw_http" as const },
+    zoneScoped: true,
+    calculator: (db, start, end, accountId) => {
+      const raw = sumHttpColumn(db, column, start, end, accountId);
+      return raw === null ? noData() : result(raw, divisor);
+    },
+    zoneBreakdown: (db, start, end, accountId) =>
+      breakdownHttpColumn(db, column, start, end, accountId).map((z) => ({
+        ...z, usageValue: Math.round((z.usageValue / divisor) * 100) / 100,
+      })),
+  };
+}
+
 export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
   // ===== CDN =====
-  {
-    key: "cdn-data-transfer",
-    displayName: "CDN \u2013 Data Transfer",
-    category: "CDN",
-    unit: "TB",
-    description: "Total edge data transfer (edgeResponseBytes) across all zones",
-    probeTable: { type: "raw_http" },
-    calculator: (db, start, end) => {
-      const raw = sumHttpColumn(db, "bytes", start, end);
-      return raw === null ? noData() : result(raw, TB);
-    },
-  },
-  {
-    key: "cdn-requests",
-    displayName: "CDN \u2013 Requests",
-    category: "CDN",
-    unit: "MM",
-    description: "Total HTTP requests across all zones",
-    probeTable: { type: "raw_http" },
-    calculator: (db, start, end) => {
-      const raw = sumHttpColumn(db, "requests", start, end);
-      return raw === null ? noData() : result(raw, MM);
-    },
-  },
+  httpEntry("cdn-data-transfer", "CDN \u2013 Data Transfer", "CDN", "TB",
+    "Total edge data transfer (edgeResponseBytes) across enterprise zones", "bytes", TB),
+  httpEntry("cdn-requests", "CDN \u2013 Requests", "CDN", "MM",
+    "Total HTTP requests across enterprise zones", "requests", MM),
 
   // ===== WAF =====
-  {
-    key: "waf-data-transfer",
-    displayName: "WAF \u2013 Data Transfer",
-    category: "WAF",
-    unit: "TB",
-    description: "WAF-processed data transfer (same as CDN \u2013 WAF inspects all traffic)",
-    probeTable: { type: "always" },
-    calculator: (db, start, end) => {
-      const raw = sumHttpColumn(db, "bytes", start, end);
-      return raw === null ? noData() : result(raw, TB);
-    },
-  },
-  {
-    key: "waf-requests",
-    displayName: "WAF \u2013 Requests",
-    category: "WAF",
-    unit: "MM",
-    description: "WAF-processed requests (same as CDN \u2013 WAF inspects all traffic)",
-    probeTable: { type: "always" },
-    calculator: (db, start, end) => {
-      const raw = sumHttpColumn(db, "requests", start, end);
-      return raw === null ? noData() : result(raw, MM);
-    },
-  },
+  httpEntry("waf-data-transfer", "WAF \u2013 Data Transfer", "WAF", "TB",
+    "WAF-processed data transfer (same as CDN \u2013 WAF inspects all traffic)", "bytes", TB, true),
+  httpEntry("waf-requests", "WAF \u2013 Requests", "WAF", "MM",
+    "WAF-processed requests (same as CDN \u2013 WAF inspects all traffic)", "requests", MM, true),
 
   // ===== Bot Management =====
-  {
-    key: "bot-mgmt-requests",
-    displayName: "Bot Management \u2013 Requests",
-    category: "Bot Management",
-    unit: "MM",
-    description: "Requests evaluated by Bot Management (all HTTP traffic)",
-    probeTable: { type: "always" },
-    calculator: (db, start, end) => {
-      const raw = sumHttpColumn(db, "requests", start, end);
-      return raw === null ? noData() : result(raw, MM);
-    },
-  },
+  httpEntry("bot-mgmt-requests", "Bot Management \u2013 Requests", "Bot Management", "MM",
+    "Requests evaluated by Bot Management (all HTTP traffic)", "requests", MM, true),
 
   // ===== Rate Limiting =====
-  {
-    key: "rate-limiting-requests",
-    displayName: "Rate Limiting \u2013 Requests",
-    category: "Rate Limiting",
-    unit: "MM",
-    description: "Requests evaluated by Rate Limiting rules (all HTTP traffic)",
-    probeTable: { type: "always" },
-    calculator: (db, start, end) => {
-      const raw = sumHttpColumn(db, "requests", start, end);
-      return raw === null ? noData() : result(raw, MM);
-    },
-  },
+  httpEntry("rate-limiting-requests", "Rate Limiting \u2013 Requests", "Rate Limiting", "MM",
+    "Requests evaluated by Rate Limiting rules (all HTTP traffic)", "requests", MM, true),
 
   // ===== Foundation DNS =====
   {
@@ -224,33 +237,49 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     displayName: "Foundation DNS \u2013 Queries",
     category: "DNS",
     unit: "MM",
-    description: "Total authoritative DNS queries across all zones",
+    description: "Total authoritative DNS queries across enterprise zones",
     probeTable: { type: "raw_dns" },
-    calculator: (db, start, end) => {
-      const raw = sumDnsQueries(db, start, end);
+    zoneScoped: true,
+    calculator: (db, start, end, accountId) => {
+      const raw = sumDnsQueries(db, start, end, accountId);
       return raw === null ? noData() : result(raw, MM);
     },
+    zoneBreakdown: (db, start, end, accountId) =>
+      breakdownDnsQueries(db, start, end, accountId).map((z) => ({
+        ...z, usageValue: Math.round((z.usageValue / MM) * 100) / 100,
+      })),
   },
   {
     key: "dns-records",
     displayName: "Foundation DNS \u2013 Records",
     category: "DNS",
     unit: "10K records",
-    description: "Total DNS records across all zones (latest snapshot)",
+    description: "Total DNS records across enterprise zones (latest snapshot)",
     probeTable: { type: "dns_records" },
-    calculator: (db) => {
-      // Count distinct records from the most recent collection
+    zoneScoped: true,
+    calculator: (db, _start, _end, accountId) => {
+      const filter = enterpriseZoneFilter(accountId);
       const row = db.prepare(
         `SELECT COUNT(DISTINCT record_id) AS cnt
          FROM dns_records
-         WHERE collected_at = (SELECT MAX(collected_at) FROM dns_records)`,
+         WHERE collected_at = (SELECT MAX(collected_at) FROM dns_records)${filter}`,
       ).get() as { cnt: number } | undefined;
       if (!row || row.cnt === 0) return noData();
       return result(row.cnt, TEN_K);
     },
+    zoneBreakdown: (db, _start, _end, accountId) => {
+      const zones = getEnterpriseZoneIds(db, accountId);
+      return zones.map((z) => {
+        const row = db.prepare(
+          `SELECT COUNT(DISTINCT record_id) AS cnt FROM dns_records
+           WHERE zone_id = ? AND collected_at = (SELECT MAX(collected_at) FROM dns_records WHERE zone_id = ?)`,
+        ).get(z.zone_id, z.zone_id) as { cnt: number };
+        return { zoneId: z.zone_id, zoneName: z.zone_name, usageValue: Math.round((row.cnt / TEN_K) * 100) / 100 };
+      }).filter((r) => r.usageValue > 0);
+    },
   },
 
-  // ===== Workers =====
+  // ===== Workers (account-scoped) =====
   {
     key: "workers-requests",
     displayName: "Workers \u2013 Requests",
@@ -258,8 +287,9 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "MM",
     description: "Total Worker invocations across all scripts",
     probeTable: { type: "ext", dataset: "ext:workers" },
-    calculator: (db, start, end) => {
-      const raw = sumExtTs(db, "ext:workers", "sum.requests", start, end);
+    zoneScoped: false,
+    calculator: (db, start, end, accountId) => {
+      const raw = sumExtTs(db, "ext:workers", "sum.requests", start, end, accountId);
       return raw === null ? noData() : result(raw, MM);
     },
   },
@@ -270,16 +300,16 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "MM ms",
     description: "Total Worker CPU time consumed",
     probeTable: { type: "ext", dataset: "ext:workers" },
-    calculator: (db, start, end) => {
-      // Stored as microseconds, convert to milliseconds then to millions
-      const raw = sumExtTs(db, "ext:workers", "sum.cpuTimeUs", start, end);
+    zoneScoped: false,
+    calculator: (db, start, end, accountId) => {
+      const raw = sumExtTs(db, "ext:workers", "sum.cpuTimeUs", start, end, accountId);
       if (raw === null) return noData();
       const ms = raw / THOUSAND;
       return result(ms, MM);
     },
   },
 
-  // ===== R2 =====
+  // ===== R2 (account-scoped) =====
   {
     key: "r2-storage",
     displayName: "R2 \u2013 Storage",
@@ -287,8 +317,9 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "TB",
     description: "Average daily peak R2 storage (GB-month billing model)",
     probeTable: { type: "ext", dataset: "ext:r2-storage" },
-    calculator: (db, start, end) => {
-      const raw = avgDailyMaxExtTs(db, "ext:r2-storage", "max.payloadSize", start, end);
+    zoneScoped: false,
+    calculator: (db, start, end, accountId) => {
+      const raw = avgDailyMaxExtTs(db, "ext:r2-storage", "max.payloadSize", start, end, accountId);
       return raw === null ? noData() : result(raw, TB);
     },
   },
@@ -299,10 +330,9 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "MM",
     description: "Mutating R2 operations (Put, Copy, List, Delete, etc.)",
     probeTable: { type: "ext_dim", dataset: "ext:r2-ops" },
-    calculator: (db, start, end) => {
-      const raw = sumExtDimFiltered(
-        db, "ext:r2-ops", "actionType", R2_CLASS_A_ACTIONS, "sum.requests", start, end,
-      );
+    zoneScoped: false,
+    calculator: (db, start, end, accountId) => {
+      const raw = sumExtDimFiltered(db, "ext:r2-ops", "actionType", R2_CLASS_A_ACTIONS, "sum.requests", start, end, accountId);
       return raw === null ? noData() : result(raw, MM);
     },
   },
@@ -313,15 +343,14 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "MM",
     description: "Read R2 operations (Get, Head)",
     probeTable: { type: "ext_dim", dataset: "ext:r2-ops" },
-    calculator: (db, start, end) => {
-      const raw = sumExtDimFiltered(
-        db, "ext:r2-ops", "actionType", R2_CLASS_B_ACTIONS, "sum.requests", start, end,
-      );
+    zoneScoped: false,
+    calculator: (db, start, end, accountId) => {
+      const raw = sumExtDimFiltered(db, "ext:r2-ops", "actionType", R2_CLASS_B_ACTIONS, "sum.requests", start, end, accountId);
       return raw === null ? noData() : result(raw, MM);
     },
   },
 
-  // ===== KV =====
+  // ===== KV (account-scoped) =====
   {
     key: "kv-reads",
     displayName: "Workers KV \u2013 Reads",
@@ -329,10 +358,9 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "MM",
     description: "KV read operations",
     probeTable: { type: "ext_dim", dataset: "ext:kv-ops" },
-    calculator: (db, start, end) => {
-      const raw = sumExtDimFiltered(
-        db, "ext:kv-ops", "actionType", ["read"], "sum.requests", start, end,
-      );
+    zoneScoped: false,
+    calculator: (db, start, end, accountId) => {
+      const raw = sumExtDimFiltered(db, "ext:kv-ops", "actionType", ["read"], "sum.requests", start, end, accountId);
       return raw === null ? noData() : result(raw, MM);
     },
   },
@@ -343,10 +371,9 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "MM",
     description: "KV write, delete, and list operations",
     probeTable: { type: "ext_dim", dataset: "ext:kv-ops" },
-    calculator: (db, start, end) => {
-      const raw = sumExtDimFiltered(
-        db, "ext:kv-ops", "actionType", ["write", "delete", "list"], "sum.requests", start, end,
-      );
+    zoneScoped: false,
+    calculator: (db, start, end, accountId) => {
+      const raw = sumExtDimFiltered(db, "ext:kv-ops", "actionType", ["write", "delete", "list"], "sum.requests", start, end, accountId);
       return raw === null ? noData() : result(raw, MM);
     },
   },
@@ -357,8 +384,9 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "GB",
     description: "Peak KV storage in the period",
     probeTable: { type: "ext", dataset: "ext:kv-storage" },
-    calculator: (db, start, end) => {
-      const raw = maxExtTs(db, "ext:kv-storage", "max.byteCount", start, end);
+    zoneScoped: false,
+    calculator: (db, start, end, accountId) => {
+      const raw = maxExtTs(db, "ext:kv-storage", "max.byteCount", start, end, accountId);
       return raw === null ? noData() : result(raw, GB);
     },
   },
@@ -371,8 +399,9 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "100K",
     description: "Total images served to end users",
     probeTable: { type: "ext", dataset: "ext:images" },
-    calculator: (db, start, end) => {
-      const raw = sumExtTs(db, "ext:images", "sum.requests", start, end);
+    zoneScoped: false,
+    calculator: (db, start, end, accountId) => {
+      const raw = sumExtTs(db, "ext:images", "sum.requests", start, end, accountId);
       return raw === null ? noData() : result(raw, HUNDRED_K);
     },
   },
@@ -383,14 +412,26 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "1K",
     description: "Image resizing/transformation requests",
     probeTable: { type: "ext", dataset: "ext:image-resizing" },
-    calculator: (db, start, end) => {
-      const raw = sumExtTs(db, "ext:image-resizing", "sum.requests", start, end);
-      if (raw === null) {
-        // Fallback: try count metric
-        const cnt = sumExtTs(db, "ext:image-resizing", "count", start, end);
-        return cnt === null ? noData() : result(cnt, THOUSAND);
+    zoneScoped: true,
+    calculator: (db, start, end, accountId) => {
+      // image-resizing is zone-scoped in ext datasets
+      const filter = accountId
+        ? ` AND scope_id IN (SELECT zone_id FROM zone_accounts WHERE account_id = '${accountId}' AND plan_name = 'Enterprise')`
+        : "";
+      const row = db.prepare(
+        `SELECT COALESCE(SUM(value), 0) AS total, COUNT(*) AS cnt
+         FROM raw_ext_ts WHERE dataset = 'ext:image-resizing' AND metric = 'sum.requests'
+           AND ts >= ? AND ts < ?${filter}`,
+      ).get(start, end) as { total: number; cnt: number } | undefined;
+      if (!row || row.cnt === 0) {
+        const cnt = db.prepare(
+          `SELECT COALESCE(SUM(value), 0) AS total, COUNT(*) AS cnt
+           FROM raw_ext_ts WHERE dataset = 'ext:image-resizing' AND metric = 'count'
+             AND ts >= ? AND ts < ?${filter}`,
+        ).get(start, end) as { total: number; cnt: number } | undefined;
+        return (!cnt || cnt.cnt === 0) ? noData() : result(cnt.total, THOUSAND);
       }
-      return result(raw, THOUSAND);
+      return result(row.total, THOUSAND);
     },
   },
 
@@ -402,13 +443,22 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "MM",
     description: "Total Zaraz events processed",
     probeTable: { type: "ext", dataset: "ext:zaraz-track" },
-    calculator: (db, start, end) => {
-      const raw = sumExtTs(db, "ext:zaraz-track", "count", start, end);
-      return raw === null ? noData() : result(raw, MM);
+    zoneScoped: true,
+    calculator: (db, start, end, accountId) => {
+      const filter = accountId
+        ? ` AND scope_id IN (SELECT zone_id FROM zone_accounts WHERE account_id = '${accountId}' AND plan_name = 'Enterprise')`
+        : "";
+      const row = db.prepare(
+        `SELECT COALESCE(SUM(value), 0) AS total, COUNT(*) AS cnt
+         FROM raw_ext_ts WHERE dataset = 'ext:zaraz-track' AND metric = 'count'
+           AND ts >= ? AND ts < ?${filter}`,
+      ).get(start, end) as { total: number; cnt: number } | undefined;
+      if (!row || row.cnt === 0) return noData();
+      return result(row.total, MM);
     },
   },
 
-  // ===== Stream =====
+  // ===== Stream (account-scoped) =====
   {
     key: "stream-minutes-viewed",
     displayName: "Stream \u2013 Minutes Viewed",
@@ -416,8 +466,9 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "1K min",
     description: "Total Stream video minutes delivered",
     probeTable: { type: "ext", dataset: "ext:stream" },
-    calculator: (db, start, end) => {
-      const raw = sumExtTs(db, "ext:stream", "sum.minutesViewed", start, end);
+    zoneScoped: false,
+    calculator: (db, start, end, accountId) => {
+      const raw = sumExtTs(db, "ext:stream", "sum.minutesViewed", start, end, accountId);
       return raw === null ? noData() : result(raw, THOUSAND);
     },
   },
@@ -430,12 +481,13 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "zones",
     description: "Number of primary (Enterprise) zones",
     probeTable: { type: "zones" },
-    calculator: (db) => {
-      // Count zones from the latest collection_log with scope_name present
-      // Fall back to counting distinct zone_ids in raw_http_hourly
+    zoneScoped: true,
+    calculator: (db, _start, _end, accountId) => {
+      const acctFilter = accountId ? " AND account_id = ?" : "";
+      const params = accountId ? [accountId] : [];
       const row = db.prepare(
-        `SELECT COUNT(DISTINCT zone_id) AS cnt FROM raw_http_hourly`,
-      ).get() as { cnt: number } | undefined;
+        `SELECT COUNT(*) AS cnt FROM zone_accounts WHERE plan_name = 'Enterprise'${acctFilter}`,
+      ).get(...params) as { cnt: number } | undefined;
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -447,20 +499,20 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "zones",
     description: "Number of zones with Advanced Certificate Manager",
     probeTable: { type: "ssl_certs" },
-    calculator: (db) => {
+    zoneScoped: true,
+    calculator: (db, _start, _end, accountId) => {
+      const filter = enterpriseZoneFilter(accountId);
       const row = db.prepare(
         `SELECT COUNT(DISTINCT zone_id) AS cnt
          FROM ssl_certificates
-         WHERE collected_at = (SELECT MAX(collected_at) FROM ssl_certificates)`,
+         WHERE collected_at = (SELECT MAX(collected_at) FROM ssl_certificates)${filter}`,
       ).get() as { cnt: number } | undefined;
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
   },
 
-  // ===== Zero Trust (seat-based) =====
-  // ZT billing is per-seat/user. Access + Gateway share a single unified seat.
-  // Add-ons (RBI, DLP, CASB) are also per-seat.
+  // ===== Zero Trust (account-scoped, seat-based) =====
   {
     key: "zt-seats",
     displayName: "Zero Trust \u2013 Seats",
@@ -468,14 +520,15 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "seats",
     description: "Active Zero Trust seats (users with Access or Gateway seat)",
     probeTable: { type: "zt_users" },
-    calculator: (db) => {
-      // Count unique users who hold an Access or Gateway seat at latest snapshot
+    zoneScoped: false,
+    calculator: (db, _start, _end, accountId) => {
+      const acctFilter = accountId ? " AND account_id = ?" : "";
+      const params = accountId ? [accountId] : [];
       const row = db.prepare(
-        `SELECT COUNT(*) AS cnt
-         FROM zt_users
+        `SELECT COUNT(*) AS cnt FROM zt_users
          WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
-           AND (access_seat = 1 OR gateway_seat = 1)`,
-      ).get() as { cnt: number } | undefined;
+           AND (access_seat = 1 OR gateway_seat = 1)${acctFilter}`,
+      ).get(...params) as { cnt: number } | undefined;
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -487,13 +540,15 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "seats",
     description: "Users with an active Access (ZTNA) seat",
     probeTable: { type: "zt_users" },
-    calculator: (db) => {
+    zoneScoped: false,
+    calculator: (db, _start, _end, accountId) => {
+      const acctFilter = accountId ? " AND account_id = ?" : "";
+      const params = accountId ? [accountId] : [];
       const row = db.prepare(
-        `SELECT COUNT(*) AS cnt
-         FROM zt_users
+        `SELECT COUNT(*) AS cnt FROM zt_users
          WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
-           AND access_seat = 1`,
-      ).get() as { cnt: number } | undefined;
+           AND access_seat = 1${acctFilter}`,
+      ).get(...params) as { cnt: number } | undefined;
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -505,13 +560,15 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "seats",
     description: "Users with an active Gateway (SWG) seat",
     probeTable: { type: "zt_users" },
-    calculator: (db) => {
+    zoneScoped: false,
+    calculator: (db, _start, _end, accountId) => {
+      const acctFilter = accountId ? " AND account_id = ?" : "";
+      const params = accountId ? [accountId] : [];
       const row = db.prepare(
-        `SELECT COUNT(*) AS cnt
-         FROM zt_users
+        `SELECT COUNT(*) AS cnt FROM zt_users
          WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
-           AND gateway_seat = 1`,
-      ).get() as { cnt: number } | undefined;
+           AND gateway_seat = 1${acctFilter}`,
+      ).get(...params) as { cnt: number } | undefined;
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -521,21 +578,13 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     displayName: "Zero Trust \u2013 Browser Isolation",
     category: "Zero Trust",
     unit: "seats",
-    description: "Unique users with Remote Browser Isolation sessions",
+    description: "Remote Browser Isolation session count",
     probeTable: { type: "ext", dataset: "ext:browser-isolation" },
-    calculator: (db, start, end) => {
-      // RBI is a per-seat add-on. Count unique sessions as a proxy for active users.
-      // The browser-isolation dataset tracks session counts, not unique users,
-      // so this is an approximation. Falls back to total ZT seat count if no RBI data.
-      const row = db.prepare(
-        `SELECT COALESCE(SUM(value), 0) AS total, COUNT(*) AS cnt
-         FROM raw_ext_ts
-         WHERE dataset = 'ext:browser-isolation' AND metric = 'count'
-           AND ts >= ? AND ts < ?`,
-      ).get(start, end) as { total: number; cnt: number } | undefined;
-      if (!row || row.cnt === 0) return noData();
-      // Return session count; the committed amount represents licensed seats
-      return { value: row.total, rawValue: row.total, dataAvailable: true };
+    zoneScoped: false,
+    calculator: (db, start, end, accountId) => {
+      const raw = sumExtTs(db, "ext:browser-isolation", "count", start, end, accountId);
+      if (raw === null) return noData();
+      return { value: raw, rawValue: raw, dataAvailable: true };
     },
   },
   {
@@ -545,14 +594,15 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "seats",
     description: "Advanced DLP add-on seats (same pool as base ZT seats)",
     probeTable: { type: "zt_users" },
-    calculator: (db) => {
-      // DLP is licensed per-seat, same count as base ZT seats
+    zoneScoped: false,
+    calculator: (db, _start, _end, accountId) => {
+      const acctFilter = accountId ? " AND account_id = ?" : "";
+      const params = accountId ? [accountId] : [];
       const row = db.prepare(
-        `SELECT COUNT(*) AS cnt
-         FROM zt_users
+        `SELECT COUNT(*) AS cnt FROM zt_users
          WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
-           AND (access_seat = 1 OR gateway_seat = 1)`,
-      ).get() as { cnt: number } | undefined;
+           AND (access_seat = 1 OR gateway_seat = 1)${acctFilter}`,
+      ).get(...params) as { cnt: number } | undefined;
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -564,14 +614,15 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     unit: "seats",
     description: "API CASB add-on seats (same pool as base ZT seats)",
     probeTable: { type: "zt_users" },
-    calculator: (db) => {
-      // CASB is licensed per-seat, same count as base ZT seats
+    zoneScoped: false,
+    calculator: (db, _start, _end, accountId) => {
+      const acctFilter = accountId ? " AND account_id = ?" : "";
+      const params = accountId ? [accountId] : [];
       const row = db.prepare(
-        `SELECT COUNT(*) AS cnt
-         FROM zt_users
+        `SELECT COUNT(*) AS cnt FROM zt_users
          WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
-           AND (access_seat = 1 OR gateway_seat = 1)`,
-      ).get() as { cnt: number } | undefined;
+           AND (access_seat = 1 OR gateway_seat = 1)${acctFilter}`,
+      ).get(...params) as { cnt: number } | undefined;
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -587,36 +638,28 @@ export const CATALOG_BY_KEY = new Map<string, ProductCatalogEntry>(
 // Auto-detection
 // =============================================================================
 
-/**
- * Probes local SQLite for datasets with recent data (last 30 days)
- * and returns catalog entries with a `detected` flag.
- */
 export function detectAvailableProducts(
   db: Database.Database,
 ): Array<ProductCatalogEntry & { detected: boolean }> {
   const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 86400;
 
-  // Pre-check which tables/datasets have recent data
   const checks = {
     raw_http: hasRows(db, "SELECT 1 FROM raw_http_hourly WHERE ts >= ? LIMIT 1", thirtyDaysAgo),
     raw_dns: hasRows(db, "SELECT 1 FROM raw_dns_hourly WHERE ts >= ? LIMIT 1", thirtyDaysAgo),
     raw_gw_dns: hasRows(db, "SELECT 1 FROM raw_gw_dns_hourly WHERE ts >= ? LIMIT 1", thirtyDaysAgo),
     dns_records: hasRows(db, "SELECT 1 FROM dns_records LIMIT 1"),
     ssl_certs: hasRows(db, "SELECT 1 FROM ssl_certificates LIMIT 1"),
-    zones: hasRows(db, "SELECT 1 FROM raw_http_hourly LIMIT 1"),
+    zones: hasRows(db, "SELECT 1 FROM zone_accounts WHERE plan_name = 'Enterprise' LIMIT 1"),
     zt_users: hasRows(db, "SELECT 1 FROM zt_users WHERE (access_seat = 1 OR gateway_seat = 1) LIMIT 1"),
   };
 
-  // Check which ext datasets have data
   const extDatasets = new Set<string>();
   try {
     const rows = db.prepare(
       `SELECT DISTINCT dataset FROM raw_ext_ts WHERE ts >= ?`,
     ).all(thirtyDaysAgo) as Array<{ dataset: string }>;
     for (const r of rows) extDatasets.add(r.dataset);
-  } catch {
-    // Table might not exist
-  }
+  } catch { /* table might not exist */ }
 
   const extDimDatasets = new Set<string>();
   try {
@@ -624,46 +667,23 @@ export function detectAvailableProducts(
       `SELECT DISTINCT dataset FROM raw_ext_dim WHERE ts >= ?`,
     ).all(thirtyDaysAgo) as Array<{ dataset: string }>;
     for (const r of rows) extDimDatasets.add(r.dataset);
-  } catch {
-    // Table might not exist
-  }
+  } catch { /* table might not exist */ }
 
   return PRODUCT_CATALOG.map((entry) => {
     let detected = false;
     const probe = entry.probeTable;
 
     switch (probe.type) {
-      case "raw_http":
-        detected = checks.raw_http;
-        break;
-      case "raw_dns":
-        detected = checks.raw_dns;
-        break;
-      case "raw_gw_dns":
-        detected = checks.raw_gw_dns;
-        break;
-      case "dns_records":
-        detected = checks.dns_records;
-        break;
-      case "ssl_certs":
-        detected = checks.ssl_certs;
-        break;
-      case "zt_users":
-        detected = checks.zt_users;
-        break;
-      case "zones":
-        detected = checks.zones;
-        break;
-      case "ext":
-        detected = extDatasets.has(probe.dataset);
-        break;
-      case "ext_dim":
-        detected = extDimDatasets.has(probe.dataset);
-        break;
-      case "always":
-        // These share a data source with CDN – available if HTTP data exists
-        detected = checks.raw_http;
-        break;
+      case "raw_http": detected = checks.raw_http; break;
+      case "raw_dns": detected = checks.raw_dns; break;
+      case "raw_gw_dns": detected = checks.raw_gw_dns; break;
+      case "dns_records": detected = checks.dns_records; break;
+      case "ssl_certs": detected = checks.ssl_certs; break;
+      case "zones": detected = checks.zones; break;
+      case "zt_users": detected = checks.zt_users; break;
+      case "ext": detected = extDatasets.has(probe.dataset); break;
+      case "ext_dim": detected = extDimDatasets.has(probe.dataset); break;
+      case "always": detected = checks.raw_http; break;
     }
 
     return { ...entry, detected };

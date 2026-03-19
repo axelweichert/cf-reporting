@@ -8,11 +8,13 @@ import ErrorMessage from "@/components/ui/error-message";
 import UsageGauge from "@/components/charts/usage-gauge";
 import MonthlyUsageChart from "@/components/charts/monthly-usage-chart";
 import { AlertTriangle, CheckCircle, RefreshCw, XCircle } from "lucide-react";
+import DataTable from "@/components/charts/data-table";
 import type {
   ContractUsageMonthly,
   ContractUsageEntry,
   ContractUsageHistory,
   ContractUsageAllHistories,
+  ContractUsageZoneBreakdown,
 } from "@/lib/contract/types";
 
 function buildPeriodOptions(): Array<{ label: string; value: string }> {
@@ -50,6 +52,11 @@ export default function ContractUsagePage() {
   // All histories for chart rendering
   const [histories, setHistories] = useState<Map<string, ContractUsageHistory>>(new Map());
   const [historiesLoading, setHistoriesLoading] = useState(false);
+
+  // Zone drill-down
+  const [drillDownKey, setDrillDownKey] = useState<string | null>(null);
+  const [zoneBreakdown, setZoneBreakdown] = useState<ContractUsageZoneBreakdown | null>(null);
+  const [breakdownLoading, setBreakdownLoading] = useState(false);
 
   const periodOptions = buildPeriodOptions();
 
@@ -96,6 +103,27 @@ export default function ContractUsagePage() {
       fetchHistories();
     }
   }, [period, fetchData, fetchHistories]);
+
+  const handleDrillDown = async (productKey: string) => {
+    if (drillDownKey === productKey) {
+      setDrillDownKey(null);
+      setZoneBreakdown(null);
+      return;
+    }
+    setDrillDownKey(productKey);
+    setBreakdownLoading(true);
+    try {
+      const res = await fetch(`/api/contract/usage?breakdown=${productKey}&period=${period}`);
+      if (res.ok) {
+        const result = await res.json() as ContractUsageZoneBreakdown;
+        setZoneBreakdown(result);
+      }
+    } catch {
+      setZoneBreakdown(null);
+    } finally {
+      setBreakdownLoading(false);
+    }
+  };
 
   const handleRecalculate = async () => {
     setRecalculating(true);
@@ -218,16 +246,67 @@ export default function ContractUsagePage() {
               {entries.filter((e) => e.dataAvailable && histories.has(e.productKey)).map((entry) => {
                 const history = histories.get(entry.productKey)!;
                 if (history.months.length === 0) return null;
+                const isExpanded = drillDownKey === entry.productKey;
                 return (
                   <div key={entry.productKey} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
-                    <h3 className="mb-2 text-sm font-semibold text-zinc-300">
-                      {history.displayName}
-                      <span className="ml-2 text-xs font-normal text-zinc-500">({history.unit})</span>
-                    </h3>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-semibold text-zinc-300">
+                        {history.displayName}
+                        <span className="ml-2 text-xs font-normal text-zinc-500">({history.unit})</span>
+                      </h3>
+                      <button
+                        onClick={() => handleDrillDown(entry.productKey)}
+                        className="text-xs text-zinc-500 hover:text-zinc-300 px-2 py-1 rounded border border-zinc-700 hover:border-zinc-600"
+                      >
+                        {isExpanded ? "Hide zones" : "Show zones"}
+                      </button>
+                    </div>
                     <MonthlyUsageChart
                       months={history.months}
                       unit={history.unit}
                     />
+                    {/* Zone drill-down */}
+                    {isExpanded && breakdownLoading && (
+                      <div className="mt-4 text-sm text-zinc-500">Loading zone breakdown...</div>
+                    )}
+                    {isExpanded && !breakdownLoading && zoneBreakdown && zoneBreakdown.zones.length > 0 && (
+                      <div className="mt-4 border-t border-zinc-800 pt-4">
+                        <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+                          Per-Zone Breakdown ({period})
+                        </h4>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-zinc-800 text-xs text-zinc-500">
+                                <th className="px-2 py-1.5 text-left">Zone</th>
+                                <th className="px-2 py-1.5 text-right">Usage</th>
+                                <th className="px-2 py-1.5 text-right">Share</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {zoneBreakdown.zones.map((z) => {
+                                const total = zoneBreakdown.zones.reduce((sum, zz) => sum + zz.usageValue, 0);
+                                const pct = total > 0 ? (z.usageValue / total * 100).toFixed(1) : "0.0";
+                                return (
+                                  <tr key={z.zoneId} className="border-b border-zinc-800/30">
+                                    <td className="px-2 py-1.5 text-zinc-300">{z.zoneName}</td>
+                                    <td className="px-2 py-1.5 text-right font-mono text-zinc-200">
+                                      {z.usageValue.toFixed(2)} {z.unit}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-right text-zinc-500">{pct}%</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                    {isExpanded && !breakdownLoading && zoneBreakdown && zoneBreakdown.zones.length === 0 && (
+                      <div className="mt-4 text-xs text-zinc-500 italic">
+                        No per-zone breakdown available (account-scoped metric or no data).
+                      </div>
+                    )}
                   </div>
                 );
               })}

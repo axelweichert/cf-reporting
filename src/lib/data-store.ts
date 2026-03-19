@@ -819,6 +819,7 @@ function rowToLineItem(r: ContractLineItemRow): ContractLineItem {
     warningThreshold: r.warning_threshold,
     enabled: r.enabled === 1,
     sortOrder: r.sort_order,
+    accountId: r.account_id,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -842,8 +843,8 @@ export function addContractLineItem(req: CreateLineItemRequest): ContractLineIte
   if (!catalog) return null;
 
   const info = db.prepare(
-    `INSERT INTO contract_line_items (product_key, display_name, category, unit, committed_amount, warning_threshold)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO contract_line_items (product_key, display_name, category, unit, committed_amount, warning_threshold, account_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     req.productKey,
     catalog.displayName,
@@ -851,6 +852,7 @@ export function addContractLineItem(req: CreateLineItemRequest): ContractLineIte
     catalog.unit,
     req.committedAmount,
     req.warningThreshold ?? 0.8,
+    req.accountId ?? null,
   );
 
   const row = db.prepare("SELECT * FROM contract_line_items WHERE id = ?").get(info.lastInsertRowid) as ContractLineItemRow;

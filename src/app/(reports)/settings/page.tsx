@@ -1101,6 +1101,14 @@ interface ContractItem {
   committedAmount: number;
   warningThreshold: number;
   enabled: boolean;
+  accountId: string | null;
+}
+
+interface AccountInfo {
+  account_id: string;
+  sample_zone: string;
+  total_zones: number;
+  enterprise_zones: number;
 }
 
 function ContractSettingsSection() {
@@ -1109,10 +1117,12 @@ function ContractSettingsSection() {
   const [detecting, setDetecting] = useState(false);
   const [detected, setDetected] = useState<DetectedProduct[] | null>(null);
   const [catalog, setCatalog] = useState<DetectedProduct[]>([]);
+  const [accounts, setAccounts] = useState<AccountInfo[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [addKey, setAddKey] = useState("");
   const [addAmount, setAddAmount] = useState("");
   const [addThreshold, setAddThreshold] = useState("0.8");
+  const [addAccountId, setAddAccountId] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -1133,13 +1143,24 @@ function ContractSettingsSection() {
 
   const loadCatalog = useCallback(async () => {
     try {
-      const res = await fetch("/api/contract/catalog");
-      if (res.ok) {
-        const data = await res.json();
+      const [catRes, acctRes] = await Promise.all([
+        fetch("/api/contract/catalog"),
+        fetch("/api/contract/accounts"),
+      ]);
+      if (catRes.ok) {
+        const data = await catRes.json();
         setCatalog(data.catalog);
       }
+      if (acctRes.ok) {
+        const data = await acctRes.json();
+        setAccounts(data.accounts || []);
+        // Auto-select first account if available
+        if (data.accounts?.length > 0 && !addAccountId) {
+          setAddAccountId(data.accounts[0].account_id);
+        }
+      }
     } catch { /* ignore */ }
-  }, []);
+  }, [addAccountId]);
 
   useEffect(() => {
     loadItems();
@@ -1178,6 +1199,7 @@ function ContractSettingsSection() {
       .map((key) => ({
         productKey: key,
         committedAmount: parseFloat(batchAmounts[key]),
+        accountId: addAccountId || undefined,
       }));
 
     if (toAdd.length === 0) {
@@ -1219,6 +1241,7 @@ function ContractSettingsSection() {
             productKey: addKey,
             committedAmount: parseFloat(addAmount),
             warningThreshold: parseFloat(addThreshold) || 0.8,
+            accountId: addAccountId || undefined,
           },
         }),
       });
@@ -1351,6 +1374,23 @@ function ContractSettingsSection() {
       {showAddForm && !detected && (
         <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-800 p-4">
           <h3 className="text-sm font-medium text-zinc-300">Add Line Item</h3>
+          {accounts.length > 0 && (
+            <div className="mt-3">
+              <label className="mb-1 block text-xs font-medium text-zinc-400">Account</label>
+              <select
+                value={addAccountId}
+                onChange={(e) => setAddAccountId(e.target.value)}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
+              >
+                <option value="">All accounts</option>
+                {accounts.map((a) => (
+                  <option key={a.account_id} value={a.account_id}>
+                    {a.account_id.slice(0, 8)}... ({a.enterprise_zones} enterprise / {a.total_zones} total zones)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
             <div className="sm:col-span-2">
               <label className="mb-1 block text-xs font-medium text-zinc-400">Product</label>
@@ -1421,6 +1461,7 @@ function ContractSettingsSection() {
               <tr className="border-b border-zinc-800 text-xs text-zinc-500">
                 <th className="px-2 py-2 text-left">Product</th>
                 <th className="px-2 py-2 text-left">Category</th>
+                <th className="px-2 py-2 text-left">Account</th>
                 <th className="px-2 py-2 text-right">Committed</th>
                 <th className="px-2 py-2 text-right">Unit</th>
                 <th className="px-2 py-2 text-right">Warning %</th>
@@ -1474,6 +1515,7 @@ function ContractItemRow({ item, onUpdate, onDelete }: {
     <tr className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
       <td className="px-2 py-2 text-zinc-200">{item.displayName}</td>
       <td className="px-2 py-2 text-zinc-400">{item.category}</td>
+      <td className="px-2 py-2 text-zinc-500 text-xs font-mono">{item.accountId ? `${item.accountId.slice(0, 8)}...` : "All"}</td>
       <td className="px-2 py-2 text-right font-mono text-zinc-200">
         {editing ? (
           <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)}

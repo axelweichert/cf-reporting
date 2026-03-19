@@ -12,7 +12,7 @@ let _db: Database.Database | null = null;
 let _initFailed = false;
 
 const DB_PATH = process.env.DB_PATH || "/app/data/cf-reporting.db";
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 
 export function getDb(): Database.Database | null {
   if (_initFailed) return null;
@@ -1011,6 +1011,44 @@ function runMigrations(db: Database.Database): void {
       CREATE INDEX IF NOT EXISTS idx_contract_alerts_item    ON contract_usage_alerts(line_item_id, period);
     `);
     console.log("[db] Migration v11: contract usage tracking tables");
+  }
+
+  if (currentVersion < 12) {
+    // v12: Zone-account mapping + account scoping for contract usage.
+    db.exec(`
+      -- Zone-to-account mapping with plan info (refreshed by collector)
+      CREATE TABLE IF NOT EXISTS zone_accounts (
+        zone_id    TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        zone_name  TEXT NOT NULL,
+        plan_name  TEXT NOT NULL DEFAULT 'Free',
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_zone_accounts_acct ON zone_accounts(account_id);
+      CREATE INDEX IF NOT EXISTS idx_zone_accounts_plan ON zone_accounts(account_id, plan_name);
+    `);
+
+    // Add account_id to contract_line_items (nullable for backward compat)
+    db.exec(`ALTER TABLE contract_line_items ADD COLUMN account_id TEXT`);
+
+    // Per-zone usage breakdown table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS contract_usage_zone_breakdown (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        line_item_id INTEGER NOT NULL REFERENCES contract_line_items(id) ON DELETE CASCADE,
+        period       TEXT    NOT NULL,
+        zone_id      TEXT    NOT NULL,
+        zone_name    TEXT    NOT NULL,
+        usage_value  REAL    NOT NULL,
+        calculated_at TEXT   NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(line_item_id, period, zone_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_contract_zone_breakdown ON contract_usage_zone_breakdown(line_item_id, period);
+    `);
+
+    console.log("[db] Migration v12: zone_accounts mapping, account scoping, zone breakdown");
   }
 
   // Upsert schema version

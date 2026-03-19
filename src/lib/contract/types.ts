@@ -18,6 +18,7 @@ export interface ContractLineItemRow {
   warning_threshold: number;
   enabled: number; // SQLite boolean (0/1)
   sort_order: number;
+  account_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -54,6 +55,7 @@ export interface ContractLineItem {
   warningThreshold: number;
   enabled: boolean;
   sortOrder: number;
+  accountId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -120,7 +122,23 @@ export type UsageCalculatorFn = (
   db: Database.Database,
   monthStart: number, // unix epoch seconds (UTC month start)
   monthEnd: number,   // unix epoch seconds (UTC month end, exclusive)
+  accountId?: string, // Filter to this account (null = all)
 ) => UsageResult;
+
+/** Per-zone breakdown of usage for a single line item. */
+export type ZoneBreakdownFn = (
+  db: Database.Database,
+  monthStart: number,
+  monthEnd: number,
+  accountId?: string,
+) => Array<{ zoneId: string; zoneName: string; usageValue: number }>;
+
+export interface ContractUsageZoneBreakdown {
+  lineItemId: number;
+  productKey: string;
+  period: string;
+  zones: Array<{ zoneId: string; zoneName: string; usageValue: number; unit: string }>;
+}
 
 export interface ProductCatalogEntry {
   /** Stable identifier, e.g. "cdn-data-transfer" */
@@ -135,8 +153,12 @@ export interface ProductCatalogEntry {
   description: string;
   /** Data source key(s) for auto-detection probing */
   probeTable: ProbeTarget;
+  /** Whether this is zone-scoped (true) or account-scoped (false, e.g. Workers, R2, ZT) */
+  zoneScoped: boolean;
   /** Function to calculate usage from raw SQLite data */
   calculator: UsageCalculatorFn;
+  /** Optional: per-zone breakdown for zone-scoped products */
+  zoneBreakdown?: ZoneBreakdownFn;
 }
 
 export type ProbeTarget =
@@ -159,6 +181,7 @@ export interface CreateLineItemRequest {
   productKey: string;
   committedAmount: number;
   warningThreshold?: number;
+  accountId?: string;
 }
 
 export interface UpdateLineItemRequest {

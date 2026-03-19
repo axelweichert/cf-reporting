@@ -254,6 +254,32 @@ export async function runCollection(): Promise<void> {
 
     console.log(`[collector] Discovered ${zones.length} zone(s), ${accounts.length} account(s)`);
 
+    // Refresh zone-account mapping (for contract usage account scoping)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getDb } = require("@/lib/db") as typeof import("@/lib/db");
+      const mapDb = getDb();
+      if (mapDb) {
+        const upsert = mapDb.prepare(
+          `INSERT INTO zone_accounts (zone_id, account_id, zone_name, plan_name, updated_at)
+           VALUES (?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(zone_id) DO UPDATE SET
+             account_id = excluded.account_id,
+             zone_name = excluded.zone_name,
+             plan_name = excluded.plan_name,
+             updated_at = excluded.updated_at`,
+        );
+        const tx = mapDb.transaction(() => {
+          for (const zone of zones) {
+            upsert.run(zone.id, zone.account.id, zone.name, zone.plan?.name || "Free");
+          }
+        });
+        tx();
+      }
+    } catch {
+      // Non-critical – contract usage still works without mapping
+    }
+
     store.startCollectionRun(runId, zones.length, accounts.length);
 
     const now = new Date();

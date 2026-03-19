@@ -32,6 +32,7 @@ function setupSchema() {
       warning_threshold REAL NOT NULL DEFAULT 0.8,
       enabled INTEGER NOT NULL DEFAULT 1,
       sort_order INTEGER NOT NULL DEFAULT 0,
+      account_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -54,6 +55,27 @@ function setupSchema() {
       alert_type TEXT NOT NULL,
       sent_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(line_item_id, period, alert_type)
+    );
+
+    -- Zone-account mapping
+    CREATE TABLE zone_accounts (
+      zone_id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      zone_name TEXT NOT NULL,
+      plan_name TEXT NOT NULL DEFAULT 'Free',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Per-zone usage breakdown
+    CREATE TABLE contract_usage_zone_breakdown (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      line_item_id INTEGER NOT NULL REFERENCES contract_line_items(id) ON DELETE CASCADE,
+      period TEXT NOT NULL,
+      zone_id TEXT NOT NULL,
+      zone_name TEXT NOT NULL,
+      usage_value REAL NOT NULL,
+      calculated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(line_item_id, period, zone_id)
     );
 
     -- Raw data tables needed by calculators
@@ -151,6 +173,13 @@ function setupSchema() {
   `);
 }
 
+/** Register a zone as Enterprise in zone_accounts (needed for calculators). */
+function registerEnterpriseZone(zoneId: string, accountId = "acct1", zoneName?: string) {
+  db.prepare(
+    "INSERT OR IGNORE INTO zone_accounts (zone_id, account_id, zone_name, plan_name) VALUES (?, ?, ?, 'Enterprise')",
+  ).run(zoneId, accountId, zoneName ?? `${zoneId}.com`);
+}
+
 beforeEach(() => {
   db = new Database(":memory:");
   setupSchema();
@@ -230,6 +259,9 @@ describe("CDN data transfer calculator", () => {
   it("calculates data transfer across multiple zones", () => {
     const item = addLineItem("cdn-data-transfer", 40);
 
+    registerEnterpriseZone("zone1");
+    registerEnterpriseZone("zone2");
+
     // Insert 10 TB across two zones
     const bytesPerHour = 5e12 / 24; // ~5 TB per zone per day
     for (let h = 0; h < 24; h++) {
@@ -277,6 +309,9 @@ describe("DNS queries calculator", () => {
        VALUES ('dns-queries', 'DNS Queries', 'DNS', 'MM', 60)`,
     ).run();
     const item = db.prepare("SELECT * FROM contract_line_items WHERE product_key = 'dns-queries'").get() as ContractLineItemRow;
+
+    registerEnterpriseZone("z1");
+    registerEnterpriseZone("z2");
 
     // Insert 10M queries
     db.prepare("INSERT INTO raw_dns_hourly (zone_id, ts, queries) VALUES (?, ?, ?)").run("z1", START, 5_000_000);
@@ -335,6 +370,8 @@ describe("calculateAllForPeriod", () => {
        VALUES ('dns-queries', 'DNS Queries', 'DNS', 'MM', 60, 0)`,
     ).run(); // disabled
 
+    registerEnterpriseZone("z1");
+
     // Insert HTTP data
     db.prepare(
       "INSERT INTO raw_http_hourly (zone_id, ts, requests, bytes, cached_requests, cached_bytes, encrypted_requests, status_1xx, status_2xx, status_3xx, status_4xx, status_5xx) VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0)",
@@ -354,6 +391,8 @@ describe("calculateAllForPeriod", () => {
       `INSERT INTO contract_line_items (product_key, display_name, category, unit, committed_amount)
        VALUES ('cdn-requests', 'CDN Requests', 'CDN', 'MM', 600)`,
     ).run();
+
+    registerEnterpriseZone("z1");
 
     db.prepare(
       "INSERT INTO raw_http_hourly (zone_id, ts, requests, bytes, cached_requests, cached_bytes, encrypted_requests, status_1xx, status_2xx, status_3xx, status_4xx, status_5xx) VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0)",
@@ -387,6 +426,7 @@ describe("detectNewCrossings", () => {
       `INSERT INTO contract_line_items (product_key, display_name, category, unit, committed_amount, warning_threshold)
        VALUES ('cdn-requests', 'CDN Requests', 'CDN', 'MM', 100, 0.8)`,
     ).run();
+    registerEnterpriseZone("z1");
 
     // Insert 85M requests (85% > 80% threshold)
     db.prepare(
@@ -406,6 +446,7 @@ describe("detectNewCrossings", () => {
       `INSERT INTO contract_line_items (product_key, display_name, category, unit, committed_amount, warning_threshold)
        VALUES ('cdn-requests', 'CDN Requests', 'CDN', 'MM', 100, 0.8)`,
     ).run();
+    registerEnterpriseZone("z1");
 
     // Insert 120M requests (120% > 100%)
     db.prepare(
@@ -425,6 +466,7 @@ describe("detectNewCrossings", () => {
       `INSERT INTO contract_line_items (product_key, display_name, category, unit, committed_amount, warning_threshold)
        VALUES ('cdn-requests', 'CDN Requests', 'CDN', 'MM', 100, 0.8)`,
     ).run();
+    registerEnterpriseZone("z1");
 
     db.prepare(
       "INSERT INTO raw_http_hourly (zone_id, ts, requests, bytes, cached_requests, cached_bytes, encrypted_requests, status_1xx, status_2xx, status_3xx, status_4xx, status_5xx) VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0)",
