@@ -14,7 +14,7 @@ export async function GET() {
       `SELECT account_id,
               COALESCE(MAX(account_name), '') as account_name,
               COUNT(*) as total_zones,
-              SUM(CASE WHEN plan_name = 'Enterprise' THEN 1 ELSE 0 END) as enterprise_zones
+              SUM(CASE WHEN plan_name LIKE 'Enterprise%' THEN 1 ELSE 0 END) as enterprise_zones
        FROM zone_accounts
        GROUP BY account_id
        ORDER BY enterprise_zones DESC`,
