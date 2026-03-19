@@ -162,6 +162,14 @@ export function calculateAllForPeriod(
             upsertZone.run(calc.lineItemId, period, z.zoneId, z.zoneName, z.usageValue);
           }
         }
+      } else {
+        // No data for this period – remove any stale cached rows
+        db.prepare(
+          "DELETE FROM contract_usage_monthly WHERE line_item_id = ? AND period = ?",
+        ).run(calc.lineItemId, calc.period);
+        db.prepare(
+          "DELETE FROM contract_usage_zone_breakdown WHERE line_item_id = ? AND period = ?",
+        ).run(calc.lineItemId, calc.period);
       }
     }
   });
