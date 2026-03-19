@@ -11,7 +11,7 @@
  * where timestamps are unix epoch seconds in UTC.
  *
  * Zone-scoped calculators join zone_accounts to filter by account_id
- * and plan_name = 'Enterprise' (free/pro/business are unmetered).
+ * when an account is specified on the line item.
  * Account-scoped calculators filter by scope_id = accountId directly.
  */
 
@@ -42,22 +42,22 @@ function result(rawValue: number, divisor: number): UsageResult {
 }
 
 /**
- * Enterprise zone filter clause.
- * Joins zone_accounts to restrict to enterprise zones for a given account.
- * Returns " AND zone_id IN (SELECT zone_id FROM zone_accounts WHERE ...)"
+ * Account zone filter clause.
+ * When accountId is set, restricts to zones belonging to that account.
+ * When accountId is not set, no filtering (all zones).
  */
-function enterpriseZoneFilter(accountId?: string): string {
+function accountZoneFilter(accountId?: string): string {
   if (!accountId) return "";
-  return ` AND zone_id IN (SELECT zone_id FROM zone_accounts WHERE account_id = '${accountId}' AND plan_name = 'Enterprise')`;
+  return ` AND zone_id IN (SELECT zone_id FROM zone_accounts WHERE account_id = '${accountId}')`;
 }
 
-/** List of enterprise zone_ids for a given account. */
-function getEnterpriseZoneIds(db: Database.Database, accountId?: string): Array<{ zone_id: string; zone_name: string }> {
+/** List of zone_ids for a given account (all plans). */
+function getAccountZoneIds(db: Database.Database, accountId?: string): Array<{ zone_id: string; zone_name: string }> {
   if (!accountId) {
-    return db.prepare("SELECT zone_id, zone_name FROM zone_accounts WHERE plan_name = 'Enterprise'").all() as Array<{ zone_id: string; zone_name: string }>;
+    return db.prepare("SELECT zone_id, zone_name FROM zone_accounts").all() as Array<{ zone_id: string; zone_name: string }>;
   }
   return db.prepare(
-    "SELECT zone_id, zone_name FROM zone_accounts WHERE account_id = ? AND plan_name = 'Enterprise'",
+    "SELECT zone_id, zone_name FROM zone_accounts WHERE account_id = ?",
   ).all(accountId) as Array<{ zone_id: string; zone_name: string }>;
 }
 
@@ -65,7 +65,7 @@ function getEnterpriseZoneIds(db: Database.Database, accountId?: string): Array<
 function sumHttpColumn(
   db: Database.Database, column: string, start: number, end: number, accountId?: string,
 ): number | null {
-  const filter = enterpriseZoneFilter(accountId);
+  const filter = accountZoneFilter(accountId);
   const row = db.prepare(
     `SELECT COALESCE(SUM(${column}), 0) AS total, COUNT(*) AS cnt
      FROM raw_http_hourly WHERE ts >= ? AND ts < ?${filter}`,
@@ -78,7 +78,7 @@ function sumHttpColumn(
 function breakdownHttpColumn(
   db: Database.Database, column: string, start: number, end: number, accountId?: string,
 ): Array<{ zoneId: string; zoneName: string; usageValue: number }> {
-  const zones = getEnterpriseZoneIds(db, accountId);
+  const zones = getAccountZoneIds(db, accountId);
   if (zones.length === 0) return [];
 
   return zones.map((z) => {
@@ -94,7 +94,7 @@ function breakdownHttpColumn(
 function sumDnsQueries(
   db: Database.Database, start: number, end: number, accountId?: string,
 ): number | null {
-  const filter = enterpriseZoneFilter(accountId);
+  const filter = accountZoneFilter(accountId);
   const row = db.prepare(
     `SELECT COALESCE(SUM(queries), 0) AS total, COUNT(*) AS cnt
      FROM raw_dns_hourly WHERE ts >= ? AND ts < ?${filter}`,
@@ -107,7 +107,7 @@ function sumDnsQueries(
 function breakdownDnsQueries(
   db: Database.Database, start: number, end: number, accountId?: string,
 ): Array<{ zoneId: string; zoneName: string; usageValue: number }> {
-  const zones = getEnterpriseZoneIds(db, accountId);
+  const zones = getAccountZoneIds(db, accountId);
   return zones.map((z) => {
     const row = db.prepare(
       `SELECT COALESCE(SUM(queries), 0) AS total
@@ -258,7 +258,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "dns_records" },
     zoneScoped: true,
     calculator: (db, _start, _end, accountId) => {
-      const filter = enterpriseZoneFilter(accountId);
+      const filter = accountZoneFilter(accountId);
       const row = db.prepare(
         `SELECT COUNT(DISTINCT record_id) AS cnt
          FROM dns_records
@@ -268,7 +268,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
       return result(row.cnt, TEN_K);
     },
     zoneBreakdown: (db, _start, _end, accountId) => {
-      const zones = getEnterpriseZoneIds(db, accountId);
+      const zones = getAccountZoneIds(db, accountId);
       return zones.map((z) => {
         const row = db.prepare(
           `SELECT COUNT(DISTINCT record_id) AS cnt FROM dns_records
@@ -416,7 +416,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     calculator: (db, start, end, accountId) => {
       // image-resizing is zone-scoped in ext datasets
       const filter = accountId
-        ? ` AND scope_id IN (SELECT zone_id FROM zone_accounts WHERE account_id = '${accountId}' AND plan_name = 'Enterprise')`
+        ? ` AND scope_id IN (SELECT zone_id FROM zone_accounts WHERE account_id = '${accountId}')`
         : "";
       const row = db.prepare(
         `SELECT COALESCE(SUM(value), 0) AS total, COUNT(*) AS cnt
@@ -446,7 +446,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     zoneScoped: true,
     calculator: (db, start, end, accountId) => {
       const filter = accountId
-        ? ` AND scope_id IN (SELECT zone_id FROM zone_accounts WHERE account_id = '${accountId}' AND plan_name = 'Enterprise')`
+        ? ` AND scope_id IN (SELECT zone_id FROM zone_accounts WHERE account_id = '${accountId}')`
         : "";
       const row = db.prepare(
         `SELECT COALESCE(SUM(value), 0) AS total, COUNT(*) AS cnt
@@ -479,14 +479,14 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     displayName: "Domains \u2013 Primary",
     category: "Domains",
     unit: "zones",
-    description: "Number of primary (Enterprise) zones",
+    description: "Number of primary zones in the account",
     probeTable: { type: "zones" },
     zoneScoped: true,
     calculator: (db, _start, _end, accountId) => {
-      const acctFilter = accountId ? " AND account_id = ?" : "";
+      const acctFilter = accountId ? " WHERE account_id = ?" : "";
       const params = accountId ? [accountId] : [];
       const row = db.prepare(
-        `SELECT COUNT(*) AS cnt FROM zone_accounts WHERE plan_name = 'Enterprise'${acctFilter}`,
+        `SELECT COUNT(*) AS cnt FROM zone_accounts${acctFilter}`,
       ).get(...params) as { cnt: number } | undefined;
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
@@ -501,7 +501,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "ssl_certs" },
     zoneScoped: true,
     calculator: (db, _start, _end, accountId) => {
-      const filter = enterpriseZoneFilter(accountId);
+      const filter = accountZoneFilter(accountId);
       const row = db.prepare(
         `SELECT COUNT(DISTINCT zone_id) AS cnt
          FROM ssl_certificates
@@ -649,7 +649,7 @@ export function detectAvailableProducts(
     raw_gw_dns: hasRows(db, "SELECT 1 FROM raw_gw_dns_hourly WHERE ts >= ? LIMIT 1", thirtyDaysAgo),
     dns_records: hasRows(db, "SELECT 1 FROM dns_records LIMIT 1"),
     ssl_certs: hasRows(db, "SELECT 1 FROM ssl_certificates LIMIT 1"),
-    zones: hasRows(db, "SELECT 1 FROM zone_accounts WHERE plan_name = 'Enterprise' LIMIT 1"),
+    zones: hasRows(db, "SELECT 1 FROM zone_accounts LIMIT 1"),
     zt_users: hasRows(db, "SELECT 1 FROM zt_users WHERE (access_seat = 1 OR gateway_seat = 1) LIMIT 1"),
   };
 
