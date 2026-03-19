@@ -183,21 +183,34 @@ function sumExtDimFiltered(
  * Key fix: the MAX(collected_at) subquery must also filter by account_id,
  * because different accounts have different collection timestamps.
  */
+/**
+ * For snapshot metrics, find the latest snapshot within the requested period.
+ * If no snapshot exists in [start, end), returns undefined → noData().
+ * For the current (partial) month, also accepts snapshots collected after
+ * the period start.
+ */
 function ztSeatCount(
-  db: Database.Database, seatCondition: string, accountId?: string,
+  db: Database.Database, seatCondition: string, start: number, end: number, accountId?: string,
 ): { cnt: number } | undefined {
   if (accountId) {
+    // Find latest snapshot for this account within the period
+    const ca = db.prepare(
+      `SELECT MAX(collected_at) AS ca FROM zt_users WHERE account_id = ? AND collected_at >= ? AND collected_at < ?`,
+    ).get(accountId, start, end) as { ca: number | null } | undefined;
+    if (!ca?.ca) return undefined;
     return db.prepare(
       `SELECT COUNT(*) AS cnt FROM zt_users
-       WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users WHERE account_id = ?)
-         AND account_id = ? AND ${seatCondition}`,
-    ).get(accountId, accountId) as { cnt: number } | undefined;
+       WHERE collected_at = ? AND account_id = ? AND ${seatCondition}`,
+    ).get(ca.ca, accountId) as { cnt: number } | undefined;
   }
+  const ca = db.prepare(
+    `SELECT MAX(collected_at) AS ca FROM zt_users WHERE collected_at >= ? AND collected_at < ?`,
+  ).get(start, end) as { ca: number | null } | undefined;
+  if (!ca?.ca) return undefined;
   return db.prepare(
     `SELECT COUNT(*) AS cnt FROM zt_users
-     WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
-       AND ${seatCondition}`,
-  ).get() as { cnt: number } | undefined;
+     WHERE collected_at = ? AND ${seatCondition}`,
+  ).get(ca.ca) as { cnt: number } | undefined;
 }
 
 // =============================================================================
@@ -282,23 +295,28 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "dns_records" },
     snapshot: true,
     zoneScoped: true,
-    calculator: (db, _start, _end, accountId) => {
+    calculator: (db, start, end, accountId) => {
       const filter = enterpriseZoneFilter(accountId);
+      // Use latest snapshot within the requested period
+      const caRow = db.prepare(
+        `SELECT MAX(collected_at) AS ca FROM dns_records WHERE collected_at >= ? AND collected_at < ?`,
+      ).get(start, end) as { ca: number | null } | undefined;
+      if (!caRow?.ca) return noData();
       const row = db.prepare(
         `SELECT COUNT(DISTINCT record_id) AS cnt
          FROM dns_records
-         WHERE collected_at = (SELECT MAX(collected_at) FROM dns_records)${filter}`,
-      ).get() as { cnt: number } | undefined;
+         WHERE collected_at = ?${filter}`,
+      ).get(caRow.ca) as { cnt: number } | undefined;
       if (!row || row.cnt === 0) return noData();
       return result(row.cnt, TEN_K);
     },
-    zoneBreakdown: (db, _start, _end, accountId) => {
+    zoneBreakdown: (db, start, end, accountId) => {
       const zones = getEnterpriseZoneIds(db, accountId);
       return zones.map((z) => {
         const row = db.prepare(
           `SELECT COUNT(DISTINCT record_id) AS cnt FROM dns_records
-           WHERE zone_id = ? AND collected_at = (SELECT MAX(collected_at) FROM dns_records WHERE zone_id = ?)`,
-        ).get(z.zone_id, z.zone_id) as { cnt: number };
+           WHERE zone_id = ? AND collected_at = (SELECT MAX(collected_at) FROM dns_records WHERE zone_id = ? AND collected_at >= ? AND collected_at < ?)`,
+        ).get(z.zone_id, z.zone_id, start, end) as { cnt: number };
         return { zoneId: z.zone_id, zoneName: z.zone_name, usageValue: Math.round((row.cnt / TEN_K) * 100) / 100 };
       }).filter((r) => r.usageValue > 0);
     },
@@ -508,7 +526,12 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "zones" },
     snapshot: true,
     zoneScoped: true,
-    calculator: (db, _start, _end, accountId) => {
+    calculator: (db, start, end, accountId) => {
+      // zone_accounts is always-current. Only show if data was collected in the period.
+      const hasData = db.prepare(
+        `SELECT 1 FROM zone_accounts WHERE updated_at >= datetime(?, 'unixepoch') AND updated_at < datetime(?, 'unixepoch') LIMIT 1`,
+      ).get(start, end);
+      if (!hasData) return noData();
       const acctFilter = accountId ? " AND account_id = ?" : "";
       const params = accountId ? [accountId] : [];
       const row = db.prepare(
@@ -527,13 +550,17 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "ssl_certs" },
     snapshot: true,
     zoneScoped: true,
-    calculator: (db, _start, _end, accountId) => {
+    calculator: (db, start, end, accountId) => {
       const filter = enterpriseZoneFilter(accountId);
+      const caRow = db.prepare(
+        `SELECT MAX(collected_at) AS ca FROM ssl_certificates WHERE collected_at >= ? AND collected_at < ?`,
+      ).get(start, end) as { ca: number | null } | undefined;
+      if (!caRow?.ca) return noData();
       const row = db.prepare(
         `SELECT COUNT(DISTINCT zone_id) AS cnt
          FROM ssl_certificates
-         WHERE collected_at = (SELECT MAX(collected_at) FROM ssl_certificates)${filter}`,
-      ).get() as { cnt: number } | undefined;
+         WHERE collected_at = ?${filter}`,
+      ).get(caRow.ca) as { cnt: number } | undefined;
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -549,8 +576,8 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "zt_users" },
     zoneScoped: false,
     snapshot: true,
-    calculator: (db, _start, _end, accountId) => {
-      const row = ztSeatCount(db, "(access_seat = 1 OR gateway_seat = 1)", accountId);
+    calculator: (db, start, end, accountId) => {
+      const row = ztSeatCount(db, "(access_seat = 1 OR gateway_seat = 1)", start, end, accountId);
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -564,8 +591,8 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "zt_users" },
     zoneScoped: false,
     snapshot: true,
-    calculator: (db, _start, _end, accountId) => {
-      const row = ztSeatCount(db, "access_seat = 1", accountId);
+    calculator: (db, start, end, accountId) => {
+      const row = ztSeatCount(db, "access_seat = 1", start, end, accountId);
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -579,8 +606,8 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "zt_users" },
     zoneScoped: false,
     snapshot: true,
-    calculator: (db, _start, _end, accountId) => {
-      const row = ztSeatCount(db, "gateway_seat = 1", accountId);
+    calculator: (db, start, end, accountId) => {
+      const row = ztSeatCount(db, "gateway_seat = 1", start, end, accountId);
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -608,8 +635,8 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "zt_users" },
     zoneScoped: false,
     snapshot: true,
-    calculator: (db, _start, _end, accountId) => {
-      const row = ztSeatCount(db, "(access_seat = 1 OR gateway_seat = 1)", accountId);
+    calculator: (db, start, end, accountId) => {
+      const row = ztSeatCount(db, "(access_seat = 1 OR gateway_seat = 1)", start, end, accountId);
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -623,8 +650,8 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "zt_users" },
     zoneScoped: false,
     snapshot: true,
-    calculator: (db, _start, _end, accountId) => {
-      const row = ztSeatCount(db, "(access_seat = 1 OR gateway_seat = 1)", accountId);
+    calculator: (db, start, end, accountId) => {
+      const row = ztSeatCount(db, "(access_seat = 1 OR gateway_seat = 1)", start, end, accountId);
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
