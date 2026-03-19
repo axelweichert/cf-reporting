@@ -178,6 +178,28 @@ function sumExtDimFiltered(
   return row.total;
 }
 
+/**
+ * Count ZT users matching a seat condition, scoped to the correct account.
+ * Key fix: the MAX(collected_at) subquery must also filter by account_id,
+ * because different accounts have different collection timestamps.
+ */
+function ztSeatCount(
+  db: Database.Database, seatCondition: string, accountId?: string,
+): { cnt: number } | undefined {
+  if (accountId) {
+    return db.prepare(
+      `SELECT COUNT(*) AS cnt FROM zt_users
+       WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users WHERE account_id = ?)
+         AND account_id = ? AND ${seatCondition}`,
+    ).get(accountId, accountId) as { cnt: number } | undefined;
+  }
+  return db.prepare(
+    `SELECT COUNT(*) AS cnt FROM zt_users
+     WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
+       AND ${seatCondition}`,
+  ).get() as { cnt: number } | undefined;
+}
+
 // =============================================================================
 // Product Catalog
 // =============================================================================
@@ -524,13 +546,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "zt_users" },
     zoneScoped: false,
     calculator: (db, _start, _end, accountId) => {
-      const acctFilter = accountId ? " AND account_id = ?" : "";
-      const params = accountId ? [accountId] : [];
-      const row = db.prepare(
-        `SELECT COUNT(*) AS cnt FROM zt_users
-         WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
-           AND (access_seat = 1 OR gateway_seat = 1)${acctFilter}`,
-      ).get(...params) as { cnt: number } | undefined;
+      const row = ztSeatCount(db, "(access_seat = 1 OR gateway_seat = 1)", accountId);
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -544,13 +560,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "zt_users" },
     zoneScoped: false,
     calculator: (db, _start, _end, accountId) => {
-      const acctFilter = accountId ? " AND account_id = ?" : "";
-      const params = accountId ? [accountId] : [];
-      const row = db.prepare(
-        `SELECT COUNT(*) AS cnt FROM zt_users
-         WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
-           AND access_seat = 1${acctFilter}`,
-      ).get(...params) as { cnt: number } | undefined;
+      const row = ztSeatCount(db, "access_seat = 1", accountId);
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -564,13 +574,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "zt_users" },
     zoneScoped: false,
     calculator: (db, _start, _end, accountId) => {
-      const acctFilter = accountId ? " AND account_id = ?" : "";
-      const params = accountId ? [accountId] : [];
-      const row = db.prepare(
-        `SELECT COUNT(*) AS cnt FROM zt_users
-         WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
-           AND gateway_seat = 1${acctFilter}`,
-      ).get(...params) as { cnt: number } | undefined;
+      const row = ztSeatCount(db, "gateway_seat = 1", accountId);
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -598,13 +602,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "zt_users" },
     zoneScoped: false,
     calculator: (db, _start, _end, accountId) => {
-      const acctFilter = accountId ? " AND account_id = ?" : "";
-      const params = accountId ? [accountId] : [];
-      const row = db.prepare(
-        `SELECT COUNT(*) AS cnt FROM zt_users
-         WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
-           AND (access_seat = 1 OR gateway_seat = 1)${acctFilter}`,
-      ).get(...params) as { cnt: number } | undefined;
+      const row = ztSeatCount(db, "(access_seat = 1 OR gateway_seat = 1)", accountId);
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
@@ -618,13 +616,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     probeTable: { type: "zt_users" },
     zoneScoped: false,
     calculator: (db, _start, _end, accountId) => {
-      const acctFilter = accountId ? " AND account_id = ?" : "";
-      const params = accountId ? [accountId] : [];
-      const row = db.prepare(
-        `SELECT COUNT(*) AS cnt FROM zt_users
-         WHERE collected_at = (SELECT MAX(collected_at) FROM zt_users)
-           AND (access_seat = 1 OR gateway_seat = 1)${acctFilter}`,
-      ).get(...params) as { cnt: number } | undefined;
+      const row = ztSeatCount(db, "(access_seat = 1 OR gateway_seat = 1)", accountId);
       if (!row || row.cnt === 0) return noData();
       return { value: row.cnt, rawValue: row.cnt, dataAvailable: true };
     },
