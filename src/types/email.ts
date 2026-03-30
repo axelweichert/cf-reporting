@@ -43,13 +43,15 @@ export type ReportType =
   | "gateway-network"
   | "access-audit"
   | "shadow-it"
-  | "devices-users";
+  | "devices-users"
+  | "contract-usage";
 
 /** Runtime set of all valid report type slugs – used for input validation. */
 export const VALID_REPORT_TYPES: ReadonlySet<string> = new Set<ReportType>([
   "executive", "security", "traffic", "dns", "performance", "ssl",
   "ddos", "bots", "origin-health", "api-shield", "zt-summary",
   "gateway-dns", "gateway-network", "access-audit", "shadow-it", "devices-users",
+  "contract-usage",
 ]);
 
 /** Report types that require an accountId instead of a zoneId */

@@ -147,6 +147,25 @@ function getReportDataZt() {
   return require("@/lib/email/report-data-zt") as typeof import("@/lib/email/report-data-zt");
 }
 
+/** Lazy-load contract usage calculator. Returns null if no line items configured. */
+function getContractCalculator() {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getDb } = require("@/lib/db") as typeof import("@/lib/db");
+    const db = getDb();
+    if (!db) return null;
+
+    // Quick check: any enabled line items?
+    const row = db.prepare("SELECT 1 FROM contract_line_items WHERE enabled = 1 LIMIT 1").get();
+    if (!row) return null;
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require("@/lib/contract/usage-calculator") as typeof import("@/lib/contract/usage-calculator");
+  } catch {
+    return null;
+  }
+}
+
 /** Lazy-load zone-scoped REST snapshot fetchers (report-data). */
 function getReportData() {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -239,6 +258,33 @@ export async function runCollection(): Promise<void> {
 
     console.log(`[collector] Discovered ${zones.length} zone(s), ${accounts.length} account(s)`);
 
+    // Refresh zone-account mapping (for contract usage account scoping)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getDb } = require("@/lib/db") as typeof import("@/lib/db");
+      const mapDb = getDb();
+      if (mapDb) {
+        const upsert = mapDb.prepare(
+          `INSERT INTO zone_accounts (zone_id, account_id, zone_name, plan_name, account_name, updated_at)
+           VALUES (?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(zone_id) DO UPDATE SET
+             account_id = excluded.account_id,
+             zone_name = excluded.zone_name,
+             plan_name = excluded.plan_name,
+             account_name = excluded.account_name,
+             updated_at = excluded.updated_at`,
+        );
+        const tx = mapDb.transaction(() => {
+          for (const zone of zones) {
+            upsert.run(zone.id, zone.account.id, zone.name, zone.plan?.name || "Free", zone.account?.name || "");
+          }
+        });
+        tx();
+      }
+    } catch {
+      // Non-critical – contract usage still works without mapping
+    }
+
     store.startCollectionRun(runId, zones.length, accounts.length);
 
     const now = new Date();
@@ -330,6 +376,32 @@ export async function runCollection(): Promise<void> {
     }
 
     _lastRunStatus = errorCount === 0 ? "success" : "partial";
+
+    // Post-collection: recalculate contract usage for current month
+    try {
+      const calcModule = getContractCalculator();
+      if (calcModule) {
+        const period = calcModule.currentPeriod();
+        const results = calcModule.calculateAllForPeriod(
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          (require("@/lib/db") as typeof import("@/lib/db")).getDb()!,
+          period,
+        );
+        if (results.length > 0) {
+          console.log(`[collector] Contract usage: calculated ${results.length} line item(s) for ${period}`);
+          const crossings = calcModule.detectNewCrossings(
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            (require("@/lib/db") as typeof import("@/lib/db")).getDb()!,
+            results,
+          );
+          if (crossings.length > 0) {
+            console.log(`[collector] Contract alerts: ${crossings.length} new threshold crossing(s)`);
+          }
+        }
+      }
+    } catch (calcErr) {
+      console.warn("[collector] Contract usage calculation failed:", (calcErr as Error).message);
+    }
   } catch (err) {
     console.error("[collector] Collection run failed:", err instanceof Error ? err.message : err);
     _lastRunStatus = "error";
