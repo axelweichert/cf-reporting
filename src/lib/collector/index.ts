@@ -41,7 +41,11 @@ const ACCOUNT_REPORT_TYPES = [
 ] as const;
 
 // Delay between backfill slices (ms) – keeps us well under 300 GQL queries / 5 min
-const BACKFILL_DELAY_MS = 1_000;
+const BACKFILL_DELAY_MS = 2_000;
+
+// Delay between incremental scope collections (ms) – each scope fires ~7-10 GQL calls;
+// with 14 zones + 4 accounts a 1.5s pause keeps burst rate well below 300/5min.
+const INCREMENTAL_DELAY_MS = 1_500;
 
 // How many days per backfill slice (wider = fewer API calls)
 const BACKFILL_SLICE_DAYS = 7;
@@ -279,15 +283,19 @@ export async function runCollection(): Promise<void> {
       }
     }
 
-    // Process incremental work (small ranges, no throttling needed)
+    // Process incremental work (throttled to avoid GraphQL rate limit:
+    // each scope fires ~7-10 GQL calls; 1.5s pause keeps burst well below 300/5min)
     const incrementalWork = allWork.filter((w) => !w.isBackfill);
-    for (const work of incrementalWork) {
+    for (let i = 0; i < incrementalWork.length; i++) {
       const result = await collectScope(
-        client, token, runId, work, now.toISOString(), store, rawStore,
+        client, token, runId, incrementalWork[i], now.toISOString(), store, rawStore,
       );
       successCount += result.success;
       errorCount += result.error;
       skippedCount += result.skipped;
+      if (i < incrementalWork.length - 1) {
+        await sleep(INCREMENTAL_DELAY_MS);
+      }
     }
 
     // Process backfill work day-by-day with throttling
