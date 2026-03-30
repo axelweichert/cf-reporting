@@ -19,7 +19,7 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "cf-reporting",
+  title: "Cloudflare Reporting",
   description: "Open-source Cloudflare reporting dashboard",
 };
 
