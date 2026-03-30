@@ -134,7 +134,7 @@ export default function Sidebar({ collapsed, permissions, role }: SidebarProps) 
     >
       <div className="flex h-14 items-center border-b border-zinc-800 px-4">
         {!collapsed && (
-          <span className="text-lg font-semibold text-white">cf-reporting</span>
+          <span className="text-lg font-semibold text-white">Cloudflare Reporting</span>
         )}
       </div>
 
