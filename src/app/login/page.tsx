@@ -73,7 +73,7 @@ export default function LoginPage() {
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-orange-500/10">
             <Shield className="h-8 w-8 text-orange-500" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">cf-reporting</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-white">Cloudflare Reporting</h1>
           <p className="mt-2 text-lg text-zinc-300">
             Enter the site password to continue
           </p>
